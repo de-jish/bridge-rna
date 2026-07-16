@@ -1,0 +1,8 @@
+dash==4.4.0
+numpy==2.4.6
+pandas==3.0.3
+plotly==6.8.0
+pyarrow==20.0.0
+requests==2.34.2
+torch==2.12.1
+biopython>=1.85,<2

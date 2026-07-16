@@ -1,0 +1,19 @@
+{
+  "created_at": "2026-05-13 12:40:04",
+  "checkpoint": "/nobackupp17/woalvara/bridge-rna/checkpoints_performer/r7hnr92k/best_model.pt",
+  "data_dir": "/nobackupp17/woalvara/bridge-rna/data/archs4/train_orthologs_sharded",
+  "batch_dir": "/nobackupp17/woalvara/bridge-rna/data/archs4/train_orthologs_sharded/batch_files",
+  "total_samples": 940455,
+  "total_samples_available": 940455,
+  "embedding_dim": 512,
+  "embedding_dtype": "float16",
+  "l2_normalize": false,
+  "normalization": "log1p_tpm",
+  "feature_type": "flash",
+  "compute_type": "iter",
+  "max_shards": 0,
+  "max_samples": 0,
+  "memmap_path": "/nobackupp17/woalvara/bridge-rna/prepared_data/archs4_sample_embeddings_full/sample_embeddings.float16.mmap",
+  "metadata_path": "/nobackupp17/woalvara/bridge-rna/prepared_data/archs4_sample_embeddings_full/sample_locations.parquet",
+  "output_dir": "/nobackupp17/woalvara/bridge-rna/prepared_data/archs4_sample_embeddings_full"
+}
