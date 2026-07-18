@@ -1,158 +1,151 @@
-# NASA Bio
+# Bridge RNA
 
-NASA Bio is a Dash website for querying NASA OSDR RNA-seq samples against
-precomputed ARCHS4 transcriptomic embeddings and exploring the closest GEO
-samples and studies.
+Bridge RNA finds the closest Earth-based analogs for NASA spaceflight RNA-seq samples.
 
-## Windows setup and run instructions
+Give it a mouse RNA-seq sample from NASA's Open Science Data Repository (OSDR), and it retrieves the most transcriptomically similar human samples from the ~940,000-sample ARCHS4/GEO collection, visualizes the matches as an interactive network, and asks a language model to suggest what the retrieval implies for spaceflight biology.
 
-Use **64-bit Python 3.11**. Newer or older Python versions may not have wheels
-for every scientific dependency. Run the commands below in PowerShell.
+> Bridge RNA is independent research and is **not affiliated with or endorsed by NASA**.
+> It uses NASA's publicly available OSDR data.
 
-### 1. Install the prerequisites
+## How it works
 
-```powershell
-winget install --id Git.Git -e --source winget
-winget install --id Python.Python.3.11 -e --source winget
+```
+OSDR counts → human-ortholog TPM vector → ExpressionPerformer embedding
+            → cosine top-k over the ARCHS4 embedding index → GEO metadata → AI summary
 ```
 
-Close and reopen PowerShell after installation. Confirm the commands work:
+A trained `ExpressionPerformer` model turns a gene-expression vector into a 512-dimensional embedding.
+Every ARCHS4 sample was pre-embedded into a memory-mapped index, so a query OSDR sample can be embedded the same way and matched by cosine similarity in one pass.
+The mouse query is mapped into human gene space with one-to-one orthologs and normalized (`log1p` of TPM) to match how the model was trained.
 
-```powershell
-git --version
-git lfs version
-py -3.11 --version
-```
+## Requirements
 
-Git for Windows normally includes Git LFS. If `git lfs version` fails, install
-Git LFS separately, then reopen PowerShell:
+- **Python 3.11**, 64-bit.
+  Some scientific dependencies do not publish wheels for every Python version, so 3.11 is the supported target.
+- **Git** and **Git LFS**.
+  The model checkpoint, embedding index, and OSDR data (~2 GB total) are stored in Git LFS.
+- Optional: an NVIDIA GPU with a CUDA-enabled PyTorch build.
+  The app falls back to CPU automatically.
+- Optional: a local [Ollama](https://ollama.com) install for AI summaries (see below).
 
-```powershell
-winget install --id GitHub.GitLFS -e --source winget
-```
+## Quickstart
 
-### 2. Clone the repository and download the large data files
+### 1. Clone and fetch the large files
 
-```powershell
+```bash
 git lfs install
 git clone https://github.com/de-jish/NASA-Bio.git
 cd NASA-Bio
 git lfs pull
 ```
 
-The LFS download is approximately 2 GB and contains the model checkpoint,
-embedding index, and OSDR source data. Verify that LFS downloaded real files
-instead of leaving pointer files:
+`git lfs pull` downloads roughly 2 GB.
+Verify that real files (not tiny LFS pointer stubs) were fetched:
 
-```powershell
+```bash
 git lfs ls-files
-Get-Item .\best_model.pt, .\archs4_sample_embeddings_full\sample_embeddings.float16.mmap | Select-Object Name, Length
 ```
 
-`best_model.pt` should be hundreds of megabytes and the `.mmap` file should be
-close to one gigabyte. If either file is only about 130 bytes, rerun
-`git lfs pull`.
+`checkpoints_performer/r7hnr92k/best_model.pt` should be hundreds of megabytes and `archs4_sample_embeddings_full/sample_embeddings.float16.mmap` close to one gigabyte.
+If a file is only ~130 bytes, rerun `git lfs pull`.
 
-### 3. Create a clean Python virtual environment
+### 2. Create a virtual environment and install dependencies
 
-The commands below deliberately call the environment's `python.exe` directly.
-Activation is not required, so this avoids PowerShell execution-policy errors
-and prevents packages from being installed into the wrong Python environment.
+**macOS / Linux:**
 
-If a previous `.venv` is broken, remove only that environment first:
-
-```powershell
-if (Test-Path .venv) { Remove-Item -Recurse -Force .venv }
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
-Create the environment and install the dependencies:
+**Windows (PowerShell):**
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-.\.venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Verify that the environment and important packages load correctly:
+Calling the environment's Python directly (as above) avoids activation and execution-policy issues.
+The first install is large because it includes PyTorch and PyArrow.
 
-```powershell
-.\.venv\Scripts\python.exe -c "import sys, dash, numpy, pandas, plotly, pyarrow, requests, torch; print(sys.version); print('Dash', dash.__version__); print('PyTorch', torch.__version__)"
-```
+### 3. Run the app
 
-The first installation is large because it includes PyTorch and PyArrow.
+```bash
+# macOS / Linux
+.venv/bin/python app_osdr_dash.py
 
-### 4. Start the website
-
-```powershell
-$env:DASH_DEBUG = "0"
+# Windows
 .\.venv\Scripts\python.exe .\app_osdr_dash.py
 ```
 
-Keep that PowerShell window open and visit <http://localhost:8050>. You can
-also open it from another PowerShell window:
+Open <http://localhost:8050> and stop the server with `Ctrl+C`.
 
-```powershell
-Start-Process http://localhost:8050
+### Command-line retrieval
+
+The web app shells out to the same retrieval workflow you can run directly:
+
+```bash
+# Random eligible sample, top-5 hits, on CPU
+.venv/bin/python demo_osdr_top5.py --topk 5 --device cpu
+
+# A specific sample, saving a report
+.venv/bin/python demo_osdr_top5.py --osdr-sample-name "<id.sample name>" --save-report-prefix ./reports/run1
 ```
 
-Stop the website with `Ctrl+C`. CPU retrieval works; an NVIDIA GPU is used
-automatically when a compatible PyTorch/CUDA setup is available.
+## Configuration
 
-### Optional: activate the environment
+The app runs with no credentials.
+All configuration is read from environment variables in the process that starts the app; nothing is loaded from a file automatically.
+See `.env.example` for the full list, and never commit real keys.
 
-Directly calling `.venv\Scripts\python.exe` as shown above is sufficient. If
-you prefer activation, use:
+### AI summaries (Ollama, default)
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-python .\app_osdr_dash.py
+Summaries use a local Ollama server by default, which needs no account or API key.
+The default model is `gemma3:4b`.
+
+```bash
+# macOS (Homebrew)
+brew install ollama
+brew services start ollama
+ollama pull gemma3:4b
 ```
 
-### Common errors
+The app connects to `http://127.0.0.1:11434` automatically.
+Set `OLLAMA_MODEL` to use a different installed model, or `OLLAMA_BASE_URL` for a remote server.
+If no Ollama server is reachable, retrieval and the rest of the interface still work; only the AI summary is skipped.
 
-- **`py` is not recognized:** install Python 3.11 with the `winget` command
-  above, reopen PowerShell, and run `py -0p` to list installed interpreters.
-- **`No matching distribution found`:** check that `py -3.11 --version` reports
-  Python 3.11 and that Windows/Python are 64-bit.
-- **`No module named dash`, `torch`, or `pyarrow`:** rerun the two pip commands
-  using `.\.venv\Scripts\python.exe`; do not use a different global `pip`.
-- **Model, embedding, or Parquet file is missing:** run `git lfs install` and
-  `git lfs pull` from the `NASA-Bio` folder.
-- **PowerShell says scripts are disabled:** use the direct `python.exe`
-  commands above, which do not require activation.
-- **Port 8050 is already in use:** find and stop the old process with:
+### Optional metadata enrichment (NCBI)
 
-  ```powershell
-  Get-NetTCPConnection -LocalPort 8050 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess }
-  ```
+Live GEO/PubMed enrichment uses NCBI Entrez, which asks callers to identify themselves:
 
-## Optional configuration
-
-The website runs without API credentials. AI summaries use a local Ollama
-server by default; retrieval and the rest of the interface do not require it.
-Environment variables are read only from the current process, so do not commit
-real keys to the repository.
-
-PowerShell example for NCBI metadata enrichment:
-
-```powershell
-$env:ENTREZ_EMAIL = "you@example.com"
-$env:NCBI_API_KEY = "your-key"
-.\.venv\Scripts\python.exe .\app_osdr_dash.py
+```bash
+export ENTREZ_EMAIL="you@example.com"
+export NCBI_API_KEY="your-key"   # optional, raises the rate limit
 ```
 
-For optional settings, see `.env.example`. The application does not
-automatically load that file; set values in PowerShell or your preferred local
-environment manager.
+### Optional AWS Bedrock backend
 
-## Main files
+Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to route AI summaries through an API-Gateway-fronted Bedrock endpoint instead of Ollama.
 
-- `app_osdr_dash.py` — Dash website, served on port 8050.
-- `demo_osdr_top5.py` — retrieval command-line workflow used by the website.
-- `checkpoints_performer/r7hnr92k/best_model.pt` — trained model checkpoint.
-- `archs4_sample_embeddings_full/` — precomputed ARCHS4 embedding index and metadata.
-- `data/` — OSDR counts, sample metadata, orthologs, and gene annotations.
+## Project layout
 
-The root `best_model.pt` is an identical compatibility copy of the checkpoint.
-Git LFS stores the identical content only once.
+| Path | What it is |
+| --- | --- |
+| `app_osdr_dash.py` | Dash web app, served on port 8050. |
+| `demo_osdr_top5.py` | Command-line retrieval workflow (also called by the web app). |
+| `generate_archs4_embeddings.py` | `ExpressionPerformer` model + the batch job that builds the embedding index. |
+| `slim_performer_model.py`, `numerator_and_denominator.py` | Linear-attention backend, used only for non-flash checkpoints. |
+| `osdr_metadata.py` | Client for the OSDR REST API. |
+| `assets/style.css` | Fully tokenized UI design system. |
+| `checkpoints_performer/` | Trained model checkpoint (Git LFS). |
+| `archs4_sample_embeddings_full/` | Precomputed ARCHS4 embedding index and metadata (Git LFS). |
+| `data/` | OSDR counts and metadata, orthologs, and gene annotations (Git LFS). |
+| `prompts/` | The AI summary prompt template. |
+
+## Data and licensing
+
+OSDR data is from NASA's [Open Science Data Repository](https://osdr.nasa.gov/).
+ARCHS4 is from the [Ma'ayan Lab](https://maayanlab.cloud/archs4/).
+Review the terms of each source before redistributing the bundled data.
