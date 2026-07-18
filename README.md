@@ -34,8 +34,8 @@ The mouse query is mapped into human gene space with one-to-one orthologs and no
 
 ```bash
 git lfs install
-git clone https://github.com/de-jish/NASA-Bio.git
-cd NASA-Bio
+git clone https://github.com/de-jish/bridge-rna.git
+cd bridge-rna
 git lfs pull
 ```
 
