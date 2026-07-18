@@ -24,8 +24,6 @@ The mouse query is mapped into human gene space with one-to-one orthologs and no
   Some scientific dependencies do not publish wheels for every Python version, so 3.11 is the supported target.
 - **Git** and **Git LFS**.
   The model checkpoint, embedding index, and OSDR data (~2 GB total) are stored in Git LFS.
-- Optional: an NVIDIA GPU with a CUDA-enabled PyTorch build.
-  The app falls back to CPU automatically.
 - Optional: a local [Ollama](https://ollama.com) install for AI summaries (see below).
 
 ## Quickstart
