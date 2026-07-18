@@ -55,7 +55,7 @@ BEDROCK_PAYLOAD_KEY = os.environ.get("BEDROCK_PAYLOAD_KEY", "query").strip() or 
 
 # Ollama settings (new default path).
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_TIMEOUT_SECONDS = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180"))
 PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES = [
     ROOT / "osdr_query_embeddings.parquet",
@@ -1674,7 +1674,7 @@ default_sample_id = default_samples.iloc[0]["sample_id"] if not default_samples.
 
 
 app: Dash = Dash(__name__)
-app.title = "bridge-rna · OSDR → ARCHS4 Explorer"
+app.title = "Bridge RNA · OSDR → ARCHS4 Explorer"
 
 # Pull in Inter + JetBrains Mono (local dev app, so a Google Fonts <link> is fine).
 app.index_string = """<!DOCTYPE html>
@@ -1733,11 +1733,11 @@ app.layout = html.Div(
                 html.Div(
                     className="app-brand",
                     children=[
-                        html.Div("bR", className="app-brand-mark"),
+                        html.Div("BR", className="app-brand-mark"),
                         html.Div(
                             className="app-brand-text",
                             children=[
-                                html.H1("bridge-rna", className="app-title"),
+                                html.H1("Bridge RNA", className="app-title"),
                                 html.P(
                                     "OSDR → ARCHS4 transcriptomic analog retrieval",
                                     className="app-subtitle",
