@@ -1223,11 +1223,11 @@ GRAPH_THEME = {
     "grid": "#e6ecf5",
     "text_primary": "#1a2432",
     "text_secondary": "#5a6b7e",
-    "query": "#2b7fff",       # --accent
-    "gsm": "#4f83c2",         # steel blue
-    "gse": "#e07a1f",         # --accent-warm
-    "edge": "rgba(79, 131, 194, 0.45)",
-    "edge_gse": "rgba(224, 122, 31, 0.35)",
+    "query": "#0bab9f",       # --accent-teal (query stands apart from its hits)
+    "gsm": "#2b7fff",         # --accent (GSM hit nodes)
+    "gse": "#d9791b",         # --accent-warm (GSE study nodes)
+    "edge": "rgba(43, 127, 255, 0.42)",
+    "edge_gse": "rgba(217, 121, 27, 0.35)",
     "marker_line": "#ffffff",
     "font_sans": "Inter, 'Segoe UI', -apple-system, sans-serif",
 }
@@ -1673,6 +1673,38 @@ default_samples = samples_df[samples_df["study_id"] == default_study]
 default_sample_id = default_samples.iloc[0]["sample_id"] if not default_samples.empty else ""
 
 
+def _archs4_sample_count() -> int | None:
+    """Total ARCHS4 samples in the embedding index, read from the manifest."""
+    try:
+        manifest = json.loads((EMBEDDING_DIR / "embedding_manifest.json").read_text())
+    except Exception:
+        return None
+    for key in ("total_samples", "num_samples", "n_samples"):
+        value = manifest.get(key)
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
+
+def _eligible_osdr_count(df: pd.DataFrame) -> int | None:
+    """OSDR samples eligible for retrieval: mouse counts present + a spaceflight
+    condition present (mirrors the demo script's eligibility filter)."""
+    try:
+        counts_ok = df["counts_path"].astype(str).str.len() > 0
+        condition_ok = df["condition"].astype(str).str.len() > 0
+        return int((counts_ok & condition_ok).sum())
+    except Exception:
+        return None
+
+
+def _format_count(value: int | None) -> str:
+    return f"{value:,}" if isinstance(value, int) else "—"
+
+
+ARCHS4_SAMPLE_COUNT = _archs4_sample_count()
+ELIGIBLE_OSDR_COUNT = _eligible_osdr_count(samples_df)
+
+
 app: Dash = Dash(__name__)
 app.title = "Bridge RNA · OSDR → ARCHS4 Explorer"
 
@@ -1749,8 +1781,23 @@ app.layout = html.Div(
                 html.Div(
                     className="app-header-meta",
                     children=[
-                        html.Span("Spaceflight RNA-seq → Earth analogs", className="app-header-note"),
-                        html.Span("ARCHS4 · 940k samples", className="app-header-chip"),
+                        html.Div(
+                            className="header-stat",
+                            title="Earth-based samples in the ARCHS4 embedding index",
+                            children=[
+                                html.Span(_format_count(ARCHS4_SAMPLE_COUNT), className="header-stat-value"),
+                                html.Span("ARCHS4 samples", className="header-stat-label"),
+                            ],
+                        ),
+                        html.Div(className="header-stat-divider"),
+                        html.Div(
+                            className="header-stat",
+                            title="OSDR samples eligible for retrieval (mouse counts + spaceflight condition)",
+                            children=[
+                                html.Span(_format_count(ELIGIBLE_OSDR_COUNT), className="header-stat-value header-stat-value--accent"),
+                                html.Span("Eligible OSDR samples", className="header-stat-label"),
+                            ],
+                        ),
                     ],
                 ),
             ],
@@ -1786,6 +1833,7 @@ app.layout = html.Div(
                                         dcc.Dropdown(id="sample-dropdown", clearable=False),
                                     ],
                                 ),
+                                html.Div(id="sample-preview", className="sample-preview"),
                             ],
                         ),
                         html.Div(
@@ -1810,34 +1858,45 @@ app.layout = html.Div(
                                 ),
                             ],
                         ),
-                        html.Div(
-                            className="control-group",
+                        html.Details(
+                            className="control-group advanced-group",
                             children=[
-                                html.Div("Metadata enrichment", className="control-group-title"),
-                                html.Div(
-                                    className="control",
+                                html.Summary(
+                                    className="advanced-summary",
                                     children=[
-                                        html.Label(
-                                            [
-                                                "Entrez email ",
-                                                html.Span("(GEO / PubMed lookups)", className="control-hint"),
-                                            ],
-                                            className="control-label",
-                                        ),
-                                        dcc.Input(
-                                            id="entrez-email-input",
-                                            type="email",
-                                            value=DEFAULT_ENTREZ_EMAIL,
-                                            placeholder="name@domain.com",
-                                            className="dash-input",
-                                        ),
+                                        html.Span("Metadata enrichment", className="control-group-title"),
+                                        html.Span("Optional", className="advanced-badge"),
                                     ],
                                 ),
-                                dcc.Checklist(
-                                    id="biopython-toggle",
-                                    options=[{"label": " Enrich with Biopython (GEO + PubMed)", "value": "on"}],
-                                    value=["on"],
-                                    className="dash-checklist",
+                                html.Div(
+                                    className="advanced-body",
+                                    children=[
+                                        html.Div(
+                                            className="control",
+                                            children=[
+                                                html.Label(
+                                                    [
+                                                        "Entrez email ",
+                                                        html.Span("(GEO / PubMed lookups)", className="control-hint"),
+                                                    ],
+                                                    className="control-label",
+                                                ),
+                                                dcc.Input(
+                                                    id="entrez-email-input",
+                                                    type="email",
+                                                    value=DEFAULT_ENTREZ_EMAIL,
+                                                    placeholder="name@domain.com",
+                                                    className="dash-input",
+                                                ),
+                                            ],
+                                        ),
+                                        dcc.Checklist(
+                                            id="biopython-toggle",
+                                            options=[{"label": " Enrich with Biopython (GEO + PubMed)", "value": "on"}],
+                                            value=["on"],
+                                            className="dash-checklist",
+                                        ),
+                                    ],
                                 ),
                             ],
                         ),
@@ -1942,6 +2001,52 @@ def update_sample_options(study_id: str):
         opts.append({"label": label, "value": _safe_str(r["sample_id"])})
     value = opts[0]["value"] if opts else None
     return opts, value
+
+
+@app.callback(
+    Output("sample-preview", "children"),
+    Input("sample-dropdown", "value"),
+)
+def update_sample_preview(sample_id: str):
+    """Instant local summary of the selected OSDR sample, shown before any search."""
+    empty = html.P("Select a sample to preview its metadata.", className="sample-preview-empty")
+    if not sample_id:
+        return empty
+    match = samples_df.loc[samples_df["sample_id"].astype(str) == str(sample_id)]
+    if match.empty:
+        return empty
+    row = match.iloc[0]
+
+    def _tidy(value: Any) -> str:
+        # Unwrap ISA-Tab unit annotations, e.g. "37 {day}" -> "37 day".
+        return re.sub(r"\s*\{([^}]*)\}", r" \1", _safe_str(value)).strip()
+
+    fields = [
+        ("Study", _tidy(row.get("study_id"))),
+        ("Tissue", _tidy(row.get("tissue"))),
+        ("Spaceflight", _tidy(row.get("condition"))),
+        ("Strain", _tidy(row.get("strain"))),
+        ("Sex", _tidy(row.get("sex"))),
+        ("Duration", _tidy(row.get("duration"))),
+    ]
+    detail_rows = [
+        html.Div(
+            className="sample-preview-row",
+            children=[
+                html.Span(label, className="sample-preview-key"),
+                html.Span(value, className="sample-preview-val"),
+            ],
+        )
+        for label, value in fields
+        if value
+    ]
+    return html.Div(
+        className="sample-preview-card",
+        children=[
+            html.Div(_safe_str(row.get("sample_name")), className="sample-preview-name"),
+            html.Div(className="sample-preview-grid", children=detail_rows),
+        ],
+    )
 
 
 @app.callback(
