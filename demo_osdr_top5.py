@@ -261,24 +261,33 @@ def resolve_canonical_genes(explicit: Path | None) -> Path:
     if explicit is not None:
         if not explicit.exists():
             raise FileNotFoundError(f"Canonical gene list not found: {explicit}")
-        return explicit
+        resolved = explicit
+    else:
+        resolved = next((c for c in CANONICAL_GENE_CANDIDATES if c.exists()), None)
+        if resolved is None:
+            raise FileNotFoundError(
+                "No canonical gene list found. Looked for:\n  "
+                + "\n  ".join(str(c) for c in CANONICAL_GENE_CANDIDATES)
+            )
 
-    for candidate in CANONICAL_GENE_CANDIDATES:
-        if candidate.exists():
-            if candidate.name != "canonical_genes.csv":
-                print(
-                    f"[WARN] Authoritative gene list {CANONICAL_GENE_CANDIDATES[0]} is missing.\n"
-                    f"[WARN] Falling back to {candidate}, which is derived from the\n"
-                    "[WARN] checkpoint's gene COUNT only and does not reproduce the training\n"
-                    "[WARN] gene ORDER. Retrieval results from this fallback are NOT valid\n"
-                    "[WARN] and must not be interpreted biologically."
-                )
-            return candidate
+    # Warn on the identity of the file actually used, never on how it was
+    # chosen. The Dash app resolves this path itself and passes it explicitly,
+    # so keying the warning off "was a path supplied?" would silence it for
+    # every web-app user -- exactly the audience least able to notice.
+    if resolved.resolve() != CANONICAL_GENE_CANDIDATES[0].resolve():
+        print(
+            f"[WARN] Not using the authoritative gene list\n"
+            f"[WARN]   {CANONICAL_GENE_CANDIDATES[0]}\n"
+            f"[WARN] Using instead: {resolved}\n"
+            "[WARN] Stand-in lists derived from the checkpoint reproduce the gene\n"
+            "[WARN] COUNT but not the training gene ORDER, so the query vector is\n"
+            "[WARN] built in a different gene space than the ARCHS4 index.\n"
+            "[WARN] Retrieval results are NOT valid and must not be interpreted\n"
+            "[WARN] biologically until the authoritative list is restored.",
+            flush=True,
+        )
 
-    raise FileNotFoundError(
-        "No canonical gene list found. Looked for:\n  "
-        + "\n  ".join(str(c) for c in CANONICAL_GENE_CANDIDATES)
-    )
+    return resolved
 
 
 def load_random_osdr_sample_vector(args: argparse.Namespace) -> Tuple[np.ndarray, str, pd.Series]:
