@@ -424,6 +424,22 @@ def _canonical_matches_checkpoint(canonical_path: Path, checkpoint_path: Path) -
         return False
 
 
+def _is_lfs_pointer(path: Path) -> bool:
+    """True if ``path`` is an unfetched Git LFS pointer rather than real data.
+
+    Pointer files are small text stubs beginning with a version line. Checking
+    the size first keeps this cheap enough to run on every preflight, and means
+    a real multi-hundred-megabyte artifact is never opened.
+    """
+    try:
+        if not path.is_file() or path.stat().st_size > 1024:
+            return False
+        with path.open("rb") as fh:
+            return fh.read(40).startswith(b"version https://git-lfs")
+    except OSError:
+        return False
+
+
 def preflight_retrieval_requirements() -> tuple[list[str], dict[str, Path]]:
     """Return missing requirements and resolved runtime paths for demo retrieval."""
     missing: list[str] = []
@@ -494,6 +510,19 @@ def preflight_retrieval_requirements() -> tuple[list[str], dict[str, Path]]:
     for key in ["checkpoint", "orthologs", "canonical_genes", "mouse_exon_lengths", "osdr_data_dir"]:
         if resolved_paths[key] is None:
             missing.append(f"file: missing required {key}")
+
+    # A clone without `git lfs pull` leaves ~130-byte pointer stubs in place of
+    # the real binaries. Every path check above passes, then torch.load fails
+    # deep inside retrieval with an error that says nothing about Git LFS.
+    for label, candidate in (
+        ("checkpoint", resolved_paths.get("checkpoint")),
+        ("embedding index", EMBEDDING_DIR / "sample_embeddings.float16.mmap"),
+        ("sample locations", EMBEDDING_DIR / "sample_locations.parquet"),
+    ):
+        if candidate is not None and _is_lfs_pointer(Path(candidate)):
+            missing.append(
+                f"Git LFS: {label} ({Path(candidate).name}) is an unfetched pointer stub. Run 'git lfs pull'."
+            )
 
     return missing, resolved_paths
 

@@ -854,6 +854,7 @@ def main() -> None:
         print(f"[INFO] Evaluating {n_candidates} OSDR candidate(s) to find best match...", flush=True)
 
         best_q_emb, best_sample_id, best_osdr_row, best_score = None, None, None, -np.inf
+        last_candidate_error: RuntimeError | None = None
         seen_seeds = set()
         attempts = 0
         while len(seen_seeds) < n_candidates:
@@ -866,7 +867,12 @@ def main() -> None:
             args.seed = seed
             try:
                 q_vec, sample_id, osdr_row = load_random_osdr_sample_vector(args)
-            except RuntimeError:
+            except RuntimeError as exc:
+                # Skipping an unusable candidate is expected, but silence here
+                # is what turns "every candidate failed" into an unrelated
+                # TypeError further down, so keep the reason visible.
+                last_candidate_error = exc
+                print(f"  candidate seed={seed}: skipped ({exc})", flush=True)
                 continue
             q_emb = build_model_and_query_embedding(args, q_vec)
             _, scores = topk_search(vecs_np, q_emb, 1, args.metric, l2_normalize=args.l2_normalize)
@@ -877,6 +883,15 @@ def main() -> None:
                 best_q_emb = q_emb
                 best_sample_id = sample_id
                 best_osdr_row = osdr_row
+
+        # Every candidate was skipped. Without this the None embedding reaches
+        # topk_search and surfaces as a TypeError about NoneType multiplication,
+        # which says nothing about the actual problem.
+        if best_q_emb is None:
+            raise RuntimeError(
+                f"All {n_candidates} OSDR candidate(s) failed to load; no query embedding was built. "
+                f"Last error: {last_candidate_error}"
+            )
 
     idx, scores = topk_search(vecs_np, best_q_emb, args.topk, args.metric, l2_normalize=args.l2_normalize)
     query_sample_id, osdr_row, q_emb = best_sample_id, best_osdr_row, best_q_emb
