@@ -142,8 +142,17 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `data/` | OSDR counts and metadata, orthologs, and gene annotations (Git LFS). |
 | `prompts/` | The AI summary prompt template. |
 
-## Data and licensing
+## Licensing
 
+The **code** in this repository is released under the [MIT License](LICENSE).
+
+The **bundled data is not covered by that license** and carries its own terms.
 OSDR data is from NASA's [Open Science Data Repository](https://osdr.nasa.gov/).
 ARCHS4 is from the [Ma'ayan Lab](https://maayanlab.cloud/archs4/).
+Gene annotations come from [Ensembl](https://www.ensembl.org/) and [GENCODE](https://www.gencodegenes.org/).
 Review the terms of each source before redistributing the bundled data.
+
+## Citing
+
+If you use Bridge RNA in published work, see [`CITATION.cff`](CITATION.cff).
+GitHub renders it as a "Cite this repository" link in the sidebar.

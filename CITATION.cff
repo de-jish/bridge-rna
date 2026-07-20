@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: "Bridge RNA: OSDR to ARCHS4 transcriptomic retrieval"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Jang
+    given-names: Joshua
+repository-code: "https://github.com/de-jish/bridge-rna"
+abstract: >-
+  Bridge RNA maps a NASA Open Science Data Repository (OSDR) spaceflight
+  RNA-seq sample to its most transcriptomically similar Earth-based samples in
+  the ~940,000-sample ARCHS4/GEO collection. A trained ExpressionPerformer
+  model embeds gene-expression vectors into a 512-dimensional space, and
+  retrieval is performed by cosine similarity over a precomputed index. This
+  project is independent research and is not affiliated with or endorsed by
+  NASA.
+keywords:
+  - transcriptomics
+  - RNA-seq
+  - space biology
+  - representation learning
+  - information retrieval
+license: MIT
+date-released: "2026-07-20"
