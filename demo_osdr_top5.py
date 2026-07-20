@@ -22,7 +22,12 @@ import numpy as np
 import pandas as pd
 import torch
 
-from generate_archs4_embeddings import ExpressionPerformer, _strip_module_prefix
+from generate_archs4_embeddings import (
+    CANONICAL_GENES_SHA256,
+    ExpressionPerformer,
+    _strip_module_prefix,
+    canonical_gene_order_digest,
+)
 
 try:
     import archs4py as a4
@@ -54,11 +59,11 @@ CANONICAL_GENE_CANDIDATES = (
 # The single sentence every downstream consumer should repeat verbatim, so the
 # console, the saved report, and the web UI cannot drift out of agreement.
 INVALID_GENE_ORDER_NOTICE = (
-    "Retrieval results are NOT scientifically valid. The authoritative gene list "
-    "is missing, and the stand-in in use reproduces the model's gene COUNT but "
-    "not the training gene ORDER, so query vectors are built in a different gene "
-    "space than the ARCHS4 index. Similarity scores look plausible but are not "
-    "meaningful and must not be interpreted biologically."
+    "Retrieval results are NOT scientifically valid. The gene list in use does "
+    "not match the ordering the ARCHS4 index was built with: it may reproduce "
+    "the model's gene COUNT but not the training gene ORDER, so query vectors "
+    "are built in a different gene space than the index. Similarity scores look "
+    "plausible but are not meaningful and must not be interpreted biologically."
 )
 
 # Set by resolve_canonical_genes(). Reports consult it so that a saved file,
@@ -263,15 +268,20 @@ def normalize_counts_to_tpm_single(counts: pd.Series, exon_len_by_human_gene: Di
 
 
 def resolve_canonical_genes(explicit: Path | None) -> Path:
-    """Locate the canonical gene list, warning when it is not the authoritative one.
+    """Locate the canonical gene list, warning when its ordering is not the real one.
 
     The gene list defines the row order of the query expression vector, and it
-    must match the order used to build the ARCHS4 index. Only the training
-    pipeline's ``canonical_genes.csv`` is authoritative. Any stand-in derived
-    from the checkpoint reproduces the gene *count* but not the gene *order*,
-    which silently misaligns every gene index and yields retrievals that look
-    plausible while being meaningless. Warn loudly rather than fail, so the
-    fallback stays usable for development but can never be mistaken for real.
+    must match the order used to build the ARCHS4 index. A list of the right
+    length in the wrong order silently misaligns every gene index and yields
+    retrievals that look plausible while being meaningless.
+
+    Authenticity is judged by *content*, not by path: the ordering is hashed and
+    compared against ``CANONICAL_GENES_SHA256``, the digest of the list the
+    deployed index was built with. Judging by path would trust whatever happens
+    to sit at the authoritative location, which is the same class of unchecked
+    assumption that let the stand-in pass unnoticed. Warn loudly rather than
+    fail, so a stand-in stays usable for development on the surrounding
+    pipeline but can never be mistaken for a real result.
     """
     if explicit is not None:
         if not explicit.exists():
@@ -290,13 +300,20 @@ def resolve_canonical_genes(explicit: Path | None) -> Path:
     # so keying the warning off "was a path supplied?" would silence it for
     # every web-app user -- exactly the audience least able to notice.
     global USING_FALLBACK_GENE_LIST, FALLBACK_GENE_LIST_PATH
-    if resolved.resolve() != CANONICAL_GENE_CANDIDATES[0].resolve():
+    try:
+        genes = pd.read_csv(resolved)["gene_symbol"].astype(str).tolist()
+        digest = canonical_gene_order_digest(genes)
+    except Exception as exc:  # unreadable or missing the gene_symbol column
+        raise RuntimeError(f"Could not read a gene_symbol column from {resolved}: {exc}") from exc
+
+    if digest != CANONICAL_GENES_SHA256:
         USING_FALLBACK_GENE_LIST = True
         FALLBACK_GENE_LIST_PATH = resolved
         print(
-            f"[WARN] Not using the authoritative gene list\n"
-            f"[WARN]   {CANONICAL_GENE_CANDIDATES[0]}\n"
-            f"[WARN] Using instead: {resolved}\n"
+            f"[WARN] Gene list does not match the ordering the ARCHS4 index was built with\n"
+            f"[WARN]   file:     {resolved}\n"
+            f"[WARN]   expected: {CANONICAL_GENES_SHA256}\n"
+            f"[WARN]   found:    {digest}\n"
             "[WARN] " + INVALID_GENE_ORDER_NOTICE.replace(". ", ".\n[WARN] "),
             flush=True,
         )

@@ -425,6 +425,26 @@ def _canonical_matches_checkpoint(canonical_path: Path, checkpoint_path: Path) -
         return False
 
 
+def _canonical_gene_order_is_authoritative(canonical_path: Path | None) -> bool:
+    """True if this file carries the exact gene ordering the index was built with.
+
+    The count check above cannot separate the real list from a stand-in of the
+    same length, which is precisely how a scrambled gene space went unnoticed.
+    Comparing the hashed ordering against the digest recorded alongside the
+    model is the only test that distinguishes them, so it gates every
+    user-facing claim that results are valid.
+    """
+    if canonical_path is None or not canonical_path.exists():
+        return False
+    try:
+        from generate_archs4_embeddings import CANONICAL_GENES_SHA256, canonical_gene_order_digest
+
+        genes = pd.read_csv(canonical_path)["gene_symbol"].astype(str).tolist()
+        return canonical_gene_order_digest(genes) == CANONICAL_GENES_SHA256
+    except Exception:
+        return False
+
+
 def _is_lfs_pointer(path: Path) -> bool:
     """True if ``path`` is an unfetched Git LFS pointer rather than real data.
 
@@ -459,11 +479,13 @@ def preflight_retrieval_requirements() -> tuple[list[str], dict[str, Path]]:
         ROOT / "data" / "ensembl" / "protein_coding_genes.csv",
     ]
 
-    canonical_candidate = _find_first_existing(
-        [
-            ROOT / "data" / "archs4" / "train_orthologs" / "canonical_genes.csv",
-            ROOT / "data" / "ensembl" / "canonical_genes.inferred.csv",
-        ]
+    # Prefer a list whose ordering actually matches the index over one that
+    # merely exists at the right path. Previously this took the first existing
+    # candidate, which made the validating loop below unreachable and meant a
+    # wrong-order file in the authoritative location would be trusted silently.
+    canonical_candidate = next(
+        (c for c in canonical_candidates if _canonical_gene_order_is_authoritative(c)),
+        None,
     )
 
     if canonical_candidate is None and resolved_paths["checkpoint"] is not None:
@@ -471,6 +493,9 @@ def preflight_retrieval_requirements() -> tuple[list[str], dict[str, Path]]:
             if candidate.exists() and _canonical_matches_checkpoint(candidate, resolved_paths["checkpoint"]):
                 canonical_candidate = candidate
                 break
+
+    if canonical_candidate is None:
+        canonical_candidate = _find_first_existing(canonical_candidates)
 
     if canonical_candidate is None and resolved_paths["checkpoint"] is not None:
         canonical_candidate = _infer_canonical_genes_from_checkpoint(resolved_paths["checkpoint"])
@@ -1436,16 +1461,33 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 "symbol": node_df["symbol"],
                 "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]},
             },
+            # Let labels on the outermost nodes spill into the margin instead of
+            # being cut off at the plot edge. The axis padding below sizes the
+            # plot so this is a backstop for narrow viewports, not the main fix.
+            cliponaxis=False,
             showlegend=False,
         )
     )
 
+    # Labels are centered on their node, so half of each one overhangs the node
+    # it belongs to. The query sits at the far left (x=0.0) and carries the
+    # longest text -- OSDR sample names run past 25 characters -- so Plotly's
+    # autorange, which pads by only a few percent of the data extent, renders it
+    # clipped. Pad each side by the overhang of the widest label anchored there.
+    x_chars_per_unit = 88.0  # ~11px glyphs across the 0.0-2.1 node span
+    def _label_overhang(kind: str) -> float:
+        widest = max((len(str(v)) for v in node_df.loc[node_df["kind"] == kind, "label"]), default=0)
+        return widest / (2.0 * x_chars_per_unit)
+
     fig.update_layout(
-        margin={"l": 16, "r": 16, "t": 16, "b": 16},
+        margin={"l": 48, "r": 48, "t": 16, "b": 16},
         paper_bgcolor=GRAPH_THEME["paper_bg"],
         plot_bgcolor=GRAPH_THEME["plot_bg"],
         font={"family": GRAPH_THEME["font_sans"], "color": GRAPH_THEME["text_primary"]},
-        xaxis={"visible": False},
+        xaxis={
+            "visible": False,
+            "range": [0.0 - _label_overhang("query") - 0.04, 2.1 + _label_overhang("gse") + 0.04],
+        },
         yaxis={"visible": False},
         clickmode="event+select",
         hoverlabel={"font": {"family": GRAPH_THEME["font_sans"], "size": 12}, "bgcolor": "#ffffff", "bordercolor": GRAPH_THEME["grid"]},
@@ -1553,22 +1595,30 @@ def build_gene_list_banner() -> Any:
     demo_osdr_top5.py prints this warning, but the app captures the subprocess
     output and only reads it when the process fails, so on a successful run the
     warning is discarded and never reaches the person looking at the results.
-    The check here is a cheap existence test rather than a preflight call,
-    because it runs at import time on every page load.
+
+    The test is on the gene *ordering*, not on whether a file exists. An
+    existence check would clear the banner for any file sitting at the
+    authoritative path, including a wrong-order one -- the same failure the
+    banner exists to announce.
     """
-    if AUTHORITATIVE_GENE_LIST.exists():
+    if _canonical_gene_order_is_authoritative(AUTHORITATIVE_GENE_LIST):
         return None
+
+    detail = (
+        "The authoritative gene list is missing, so retrieval is running on a stand-in."
+        if not AUTHORITATIVE_GENE_LIST.exists()
+        else "The gene list in place does not match the ordering the ARCHS4 index was built with."
+    )
 
     return html.Div(
         className="invalid-banner",
         children=[
             html.Span("Results are not scientifically valid", className="invalid-banner-title"),
             html.Span(
-                "The authoritative gene list is missing, so retrieval is running on a "
-                "stand-in that reproduces the model's gene count but not its training "
-                "gene order. Query vectors are built in a different gene space than the "
-                "ARCHS4 index, so similarity scores look plausible but are not "
-                "meaningful and must not be interpreted biologically.",
+                f"{detail} A list that reproduces the model's gene count but not its "
+                "training gene order builds query vectors in a different gene space "
+                "than the ARCHS4 index, so similarity scores look plausible but are "
+                "not meaningful and must not be interpreted biologically.",
                 className="invalid-banner-body",
             ),
         ],

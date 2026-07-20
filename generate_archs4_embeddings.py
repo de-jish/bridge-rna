@@ -15,10 +15,11 @@ Designed for >1M samples by avoiding full dataset materialization in RAM.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,27 @@ import pyarrow.parquet as pq
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+# Gene ordering of the canonical list the deployed ARCHS4 index was built with.
+#
+# The model carries no gene identity of its own: _encode_hidden indexes
+# gene_embedding by position, so slot i of the expression vector *is* gene i.
+# A list of the right length in the wrong order therefore pairs every gene's
+# learned embedding with another gene's expression value, and still produces
+# cosine scores in a plausible range. That failure is invisible to a count
+# comparison, which is why identity is pinned by content here.
+CANONICAL_GENES_SHA256 = "3f887ac8d329dce3c54d26448964904c07a345940cd3d9ebab18dd1f603194c5"
+
+
+def canonical_gene_order_digest(genes: Sequence[str]) -> str:
+	"""Return the SHA-256 of a gene ordering, independent of file format.
+
+	Hashes the symbol sequence rather than the file bytes, so that column
+	layout, line endings, and the presence of a ``token_id`` column do not
+	affect the result. Only the ordering that actually reaches the model does.
+	"""
+	joined = "\n".join(str(g).strip() for g in genes)
+	return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 class RotaryExpressionEmbedding(nn.Module):
