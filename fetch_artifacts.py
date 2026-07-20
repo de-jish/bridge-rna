@@ -16,11 +16,21 @@ Usage:
     # Re-download everything, ignoring existing files
     python fetch_artifacts.py --force
 
-Downloads resume from a partial ``.part`` file when the server supports HTTP
-range requests, so an interrupted 1 GB transfer does not restart from zero.
-A file is only moved into place after its SHA-256 matches the manifest, so an
-aborted or corrupted run can never leave a bad artifact where the app will
-silently load it.
+Integrity guarantees, each covered by the sandbox cases in the commit history:
+
+- A download is written to a sibling ``.part`` file, verified there, and moved
+  into place only after its SHA-256 matches the manifest. A corrupt or
+  truncated transfer therefore never lands at the path the app loads from, and
+  a valid existing file survives a failed re-download.
+- A truncated body reads as a clean EOF rather than an error, so the byte count
+  is checked explicitly. A short transfer keeps its ``.part`` and resumes on the
+  next run instead of being mistaken for a complete file.
+- Resumption uses HTTP range requests, and falls back to restarting when a
+  server ignores ``Range`` and replies 200 instead of 206.
+
+Note that nothing else in this project verifies these artifacts: the app and
+the CLI load whatever is at those paths. A non-zero exit here should be treated
+as blocking.
 """
 
 from __future__ import annotations
@@ -121,8 +131,22 @@ def verify(path: Path, expected_sha: str, expected_bytes: int) -> tuple[bool, st
     return True, "ok"
 
 
-def download(url: str, dest: Path, expected_bytes: int) -> None:
-    """Download to a .part file, resuming if a partial transfer exists."""
+class ShortTransfer(RuntimeError):
+    """The server closed the connection before delivering the whole body.
+
+    Raised rather than returned so the caller cannot mistake a truncated
+    transfer for a complete one. The .part file is deliberately left on disk so
+    the next run resumes from where this one stopped.
+    """
+
+
+def download(url: str, dest: Path, expected_bytes: int) -> Path:
+    """Fetch into a sibling .part file and return its path.
+
+    This deliberately does NOT move the file into place. The caller verifies
+    the .part first and promotes it only on success, so a corrupt or truncated
+    transfer can never land at the path the application loads from.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
 
@@ -164,15 +188,30 @@ def download(url: str, dest: Path, expected_bytes: int) -> None:
             fh.write(chunk)
             seen += len(chunk)
             meter.update(seen)
+        fh.flush()
+        os.fsync(fh.fileno())
     meter.clear()
 
-    os.replace(part, dest)
+    # A truncated body reads as a clean EOF rather than raising, so the loop
+    # above exits normally on a dropped connection. Without this check a half
+    # transfer looks identical to a complete one.
+    if seen < expected_bytes:
+        raise ShortTransfer(
+            f"connection closed after {human_bytes(seen)} of {human_bytes(expected_bytes)}; "
+            "partial file kept for resume"
+        )
+
+    return part
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--verify-only", action="store_true", help="Check local files without downloading.")
-    parser.add_argument("--force", action="store_true", help="Re-download even if the local file is valid.")
+    # Mutually exclusive: --force means "re-download regardless" and
+    # --verify-only means "never download", so together they have no coherent
+    # meaning. Rejecting the pair beats silently reporting valid files as failed.
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--verify-only", action="store_true", help="Check local files without downloading.")
+    mode.add_argument("--force", action="store_true", help="Re-download even if the local file is valid.")
     args = parser.parse_args()
 
     manifest = load_manifest()
@@ -211,18 +250,24 @@ def main() -> int:
             continue
 
         try:
-            download(url, path, entry["bytes"])
+            part = download(url, path, entry["bytes"])
         except Exception as exc:  # noqa: BLE001 - report and continue to next artifact
             failures.append(entry["path"])
             print(f"  download failed: {exc}\n")
             continue
 
-        ok, reason = verify(path, entry["sha256"], entry["bytes"])
+        # Verify the .part, never the destination: promoting first and checking
+        # afterwards would leave corrupt bytes at the path the app loads from.
+        ok, reason = verify(part, entry["sha256"], entry["bytes"])
         if ok:
+            os.replace(part, path)
             print("  downloaded and verified\n")
         else:
+            # Keep the bad .part out of the way; a stale one would be treated as
+            # a resumable prefix on the next run and corrupt that transfer too.
+            part.unlink(missing_ok=True)
             failures.append(entry["path"])
-            print(f"  downloaded but {reason}\n")
+            print(f"  downloaded but {reason} (discarded, destination untouched)\n")
 
     if unhosted:
         print("These artifacts have no download URL yet:")
@@ -237,7 +282,10 @@ def main() -> int:
         print("FAILED:")
         for name in failures:
             print(f"  - {name}")
-        print("\nRe-run without --verify-only to fetch, or 'git lfs pull' if using LFS.")
+        if args.verify_only:
+            print("\nRe-run without --verify-only to download these, or run 'git lfs pull'.")
+        else:
+            print("\nRe-run to retry (partial transfers resume), or run 'git lfs pull'.")
         return 1
 
     if not unhosted:
