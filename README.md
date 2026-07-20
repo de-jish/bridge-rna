@@ -38,14 +38,18 @@ git lfs pull
 ```
 
 `git lfs pull` downloads roughly 2 GB.
-Verify that real files (not tiny LFS pointer stubs) were fetched:
+
+Then verify that the large artifacts arrived intact:
 
 ```bash
-git lfs ls-files
+python3 fetch_artifacts.py --verify-only
 ```
 
-`checkpoints_performer/r7hnr92k/best_model.pt` should be hundreds of megabytes and `archs4_sample_embeddings_full/sample_embeddings.float16.mmap` close to one gigabyte.
-If a file is only ~130 bytes, rerun `git lfs pull`.
+This checks the model checkpoint and embedding index against the SHA-256 digests recorded in `artifacts.json`, and exits non-zero if anything is missing, truncated, or corrupt.
+It needs no dependencies beyond the Python standard library, so you can run it before creating the virtual environment.
+
+> **If `git lfs pull` fails with a bandwidth or quota error:** this repository's LFS payload exceeds GitHub's free allowance, so cloning may not fetch the large files.
+> If that happens, ask the maintainer for the artifact download links, add them to the `url` fields in `artifacts.json`, and run `python3 fetch_artifacts.py` to fetch and verify them directly.
 
 ### 2. Create a virtual environment and install dependencies
 
@@ -148,6 +152,7 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `generate_archs4_embeddings.py` | `ExpressionPerformer` model + the batch job that builds the embedding index. |
 | `slim_performer_model.py`, `numerator_and_denominator.py` | Linear-attention backend, used only for non-flash checkpoints. |
 | `osdr_metadata.py` | Client for the OSDR REST API. |
+| `fetch_artifacts.py` | Downloads and checksum-verifies the large artifacts in `artifacts.json`. |
 | `assets/style.css` | Fully tokenized UI design system. |
 | `checkpoints_performer/` | Trained model checkpoint (Git LFS). |
 | `archs4_sample_embeddings_full/` | Precomputed ARCHS4 embedding index and metadata (Git LFS). |

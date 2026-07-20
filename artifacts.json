@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Large runtime artifacts hosted outside Git.",
+    "",
+    "The model checkpoint and embedding index total ~1.5 GB, which exceeds",
+    "GitHub's free Git LFS allowance (1 GB storage, 1 GB/month bandwidth).",
+    "Hosting them on Zenodo keeps clones small and gives the release a DOI.",
+    "",
+    "TO PUBLISH: upload the files listed below to a Zenodo record, then replace",
+    "each null 'url' with its direct download link and set 'record_url'/'doi'.",
+    "Until then fetch_artifacts.py runs in verify-only mode against local files.",
+    "",
+    "Checksums were computed from the known-good local copies and are valid",
+    "regardless of where the files are ultimately hosted."
+  ],
+  "record_url": null,
+  "doi": null,
+  "artifacts": [
+    {
+      "path": "checkpoints_performer/r7hnr92k/best_model.pt",
+      "sha256": "f3491beaa697a0408dc1daeb6f8d648566bd46bafc6e44938d723e7ffc325541",
+      "bytes": 547359838,
+      "url": null,
+      "description": "Trained ExpressionPerformer checkpoint (feature_type=flash, hidden_dim=512, log1p_tpm)."
+    },
+    {
+      "path": "archs4_sample_embeddings_full/sample_embeddings.float16.mmap",
+      "sha256": "2381f26e4197715d74efc9e68f985d546a5aa60671ba4c96482bd2952252299a",
+      "bytes": 963025920,
+      "url": null,
+      "description": "ARCHS4 embedding index: 940455 samples x 512 dims, float16 memmap."
+    },
+    {
+      "path": "archs4_sample_embeddings_full/sample_locations.parquet",
+      "sha256": "c0fb1e1f628ad01caefd76b3a661820173498612f9e1f5510d9a1177a8d8af98",
+      "bytes": 14032688,
+      "url": null,
+      "description": "Per-sample GEO accession and shard location for the embedding index."
+    }
+  ]
+}
