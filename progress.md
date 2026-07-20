@@ -79,9 +79,14 @@ Still to do: upload the files, fill in the `url`, `record_url`, and `doi` fields
 The recorded checksums are host-independent and already correct.
 Removing the files from LFS to reclaim quota would require a history rewrite and has deliberately not been done.
 
-**#6, #7, #8 - not yet addressed** (audited, fixes not authorized this session; all are now disclosed in the README's Known limitations section):
+**#6 - fixed.**
+`app_osdr_dash.py` had no argparse, so `--help` booted the server and blocked, and `DASH_DEBUG` defaulted on with `host="0.0.0.0"` - the Werkzeug debugger, which runs arbitrary Python for any client that reaches it, was exposed on every interface by default.
+Defaults are now loopback-only with the debugger off, `--host`/`--port`/`--debug` (and `DASH_HOST`/`DASH_PORT`/`DASH_DEBUG`) are supported, and `--debug` on a non-loopback host is refused rather than warned about, since it is not a combination anyone wants by accident.
+Binding `0.0.0.0` deliberately still warns.
+Verified: default binds `127.0.0.1` only and is refused from the LAN address; `--debug` works on loopback; `--debug --host 0.0.0.0` exits with an explanation; `--help` prints and exits.
 
-- #6: `app_osdr_dash.py` has no argparse, so `--help` boots the server and blocks instead of printing help. `DASH_DEBUG` defaults on with `host="0.0.0.0"`, exposing the interactive traceback console on all interfaces.
+**#7, #8 - not yet addressed** (audited, fixes not authorized this session; both are disclosed in the README's Known limitations section):
+
 - #7: `demo_osdr_top5.py` loads the entire index into RAM (~1.93 GB, ~3.9 GB peak during normalization), and `--select-best N` re-normalizes the full index once per candidate. The Dash app already solves this with 25k-row chunking.
 - #8: `load_state_dict(strict=False)` with no reporting hides checkpoint mismatch; `feature_type` falls back to `"sqr"` when the deployed checkpoint is `"flash"`; query normalization hardcodes `log1p` instead of reading the checkpoint's `normalization` field.
 

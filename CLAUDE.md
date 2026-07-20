@@ -24,7 +24,7 @@ Both enrichment paths degrade with an explanatory warning rather than failing.
 All default paths in `demo_osdr_top5.py` are anchored to the repository root via `ROOT`, so the CLI works from any working directory.
 Verify the large Git LFS artifacts with `python3 fetch_artifacts.py --verify-only` (standard library only).
 
-Run the Dash web app (serves on `http://0.0.0.0:8050`):
+Run the Dash web app (serves on `http://127.0.0.1:8050`; `--host`/`--port`/`--debug` override, and `--debug` off loopback is refused):
 
 ```bash
 .venv/bin/python app_osdr_dash.py

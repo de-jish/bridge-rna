@@ -112,6 +112,19 @@ Without them, retrieval still works and hits are reported as bare GSM accessions
 
 Open <http://localhost:8050> and stop the server with `Ctrl+C`.
 
+By default the app binds to `127.0.0.1`, so it is reachable only from your own machine, and the debugger is off.
+`--host`, `--port`, and `--debug` (or `DASH_HOST`, `DASH_PORT`, `DASH_DEBUG`) change that:
+
+```bash
+.venv/bin/python app_osdr_dash.py --port 8060      # different port
+.venv/bin/python app_osdr_dash.py --debug          # hot reload, loopback only
+.venv/bin/python app_osdr_dash.py --host 0.0.0.0   # expose on your network
+```
+
+`--debug` enables the Werkzeug debugger, which runs arbitrary Python for anyone who can reach the port.
+Combining it with a non-loopback `--host` is refused rather than warned about.
+This is Flask's development server either way, so put a real WSGI server in front of it for anything beyond local or lab use.
+
 ### Command-line retrieval
 
 The web app shells out to the same retrieval workflow you can run directly:
@@ -199,8 +212,6 @@ Everything except the retrieval results - data loading, normalization, ortholog 
 
 **Other known issues**
 
-- `app_osdr_dash.py` has no argument parsing, so `python app_osdr_dash.py --help` starts the server rather than printing help.
-- `DASH_DEBUG` defaults to on and the server binds `0.0.0.0`, which exposes the interactive debugger. Set `DASH_DEBUG=0` for anything beyond local use.
 - `demo_osdr_top5.py` loads the entire embedding index into memory (~1.9 GB, ~3.9 GB peak). `--select-best N` repeats that work per candidate. The web app streams the index in chunks and does not have this problem.
 - The UI loads webfonts from `fonts.googleapis.com`, so first paint needs network access.
 - There is no automated test suite.

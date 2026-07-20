@@ -6,6 +6,7 @@ All searches run through the existing demo retrieval script for real hits.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -2272,8 +2273,67 @@ def render_details(hits_payload: dict[str, Any] | None, selected_node: dict[str,
     return build_details_panel(query=q_row, selected_payload=selected_node, hits_df=hits_df)
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the Bridge RNA web app (OSDR to ARCHS4 retrieval explorer).",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("DASH_HOST", "127.0.0.1"),
+        help=(
+            "Interface to bind. Defaults to 127.0.0.1 (this machine only). "
+            "Use 0.0.0.0 to expose the app on your network, but only on a "
+            "network you trust and never together with --debug."
+        ),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("DASH_PORT", "8050")),
+        help="Port to serve on (default: 8050).",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=_env_flag("DASH_DEBUG", False),
+        help=(
+            "Enable hot reload and the Werkzeug debugger. Development only: the "
+            "debugger exposes an interactive Python console to anyone who can "
+            "reach the port."
+        ),
+    )
+    args = parser.parse_args()
+
+    # The debugger's console executes arbitrary Python for any client that can
+    # reach it, so binding it off-loopback hands out remote code execution.
+    # Refuse rather than warn: this is not a combination anyone wants by accident.
+    if args.debug and args.host not in ("127.0.0.1", "localhost", "::1"):
+        parser.error(
+            f"refusing to run the debugger on {args.host}: the Werkzeug console executes "
+            "arbitrary code for anyone who can reach the port. Use --host 127.0.0.1, "
+            "or drop --debug to serve on this interface."
+        )
+
+    if args.host == "0.0.0.0":
+        print(
+            f"[WARN] Serving on all interfaces (port {args.port}). Anyone who can reach "
+            "this machine can use the app and the data it exposes.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    # dev_tools_ui=False hides the floating dev-tools toolbar, which otherwise
+    # overlaps the UI during a demo.
+    app.run(debug=args.debug, dev_tools_ui=False, host=args.host, port=args.port)
+    return 0
+
+
 if __name__ == "__main__":
-    # Keep hot-reload for development, but hide the floating dev-tools toolbar so
-    # it doesn't overlap the UI during a demo. Set DASH_DEBUG=0 to disable reload.
-    debug = os.environ.get("DASH_DEBUG", "1") not in ("0", "false", "False")
-    app.run(debug=debug, dev_tools_ui=False, host="0.0.0.0", port=8050)
+    sys.exit(main())
