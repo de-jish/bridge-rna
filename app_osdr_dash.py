@@ -1381,12 +1381,20 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
         score = float(row["score"])
         gsm = _safe_str(row["gsm"])
         gse = _safe_str(row.get("gse", ""))
-        hover = (
-            f"{gsm}<br>"
-            f"{_safe_str(row.get('source_name', ''))}<br>"
-            f"{_safe_str(row.get('characteristics', ''))}<br>"
-            f"Score: {score:.3f}<br>"
-            f"{gse}"
+        # Join only the fields that have content. source_name and characteristics
+        # come from the optional archs4py HDF5 enrichment, so without it they are
+        # empty strings, and joining unconditionally left blank lines stranded in
+        # the middle of every tooltip.
+        hover = "<br>".join(
+            part
+            for part in (
+                gsm,
+                _safe_str(row.get("source_name", "")),
+                _safe_str(row.get("characteristics", "")),
+                f"Score: {score:.3f}",
+                gse,
+            )
+            if part
         )
 
         node_rows.append(
@@ -1515,7 +1523,15 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
         },
         yaxis={"visible": False},
         clickmode="event+select",
-        hoverlabel={"font": {"family": GRAPH_THEME["font_sans"], "size": 12}, "bgcolor": "#ffffff", "bordercolor": GRAPH_THEME["grid"]},
+        # The font colour must be set explicitly. Plotly only auto-contrasts the
+        # hover text when it also picks the background; forcing bgcolor to white
+        # while leaving the colour unset makes it inherit the trace colour, so
+        # tooltips rendered pale blue on white and were effectively unreadable.
+        hoverlabel={
+            "font": {"family": GRAPH_THEME["font_sans"], "size": 12, "color": GRAPH_THEME["text_primary"]},
+            "bgcolor": "#ffffff",
+            "bordercolor": GRAPH_THEME["grid"],
+        },
         autosize=True,
         height=None,
     )
@@ -1547,6 +1563,13 @@ def build_bar_figure(hits_df: pd.DataFrame) -> go.Figure:
         xaxis={"title": "Similarity", "gridcolor": GRAPH_THEME["grid"], "zerolinecolor": GRAPH_THEME["grid"]},
         yaxis_title="",
         height=420,
+        # Pinned for the same reason as the network graph: never leave hover
+        # text colour to Plotly's fallback once a background is specified.
+        hoverlabel={
+            "font": {"family": GRAPH_THEME["font_sans"], "size": 12, "color": GRAPH_THEME["text_primary"]},
+            "bgcolor": "#ffffff",
+            "bordercolor": GRAPH_THEME["grid"],
+        },
     )
     return fig
 
