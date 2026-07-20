@@ -178,6 +178,66 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `docs/` | README images. |
 | `prompts/` | The AI summary prompt template. |
 
+## Architecture
+
+Retrieval spans five modules, and data flows in one direction through them:
+
+```
+OSDR counts → human-ortholog TPM vector → ExpressionPerformer embedding
+            → cosine top-k over the ARCHS4 memmap → GEO metadata → LLM summary
+```
+
+**`generate_archs4_embeddings.py`** defines `ExpressionPerformer`, the deployed model, along with the batch job that writes the embedding memmap, `sample_locations.parquet`, and `embedding_manifest.json`.
+`ExpressionPerformer.encode()` mean-pools over gene positions, and is what both the batch job and the CLI call.
+Two attention backends are selected by the checkpoint's `feature_type`: `flash` (`FlashTransformerLayer`, PyTorch SDPA) or a SLiM/Performer linear-attention layer imported lazily from `slim_performer_model.py`.
+The deployed checkpoint uses `flash`.
+
+Rebuilding the index from sharded parquet is a GPU-scale batch job and is rarely run locally:
+
+```bash
+.venv/bin/python generate_archs4_embeddings.py \
+  --checkpoint checkpoints_performer/r7hnr92k/best_model.pt --overwrite
+```
+
+**`slim_performer_model.py`** and **`numerator_and_denominator.py`** are the Google Research SLiMPerformer linear-attention implementation.
+The latter is a local inference-only reimplementation of the prefix-sum numerator/denominator ops, where the `_ps` and `parallel` variants delegate to the iterative path.
+Neither is reached unless a checkpoint uses a `favor+`, `sqr`, or `relu` feature type instead of `flash`.
+
+**`demo_osdr_top5.py`** is the standalone CLI.
+It performs the whole OSDR to query-vector transform in `load_random_osdr_sample_vector`, embeds it, runs `topk_search` against the memmap, and enriches hits through `archs4py` and optional Biopython Entrez lookups.
+`--select-best N` samples N random OSDR candidates and keeps whichever has the highest top-1 similarity.
+
+**`app_osdr_dash.py`** is the single-file Dash app.
+It shells out to `demo_osdr_top5.py` through `subprocess` rather than importing it, renders the Plotly network graph and bar chart, and generates the AI summary.
+`preflight_retrieval_requirements` checks every required path, the checkpoint's attention config, and the canonical gene list before any retrieval runs.
+
+**`osdr_metadata.py`** is a thin client for the OSDR REST API, used to fetch study titles, descriptions, and protocols.
+
+`_call_ai_summary` dispatches to either Ollama or an API-Gateway-fronted Bedrock endpoint.
+The prompt template in `prompts/ai_summary_prompt.txt` is filled with the OSDR query metadata, the hits table, and GEO study context.
+
+## Implementation notes
+
+**Species mapping is central.**
+The OSDR samples here are mouse, and the model operates in human gene space.
+`build_mouse_to_human_maps` uses `data/ensembl/orthologs_one2one.txt`, restricted to one-to-one orthologs, to map mouse Ensembl IDs onto human gene symbols, then reindexes onto the canonical gene list.
+
+**Normalization has to match the checkpoint.**
+Counts are converted to TPM using mouse exon lengths from `data/gencode/`, then `log1p`.
+The checkpoint's `normalization` field is `log1p_tpm`, and query-side normalization must reproduce it exactly or the embeddings will not align.
+
+**Embeddings are stored un-normalized.**
+The manifest records `l2_normalize: false`, and L2 normalization is applied at search time, so cosine similarity equals the dot product once both sides are normalized.
+
+**Index facts.**
+940,455 samples, 512 dimensions, float16 memmap, `feature_type: flash`.
+The paths recorded inside `embedding_manifest.json` point at the original training host and should be ignored; everything resolves relative to the repository root at runtime.
+
+**Conventions.**
+The model is shared by import rather than copied, so `ExpressionPerformer` changes in exactly one place.
+`--device cuda` is the default in both scripts, and both fall back to CPU automatically when CUDA is unavailable.
+The UI design system is fully tokenized in `assets/style.css` as `:root` custom properties, so the whole app can be re-skinned by editing those tokens.
+
 ## The canonical gene list
 
 The model consumes a fixed-length expression vector whose row order is defined by a canonical gene list, at `data/archs4/train_orthologs/canonical_genes.csv`.
