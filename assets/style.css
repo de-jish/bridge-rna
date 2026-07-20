@@ -693,6 +693,37 @@ input.dash-input:focus,
 .status-error .status-banner-text::before { content: "⚠ "; font-weight: 700; }
 
 .status-details { margin-top: var(--space-2); }
+
+/* Persistent notice that retrieval is running on a stand-in gene list.
+   Deliberately heavier than .status-banner: it reports that the numbers on
+   screen are not usable, so it must not read as routine run status. */
+.invalid-banner {
+  margin: 0 var(--space-4) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(214, 69, 69, 0.4);
+  border-left: 4px solid var(--status-error);
+  border-radius: var(--radius-md);
+  background: var(--status-error-soft);
+  color: #8f2727;
+}
+.invalid-banner-title {
+  display: block;
+  font-weight: 700;
+  font-size: var(--text-sm);
+  letter-spacing: 0.01em;
+}
+.invalid-banner-title::before { content: "⚠ "; }
+.invalid-banner-body {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: #a33a3a;
+  max-width: 105ch;
+}
+@media (max-width: 900px) {
+  .invalid-banner { margin: 0 var(--space-3) var(--space-3); }
+}
 .status-details > summary {
   cursor: pointer;
   font-size: 11px;

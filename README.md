@@ -7,6 +7,21 @@ Give it a mouse RNA-seq sample from NASA's Open Science Data Repository (OSDR), 
 > Bridge RNA is independent research and is **not affiliated with or endorsed by NASA**.
 > It uses NASA's publicly available OSDR data.
 
+> [!WARNING]
+> **Retrieval results are currently not scientifically valid.**
+> The authoritative gene list that defines the model's input ordering
+> (`data/archs4/train_orthologs/canonical_genes.csv`) is missing from this
+> repository, and the code falls back to a stand-in derived from the
+> checkpoint. The stand-in reproduces the gene *count* but not the training
+> gene *order*, so query vectors are built in a different gene space than the
+> ARCHS4 index they are compared against.
+>
+> Similarity scores still look plausible - they fall in a normal range and the
+> visualizations render - but they are **not meaningful and must not be
+> interpreted biologically**. The pipeline, plumbing, and UI are functional and
+> reviewable; only the retrieval output is affected. See
+> [Known limitations](#known-limitations).
+
 ## How it works
 
 ```
@@ -23,7 +38,8 @@ The mouse query is mapped into human gene space with one-to-one orthologs and no
 - **Python 3.11**, 64-bit.
   Some scientific dependencies do not publish wheels for every Python version, so 3.11 is the supported target.
 - **Git** and **Git LFS**.
-  The model checkpoint, embedding index, and OSDR data (~2 GB total) are stored in Git LFS.
+  The model checkpoint, embedding index, and the raw OSDR count matrices (~2 GB total) are stored in Git LFS.
+  Gene annotations, ortholog tables, and the OSDR sample metadata are ordinary Git files and arrive with the clone.
 - Optional: a local [Ollama](https://ollama.com) install for AI summaries (see below).
 
 ## Quickstart
@@ -156,8 +172,38 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `assets/style.css` | Fully tokenized UI design system. |
 | `checkpoints_performer/` | Trained model checkpoint (Git LFS). |
 | `archs4_sample_embeddings_full/` | Precomputed ARCHS4 embedding index and metadata (Git LFS). |
-| `data/` | OSDR counts and metadata, orthologs, and gene annotations (Git LFS). |
+| `data/` | OSDR counts (`osdr/raw/`, Git LFS) plus sample metadata, orthologs, and gene annotations (ordinary Git files). |
 | `prompts/` | The AI summary prompt template. |
+
+## Known limitations
+
+**The canonical gene list is missing, and retrieval output is invalid until it is restored.**
+
+The model consumes a fixed-length expression vector whose row order is defined by a canonical gene list.
+The ARCHS4 embedding index was built with the list produced by the training pipeline, at `data/archs4/train_orthologs/canonical_genes.csv`.
+That file was never committed to this repository.
+
+When it is absent, the app synthesizes `data/ensembl/canonical_genes.inferred.csv` by taking the first N entries of the alphabetically sorted `protein_coding_ortholog_genes.txt`, where N is the checkpoint's gene-embedding row count (15,165).
+The result is an exact alphabetical prefix: it truncates at `WDTC1` and drops the 569 genes from there through `ZZZ3`.
+It matches the model's expected input *shape* but not its expected gene *order*.
+
+Consequences:
+
+- Query and index vectors occupy different gene spaces, so cosine similarity between them is not meaningful.
+- The failure is silent by construction. Scores land in a plausible range, the network graph renders, and the AI summary confidently describes biology downstream of a scrambled mapping.
+- The existing preflight cannot catch it, because it compares gene counts only, and the synthesized file is built to match the count.
+- The true ordering is not recoverable from the checkpoint, whose `config` stores no gene list. It has to be retrieved from the training host.
+
+The CLI prints a warning whenever it falls back, and the web app shows a banner.
+Everything except the retrieval results - data loading, normalization, ortholog mapping, the embedding model, the index, the UI, and the AI summary plumbing - is unaffected and reviewable.
+
+**Other known issues**
+
+- `app_osdr_dash.py` has no argument parsing, so `python app_osdr_dash.py --help` starts the server rather than printing help.
+- `DASH_DEBUG` defaults to on and the server binds `0.0.0.0`, which exposes the interactive debugger. Set `DASH_DEBUG=0` for anything beyond local use.
+- `demo_osdr_top5.py` loads the entire embedding index into memory (~1.9 GB, ~3.9 GB peak). `--select-best N` repeats that work per candidate. The web app streams the index in chunks and does not have this problem.
+- The UI loads webfonts from `fonts.googleapis.com`, so first paint needs network access.
+- There is no automated test suite.
 
 ## Licensing
 

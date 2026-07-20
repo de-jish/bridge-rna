@@ -1514,6 +1514,37 @@ def _details_head(kicker: str, heading: str, score: float | None = None) -> Any:
     return html.Div(className="details-head", children=children)
 
 
+AUTHORITATIVE_GENE_LIST = ROOT / "data" / "archs4" / "train_orthologs" / "canonical_genes.csv"
+
+
+def build_gene_list_banner() -> Any:
+    """Persistent banner shown when retrieval is running on a stand-in gene list.
+
+    demo_osdr_top5.py prints this warning, but the app captures the subprocess
+    output and only reads it when the process fails, so on a successful run the
+    warning is discarded and never reaches the person looking at the results.
+    The check here is a cheap existence test rather than a preflight call,
+    because it runs at import time on every page load.
+    """
+    if AUTHORITATIVE_GENE_LIST.exists():
+        return None
+
+    return html.Div(
+        className="invalid-banner",
+        children=[
+            html.Span("Results are not scientifically valid", className="invalid-banner-title"),
+            html.Span(
+                "The authoritative gene list is missing, so retrieval is running on a "
+                "stand-in that reproduces the model's gene count but not its training "
+                "gene order. Query vectors are built in a different gene space than the "
+                "ARCHS4 index, so similarity scores look plausible but are not "
+                "meaningful and must not be interpreted biologically.",
+                className="invalid-banner-body",
+            ),
+        ],
+    )
+
+
 def build_status_banner(message: str, kind: str = "info", detail: str | None = None) -> Any:
     """One-line status banner. ``kind`` is info | good | error.
 
@@ -1802,6 +1833,7 @@ app.layout = html.Div(
                 ),
             ],
         ),
+        build_gene_list_banner(),
         html.Div(
             className="app-grid",
             children=[

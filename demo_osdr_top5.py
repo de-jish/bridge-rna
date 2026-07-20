@@ -51,6 +51,21 @@ CANONICAL_GENE_CANDIDATES = (
     ROOT / "data" / "ensembl" / "canonical_genes.inferred.csv",
 )
 
+# The single sentence every downstream consumer should repeat verbatim, so the
+# console, the saved report, and the web UI cannot drift out of agreement.
+INVALID_GENE_ORDER_NOTICE = (
+    "Retrieval results are NOT scientifically valid. The authoritative gene list "
+    "is missing, and the stand-in in use reproduces the model's gene COUNT but "
+    "not the training gene ORDER, so query vectors are built in a different gene "
+    "space than the ARCHS4 index. Similarity scores look plausible but are not "
+    "meaningful and must not be interpreted biologically."
+)
+
+# Set by resolve_canonical_genes(). Reports consult it so that a saved file,
+# detached from the console session that produced it, still carries the caveat.
+USING_FALLBACK_GENE_LIST = False
+FALLBACK_GENE_LIST_PATH: Path | None = None
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Random OSDR sample -> top-k ARCHS4 retrieval demo")
@@ -274,18 +289,20 @@ def resolve_canonical_genes(explicit: Path | None) -> Path:
     # chosen. The Dash app resolves this path itself and passes it explicitly,
     # so keying the warning off "was a path supplied?" would silence it for
     # every web-app user -- exactly the audience least able to notice.
+    global USING_FALLBACK_GENE_LIST, FALLBACK_GENE_LIST_PATH
     if resolved.resolve() != CANONICAL_GENE_CANDIDATES[0].resolve():
+        USING_FALLBACK_GENE_LIST = True
+        FALLBACK_GENE_LIST_PATH = resolved
         print(
             f"[WARN] Not using the authoritative gene list\n"
             f"[WARN]   {CANONICAL_GENE_CANDIDATES[0]}\n"
             f"[WARN] Using instead: {resolved}\n"
-            "[WARN] Stand-in lists derived from the checkpoint reproduce the gene\n"
-            "[WARN] COUNT but not the training gene ORDER, so the query vector is\n"
-            "[WARN] built in a different gene space than the ARCHS4 index.\n"
-            "[WARN] Retrieval results are NOT valid and must not be interpreted\n"
-            "[WARN] biologically until the authoritative list is restored.",
+            "[WARN] " + INVALID_GENE_ORDER_NOTICE.replace(". ", ".\n[WARN] "),
             flush=True,
         )
+    else:
+        USING_FALLBACK_GENE_LIST = False
+        FALLBACK_GENE_LIST_PATH = None
 
     return resolved
 
@@ -738,6 +755,34 @@ def save_retrieval_report(
     lines = []
     lines.append("# OSDR to ARCHS4 Retrieval Report")
     lines.append("")
+
+    # A report file outlives the console session that produced it and is the
+    # thing a researcher forwards to someone else. Without this it is
+    # indistinguishable from a valid one.
+    if USING_FALLBACK_GENE_LIST:
+        lines.append("> [!WARNING]")
+        lines.append("> **THESE RESULTS ARE NOT SCIENTIFICALLY VALID.**")
+        lines.append(">")
+        lines.append(f"> {INVALID_GENE_ORDER_NOTICE}")
+        lines.append(">")
+        lines.append(f"> Gene list used: `{FALLBACK_GENE_LIST_PATH}`")
+        lines.append(f"> Authoritative list expected at: `{CANONICAL_GENE_CANDIDATES[0]}`")
+        lines.append("")
+
+        # A standalone marker file, so the caveat is visible to anyone who
+        # copies the CSVs without the report.
+        warning_path = Path(f"{base}.INVALID_RESULTS.txt")
+        warning_path.write_text(
+            "THESE RESULTS ARE NOT SCIENTIFICALLY VALID.\n\n"
+            + INVALID_GENE_ORDER_NOTICE
+            + f"\n\nGene list used: {FALLBACK_GENE_LIST_PATH}\n"
+            f"Authoritative list expected at: {CANONICAL_GENE_CANDIDATES[0]}\n"
+            f"Applies to: {base.name}.report.md, {base.name}.top_hits.csv, "
+            f"{base.name}.archs4_metadata.csv\n",
+            encoding="utf-8",
+        )
+        print(f"[WARN] Wrote invalidity notice to {warning_path}", flush=True)
+
     lines.append("## Query")
     lines.append(f"- sample_id: {query_sample_id}")
     lines.append(f"- metric: {args.metric}")
