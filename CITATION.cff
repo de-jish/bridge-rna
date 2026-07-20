@@ -11,9 +11,7 @@ abstract: >-
   RNA-seq sample to its most transcriptomically similar Earth-based samples in
   the ~940,000-sample ARCHS4/GEO collection. A trained ExpressionPerformer
   model embeds gene-expression vectors into a 512-dimensional space, and
-  retrieval is performed by cosine similarity over a precomputed index. This
-  project is independent research and is not affiliated with or endorsed by
-  NASA.
+  retrieval is performed by cosine similarity over a precomputed index.
 keywords:
   - transcriptomics
   - RNA-seq
