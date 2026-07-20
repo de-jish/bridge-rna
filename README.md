@@ -4,6 +4,9 @@ Bridge RNA finds the closest Earth-based analogs for NASA spaceflight RNA-seq sa
 
 Give it a mouse RNA-seq sample from NASA's Open Science Data Repository (OSDR), and it retrieves the most transcriptomically similar human samples from the ~940,000-sample ARCHS4/GEO collection, visualizes the matches as an interactive network, and asks a language model to suggest what the retrieval implies for spaceflight biology.
 
+> Bridge RNA is independent research and is **not affiliated with or endorsed by NASA**.
+> It uses NASA's publicly available OSDR data.
+
 ![The Bridge RNA web interface, showing a mouse eye spaceflight sample from OSD-100 matched against its nearest ARCHS4 neighbours](docs/bridge-rna-interface.png)
 
 The screenshot above shows a real retrieval.
