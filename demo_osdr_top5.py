@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Demo: embed a random OSDR sample and retrieve top-k ARCHS4 nearest hits.
 
-This script REUSES existing ARCHS4 embeddings under prepared_data and only embeds
-one random OSDR sample for retrieval.
+This script REUSES the prebuilt ARCHS4 embedding index in
+``archs4_sample_embeddings_full/`` and only embeds one OSDR sample for retrieval.
+
+All default paths are resolved relative to the repository root (the directory
+containing this file), so the script behaves identically regardless of the
+working directory it is invoked from.
 """
 
 from __future__ import annotations
@@ -34,18 +38,32 @@ except ImportError:
     _BIOPYTHON_AVAILABLE = False
 
 
+# Repository root. Every default path below is anchored here rather than to the
+# process working directory, so the CLI works from anywhere on the filesystem.
+ROOT = Path(__file__).resolve().parent
+
+# Candidate locations for the canonical gene list, in priority order. The first
+# entry is the authoritative list produced by the training pipeline; the second
+# is the checkpoint-derived stand-in written by the Dash app. See
+# resolve_canonical_genes() for why the distinction matters.
+CANONICAL_GENE_CANDIDATES = (
+    ROOT / "data" / "archs4" / "train_orthologs" / "canonical_genes.csv",
+    ROOT / "data" / "ensembl" / "canonical_genes.inferred.csv",
+)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Random OSDR sample -> top-k ARCHS4 retrieval demo")
     parser.add_argument(
         "--embedding-dir",
         type=Path,
-        default=Path("./prepared_data/archs4_sample_embeddings_full"),
+        default=ROOT / "archs4_sample_embeddings_full",
         help="Directory containing embedding_manifest.json, sample_embeddings.*.mmap, sample_locations.parquet",
     )
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path("./checkpoints_performer/r7hnr92k/best_model.pt"),
+        default=ROOT / "checkpoints_performer" / "r7hnr92k" / "best_model.pt",
         help="Checkpoint used to generate embeddings.",
     )
     parser.add_argument("--topk", type=int, default=5, help="Number of nearest neighbors to return.")
@@ -80,14 +98,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--archs4-h5",
         type=Path,
-        default=Path("./data/archs4/human_gene_v2.5.h5"),
-        help="ARCHS4 human HDF5 file used to fetch hit metadata via archs4py.",
+        default=ROOT / "data" / "archs4" / "human_gene_v2.5.h5",
+        help=(
+            "ARCHS4 human HDF5 file used to fetch hit metadata via archs4py. "
+            "Optional and not bundled with the repository; download separately "
+            "from https://archs4.org/download to enable metadata enrichment."
+        ),
     )
     parser.add_argument(
         "--mouse-archs4-h5",
         type=Path,
-        default=Path("./data/archs4/mouse_gene_v2.5.h5"),
-        help="ARCHS4 mouse HDF5 file for metadata lookup (searched after human h5).",
+        default=ROOT / "data" / "archs4" / "mouse_gene_v2.5.h5",
+        help=(
+            "ARCHS4 mouse HDF5 file for metadata lookup (searched after human h5). "
+            "Optional and not bundled; see --archs4-h5."
+        ),
     )
     parser.add_argument(
         "--biopython-metadata",
@@ -115,7 +140,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--osdr-data-dir",
         type=Path,
-        default=Path("./data/osdr"),
+        default=ROOT / "data" / "osdr",
         help="Base OSDR data folder containing metadata/ and raw/",
     )
 
@@ -128,17 +153,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--orthologs",
         type=Path,
-        default=Path("./data/ensembl/orthologs_one2one.txt"),
+        default=ROOT / "data" / "ensembl" / "orthologs_one2one.txt",
     )
     parser.add_argument(
         "--canonical-genes",
         type=Path,
-        default=Path("./data/archs4/train_orthologs/canonical_genes.csv"),
+        default=None,
+        help=(
+            "Canonical gene list matching the checkpoint's training gene order. "
+            "Defaults to the first of CANONICAL_GENE_CANDIDATES that exists."
+        ),
     )
     parser.add_argument(
         "--mouse-exon-lengths",
         type=Path,
-        default=Path("./data/gencode/gencode_v49_mouse_gene_exon_lengths.csv"),
+        default=ROOT / "data" / "gencode" / "gencode_v49_mouse_gene_exon_lengths.csv",
     )
     parser.add_argument(
         "--save-report-prefix",
@@ -218,11 +247,46 @@ def normalize_counts_to_tpm_single(counts: pd.Series, exon_len_by_human_gene: Di
     return out
 
 
+def resolve_canonical_genes(explicit: Path | None) -> Path:
+    """Locate the canonical gene list, warning when it is not the authoritative one.
+
+    The gene list defines the row order of the query expression vector, and it
+    must match the order used to build the ARCHS4 index. Only the training
+    pipeline's ``canonical_genes.csv`` is authoritative. Any stand-in derived
+    from the checkpoint reproduces the gene *count* but not the gene *order*,
+    which silently misaligns every gene index and yields retrievals that look
+    plausible while being meaningless. Warn loudly rather than fail, so the
+    fallback stays usable for development but can never be mistaken for real.
+    """
+    if explicit is not None:
+        if not explicit.exists():
+            raise FileNotFoundError(f"Canonical gene list not found: {explicit}")
+        return explicit
+
+    for candidate in CANONICAL_GENE_CANDIDATES:
+        if candidate.exists():
+            if candidate.name != "canonical_genes.csv":
+                print(
+                    f"[WARN] Authoritative gene list {CANONICAL_GENE_CANDIDATES[0]} is missing.\n"
+                    f"[WARN] Falling back to {candidate}, which is derived from the\n"
+                    "[WARN] checkpoint's gene COUNT only and does not reproduce the training\n"
+                    "[WARN] gene ORDER. Retrieval results from this fallback are NOT valid\n"
+                    "[WARN] and must not be interpreted biologically."
+                )
+            return candidate
+
+    raise FileNotFoundError(
+        "No canonical gene list found. Looked for:\n  "
+        + "\n  ".join(str(c) for c in CANONICAL_GENE_CANDIDATES)
+    )
+
+
 def load_random_osdr_sample_vector(args: argparse.Namespace) -> Tuple[np.ndarray, str, pd.Series]:
     osdr_data_dir = args.osdr_data_dir
     osdr_metadata = args.osdr_metadata or (osdr_data_dir / "metadata" / "selected_sample_metadata.tsv")
+    canonical_genes_path = resolve_canonical_genes(args.canonical_genes)
 
-    for p in [osdr_metadata, args.orthologs, args.canonical_genes, args.mouse_exon_lengths]:
+    for p in [osdr_metadata, args.orthologs, canonical_genes_path, args.mouse_exon_lengths]:
         if not p.exists():
             raise FileNotFoundError(f"Required file not found: {p}")
 
@@ -245,7 +309,7 @@ def load_random_osdr_sample_vector(args: argparse.Namespace) -> Tuple[np.ndarray
         raise RuntimeError("No eligible OSDR rows after filtering.")
 
     ensembl_to_human, human_length_map = build_mouse_to_human_maps(args.orthologs, args.mouse_exon_lengths)
-    canonical_genes = pd.read_csv(args.canonical_genes)["gene_symbol"].astype(str).tolist()
+    canonical_genes = pd.read_csv(canonical_genes_path)["gene_symbol"].astype(str).tolist()
 
     requested_sample_name = (args.osdr_sample_name or "").strip()
     if requested_sample_name:
