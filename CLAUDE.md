@@ -17,7 +17,12 @@ It uses NASA's publicly available Open Science Data Repository (OSDR) data.
 
 Python 3.11 in `.venv/`.
 Activate with `source .venv/bin/activate` or call `.venv/bin/python` directly.
-Note: `torch`, `pyarrow`, `archs4py`, and `biopython` are heavy optional deps used only by the embedding/retrieval scripts, not necessarily installed in every environment.
+`requirements.txt` covers retrieval (including `torch`, `pyarrow`, and `biopython`).
+`requirements-optional.txt` holds `archs4py`, which is only needed for ARCHS4 HDF5 metadata enrichment and is inert without the separately downloaded `.h5` files.
+Both enrichment paths degrade with an explanatory warning rather than failing.
+
+All default paths in `demo_osdr_top5.py` are anchored to the repository root via `ROOT`, so the CLI works from any working directory.
+Verify the large Git LFS artifacts with `python3 fetch_artifacts.py --verify-only` (standard library only).
 
 Run the Dash web app (serves on `http://0.0.0.0:8050`):
 
@@ -91,9 +96,18 @@ Config is env-driven: `BEDROCK_API_URL`, `BEDROCK_API_KEY`, `OLLAMA_BASE_URL`, `
 - **Embedding index facts** (`archs4_sample_embeddings_full/embedding_manifest.json`): 940,455 samples × 512 dims, float16 memmap, `feature_type: flash`.
   Paths inside the manifest are from the original NAS training host (`/nobackupp17/...`) — ignore them; the app resolves files relative to repo root via `EMBEDDING_DIR`.
 
-- **Two config-path defaults differ.**
-  The demo defaults to `data/archs4/train_orthologs/canonical_genes.csv`; the Dash app resolves the canonical gene list independently and cross-checks it against the checkpoint.
-  When gene counts mismatch, retrieval preflight fails loudly rather than producing garbage.
+- **The authoritative canonical gene list is currently MISSING from this repo.**
+  It lived at `data/archs4/train_orthologs/canonical_genes.csv` on the training host; that directory was never committed.
+  The gene list defines the row order of the expression vector, and it must match the order used to build the ARCHS4 index.
+
+  Both entry points fall back to `data/ensembl/canonical_genes.inferred.csv`, which `_infer_canonical_genes_from_checkpoint` in `app_osdr_dash.py` generates by taking the **first N entries of the alphabetically sorted** `protein_coding_ortholog_genes.txt`, where N is the checkpoint's `gene_embedding` row count (15,165).
+  That file reproduces the gene **count** but not the gene **order**: it is an exact alphabetical prefix that truncates at `WDTC1` and drops the 569 genes through `ZZZ3`.
+
+  Consequence: query vectors are built in a different gene space than the index, so cosine scores look plausible while being biologically meaningless.
+  `_canonical_matches_checkpoint` only compares counts, so the synthesized file **satisfies the preflight** rather than tripping it — the check cannot catch this.
+  The true ordering is not recoverable from the checkpoint (its `config` stores no gene list), so it must be retrieved from the training host.
+  `demo_osdr_top5.py` prints a loud warning whenever it uses the fallback.
+  **Retrieval output should not be interpreted until the real `canonical_genes.csv` is restored.**
 
 ## Data layout
 
