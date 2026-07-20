@@ -96,26 +96,33 @@ Config is env-driven: `BEDROCK_API_URL`, `BEDROCK_API_KEY`, `OLLAMA_BASE_URL`, `
 - **Embedding index facts** (`archs4_sample_embeddings_full/embedding_manifest.json`): 940,455 samples × 512 dims, float16 memmap, `feature_type: flash`.
   Paths inside the manifest are from the original NAS training host (`/nobackupp17/...`) — ignore them; the app resolves files relative to repo root via `EMBEDDING_DIR`.
 
-- **The authoritative canonical gene list is currently MISSING from this repo.**
-  It lived at `data/archs4/train_orthologs/canonical_genes.csv` on the training host; that directory was never committed.
-  The gene list defines the row order of the expression vector, and it must match the order used to build the ARCHS4 index.
+- **The canonical gene list is present and authoritative.**
+  `data/archs4/train_orthologs/canonical_genes.csv` holds 15,165 genes, columns `token_id,gene_symbol`, ordered alphabetically from `A1CF` to `ZZZ3`.
+  It is a strict subset of `protein_coding_ortholog_genes.txt` (15,734) that drops 569 scattered genes, and its row count matches the checkpoint's `gene_embedding` rows exactly.
+  It commits as an ordinary Git file; no `.gitattributes` pattern routes it to LFS.
 
-  Both entry points fall back to `data/ensembl/canonical_genes.inferred.csv`, which `_infer_canonical_genes_from_checkpoint` in `app_osdr_dash.py` generates by taking the **first N entries of the alphabetically sorted** `protein_coding_ortholog_genes.txt`, where N is the checkpoint's `gene_embedding` row count (15,165).
-  That file reproduces the gene **count** but not the gene **order**: it is an exact alphabetical prefix that truncates at `WDTC1` and drops the 569 genes through `ZZZ3`.
+  The gene list defines the row order of the expression vector and must match the order used to build the ARCHS4 index.
+  `ExpressionPerformer._encode_hidden` indexes `gene_embedding` by position (`torch.arange(genes)`), so slot `i` **is** gene `i` and the model has no other channel for gene identity.
+  A list of the right length in the wrong order pairs every gene's embedding with another gene's expression value and still yields plausible-looking cosine scores.
 
-  Consequence: query vectors are built in a different gene space than the index, so cosine scores look plausible while being biologically meaningless.
-  `_canonical_matches_checkpoint` only compares counts, so the synthesized file **satisfies the preflight** rather than tripping it — the check cannot catch this.
-  The true ordering is not recoverable from the checkpoint (its `config` stores no gene list), so it must be retrieved from the training host.
-  `demo_osdr_top5.py` prints a loud warning whenever it uses the fallback.
-  **Retrieval output should not be interpreted until the real `canonical_genes.csv` is restored.**
+  **Authenticity is checked by content, not by path.**
+  `CANONICAL_GENES_SHA256` in `generate_archs4_embeddings.py` is the SHA-256 of the gene ordering (symbols joined by newline, so the `token_id` column and file formatting do not affect it).
+  `resolve_canonical_genes` in `demo_osdr_top5.py` and `_canonical_gene_order_is_authoritative` in `app_osdr_dash.py` both hash the list they load and compare against it.
+  Judging by path was the original blind spot: it trusts whatever happens to sit at the authoritative location. Do not reintroduce a path-identity or count-only test as the gate for validity.
+
+  If the digest does not match, the CLI prints a warning and stamps saved reports, and the app shows a persistent banner.
+  `_infer_canonical_genes_from_checkpoint` still synthesizes `data/ensembl/canonical_genes.inferred.csv` as a last-resort stand-in, but it now fails the content check rather than satisfying the preflight.
+  `_canonical_matches_checkpoint` remains count-only and is retained solely as a coarse fallback ordering criterion.
 
 ## Data layout
 
 - `checkpoints_performer/r7hnr92k/best_model.pt` — trained checkpoint; `torch.load(...)["config"]` holds `hidden_dim`, `num_heads`, `feature_type`, `normalization`, etc.
 - `archs4_sample_embeddings_full/` — the memmap (`sample_embeddings.float16.mmap`), `sample_locations.parquet` (per-sample GEO accession + shard location), `embedding_manifest.json`.
 - `data/osdr/metadata/selected_sample_metadata.tsv` — OSDR sample table; `data/osdr/raw/*.csv` — per-study unnormalized count matrices.
-- `data/ensembl/` — orthologs, canonical/protein-coding gene lists.
+- `data/archs4/train_orthologs/canonical_genes.csv` — the authoritative gene list; defines expression-vector row order.
+- `data/ensembl/` — orthologs, protein-coding gene lists, and `canonical_genes.inferred.csv` (a stand-in, not the canonical list).
 - `data/gencode/` — mouse exon lengths.
+- `docs/` — README images.
 - `prompts/ai_summary_prompt.txt` — the LLM prompt template.
 
 The large model, embedding, and data files are stored in **Git LFS**.

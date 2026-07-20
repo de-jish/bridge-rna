@@ -7,20 +7,11 @@ Give it a mouse RNA-seq sample from NASA's Open Science Data Repository (OSDR), 
 > Bridge RNA is independent research and is **not affiliated with or endorsed by NASA**.
 > It uses NASA's publicly available OSDR data.
 
-> [!WARNING]
-> **Retrieval results are currently not scientifically valid.**
-> The authoritative gene list that defines the model's input ordering
-> (`data/archs4/train_orthologs/canonical_genes.csv`) is missing from this
-> repository, and the code falls back to a stand-in derived from the
-> checkpoint. The stand-in reproduces the gene *count* but not the training
-> gene *order*, so query vectors are built in a different gene space than the
-> ARCHS4 index they are compared against.
->
-> Similarity scores still look plausible - they fall in a normal range and the
-> visualizations render - but they are **not meaningful and must not be
-> interpreted biologically**. The pipeline, plumbing, and UI are functional and
-> reviewable; only the retrieval output is affected. See
-> [Known limitations](#known-limitations).
+![The Bridge RNA web interface, showing a mouse eye spaceflight sample from OSD-100 matched against its nearest ARCHS4 neighbours](docs/bridge-rna-interface.png)
+
+The screenshot above shows a real retrieval.
+The query is a mouse left-eye sample flown on Rodent Research-1 (OSD-100), and the three GEO series it pulls back are all mouse retina studies: sub-RPE deposit accumulation in retinal dystrophy (GSE210492), `Mertk` loss-of-function traits (GSE205070), and the retina transcriptome after `UXT` knockout (GSE143281).
+Nothing in the pipeline is told what tissue the query came from.
 
 ## How it works
 
@@ -185,30 +176,36 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `assets/style.css` | Fully tokenized UI design system. |
 | `checkpoints_performer/` | Trained model checkpoint (Git LFS). |
 | `archs4_sample_embeddings_full/` | Precomputed ARCHS4 embedding index and metadata (Git LFS). |
+| `data/archs4/train_orthologs/canonical_genes.csv` | Authoritative gene list (15,165 genes) defining expression-vector row order. |
 | `data/` | OSDR counts (`osdr/raw/`, Git LFS) plus sample metadata, orthologs, and gene annotations (ordinary Git files). |
+| `docs/` | README images. |
 | `prompts/` | The AI summary prompt template. |
+
+## The canonical gene list
+
+The model consumes a fixed-length expression vector whose row order is defined by a canonical gene list, at `data/archs4/train_orthologs/canonical_genes.csv`.
+This matters more than it sounds: `ExpressionPerformer` indexes its `gene_embedding` table by *position*, so slot `i` of the vector simply is gene `i`.
+The model carries no other notion of which gene a slot holds.
+
+A list with the right length but the wrong order therefore pairs every gene's learned embedding with a different gene's expression value.
+The resulting cosine scores still land in a plausible range and every visualization still renders, so the failure is silent by construction.
+
+That is not hypothetical.
+This repository previously shipped without the real list and fell back to a stand-in synthesized from the checkpoint's gene count, taking the alphabetical prefix of `protein_coding_ortholog_genes.txt`.
+It agreed with the true ordering on **18 of 15,165 positions**, and every retrieval published before the list was restored was meaningless.
+
+The list is now present and committed as an ordinary Git file (no `git lfs pull` needed).
+Its integrity is pinned by content rather than by path: `CANONICAL_GENES_SHA256` in `generate_archs4_embeddings.py` records the SHA-256 of the gene ordering, and both entry points hash the list they load and compare.
+A stand-in, a corrupted copy, or a wrong-order file sitting at the authoritative path all fail that check, and the CLI prints a warning while the web app shows a banner.
+Checking the path instead of the content was the original blind spot, so the check is deliberately content-based.
+
+If you want to confirm the ordering yourself, embed a query and compare its mean cosine against the whole index.
+A correct gene order puts the query on the index manifold (~0.84 for the sample above); a scrambled one leaves it off-manifold (~0.58) while the top-1 score barely moves.
 
 ## Known limitations
 
-**The canonical gene list is missing, and retrieval output is invalid until it is restored.**
-
-The model consumes a fixed-length expression vector whose row order is defined by a canonical gene list.
-The ARCHS4 embedding index was built with the list produced by the training pipeline, at `data/archs4/train_orthologs/canonical_genes.csv`.
-That file was never committed to this repository.
-
-When it is absent, the app synthesizes `data/ensembl/canonical_genes.inferred.csv` by taking the first N entries of the alphabetically sorted `protein_coding_ortholog_genes.txt`, where N is the checkpoint's gene-embedding row count (15,165).
-The result is an exact alphabetical prefix: it truncates at `WDTC1` and drops the 569 genes from there through `ZZZ3`.
-It matches the model's expected input *shape* but not its expected gene *order*.
-
-Consequences:
-
-- Query and index vectors occupy different gene spaces, so cosine similarity between them is not meaningful.
-- The failure is silent by construction. Scores land in a plausible range, the network graph renders, and the AI summary confidently describes biology downstream of a scrambled mapping.
-- The existing preflight cannot catch it, because it compares gene counts only, and the synthesized file is built to match the count.
-- The true ordering is not recoverable from the checkpoint, whose `config` stores no gene list. It has to be retrieved from the training host.
-
-The CLI prints a warning whenever it falls back, and the web app shows a banner.
-Everything except the retrieval results - data loading, normalization, ortholog mapping, the embedding model, the index, the UI, and the AI summary plumbing - is unaffected and reviewable.
+- `_canonical_matches_checkpoint` in `app_osdr_dash.py` still compares gene counts only. It is now backed by the content check above, but on its own it cannot tell a correct list from a wrong-order list of the same length.
+- If a precomputed query-embedding parquet is ever added (see `PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES`), it takes precedence over live retrieval and carries no record of which gene ordering produced it.
 
 **Other known issues**
 

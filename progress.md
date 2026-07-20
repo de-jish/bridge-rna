@@ -1,5 +1,69 @@
 # Progress
 
+## 2026-07-20 - Canonical gene list restored
+
+Joshua supplied the missing `canonical_genes.csv`, which clears blocking item #1 below.
+Committed as `78aeca5`.
+
+### What the file is
+
+15,165 genes, columns `token_id,gene_symbol`, ordered alphabetically from `A1CF` to `ZZZ3`.
+Verified before use: row count matches the checkpoint's `gene_embedding` rows exactly, `token_id` is contiguous 1..15165 in row order, no duplicate symbols, and it is a strict subset of `protein_coding_ortholog_genes.txt` dropping 569 scattered genes.
+SHA-256 of the file is `1dbe9a5753e5982b3ddb383f35e92ce5795c21fc054fff685514831c8dadbb8d`; SHA-256 of the gene ordering is `3f887ac8d329dce3c54d26448964904c07a345940cd3d9ebab18dd1f603194c5`.
+
+It commits as an ordinary Git file.
+No `.gitattributes` pattern matches `data/archs4/train_orthologs/*.csv`, so a fresh clone gets it without `git lfs pull`, and the failure mode that produced this whole incident cannot recur from a missing LFS fetch.
+
+Worth recording: the true ordering is alphabetical, but over a 15,165-gene *subset*.
+The old stand-in assumed an alphabetical *prefix* of the 15,734-gene superset, which is why it diverged at index 18 (`AARS2` where the real list has `AARS1`) and agreed on only 18 of 15,165 positions, or 0.1%.
+
+### Evidence that retrieval is now correct
+
+Embedded one OSDR sample three ways and compared the resulting neighbourhoods.
+
+| gene order | top-1 | corpus mean cosine | distinct shards in top 50 |
+| --- | --- | --- | --- |
+| real | 0.9964 | 0.836 | 15 |
+| inferred stand-in | 0.9796 | 0.626 | 21 |
+| scrambled control | 0.9739 | 0.577 | 23 |
+
+The diagnostic signal is the corpus mean, not the top-1 score.
+With the real ordering the query lands on the index manifold; both wrong orderings leave it off-manifold while the top-1 score barely moves, which is exactly why the original failure was invisible.
+The three neighbourhoods share zero of 50 hits.
+
+Biological check on OSD-100 (mouse left eye, Rodent Research-1): all three retrieved GEO series are mouse retina studies.
+GSE210492 (sub-RPE deposits in retinal dystrophy), GSE205070 (`Mertk` loss-of-function), GSE143281 (retina transcriptome after `UXT` knockout).
+Nothing in the pipeline is told the query tissue.
+
+### Validity is now checked by content, not by path
+
+The old `resolve_canonical_genes` decided authenticity by comparing the resolved path against the authoritative one, and `build_gene_list_banner` cleared the banner on a bare `Path.exists()`.
+Both would trust any file sitting at the right path, including a wrong-order one, which is the same unchecked assumption that let the stand-in through.
+
+`CANONICAL_GENES_SHA256` and `canonical_gene_order_digest` now live in `generate_archs4_embeddings.py`, the module that owns the deployed index contract.
+The digest hashes the symbol sequence rather than the file bytes, so column layout and line endings do not affect it.
+`demo_osdr_top5.resolve_canonical_genes` and `app_osdr_dash._canonical_gene_order_is_authoritative` both hash what they load and compare.
+
+Verified all three cases by execution: the real file passes and emits no warning; the inferred stand-in warns and sets `USING_FALLBACK_GENE_LIST`; and a reversed-order list with the correct count passes `_canonical_matches_checkpoint` (`True`) while failing the content check (`False`).
+That last case is the exact failure mode and it is now caught.
+
+Also fixed a dead branch: preflight took the first *existing* candidate at line 462, which made the validating loop below it unreachable.
+It now prefers a candidate whose ordering verifies, falling back to first-existing only when none does.
+
+### UI fix found while screenshotting
+
+The retrieval-network query label rendered clipped (`_C57-6J_EYE_FLT_Rep1_M23`, missing its `Mmus` prefix).
+Node labels are centred on their node and the query sits at `x=0.0`, the left edge of the data extent, so Plotly's autorange left no room for the overhang.
+The x-axis range is now padded by the half-width of the widest label anchored on each side, with `cliponaxis=False` and wider margins as a backstop for narrow viewports.
+
+Added `docs/bridge-rna-interface.png`, a real retrieval captured from the running app, to the README.
+
+### Next steps
+
+- Item #4 follow-up (Zenodo upload) is unchanged and still outstanding.
+- Consider recording the gene-list digest in `artifacts.json` so `fetch_artifacts.py --verify-only` covers it too.
+- If a precomputed query-embedding parquet is ever generated, stamp it with the gene-order digest. That path takes precedence over live retrieval and currently carries no provenance.
+
 ## 2026-07-20 - Pre-handoff audit
 
 Full audit of the repository ahead of sending it to an outside researcher.
@@ -64,14 +128,10 @@ Preflight tested existence only, so a clone without `git lfs pull` reported noth
 
 ### Outstanding
 
-**#1 - BLOCKING: the authoritative canonical gene list is missing.**
-`data/archs4/train_orthologs/canonical_genes.csv` was never committed.
-Both entry points fall back to `data/ensembl/canonical_genes.inferred.csv`, which is generated by taking the first 15,165 entries of the alphabetically sorted `protein_coding_ortholog_genes.txt`.
-That reproduces the gene count but not the training gene order: it is an exact alphabetical prefix truncating at `WDTC1`, dropping the 569 genes through `ZZZ3`.
-Because the ARCHS4 index was built with the true ordering, query and index sit in different gene spaces, and retrievals are plausible-looking but meaningless.
-`_canonical_matches_checkpoint` compares counts only, so the synthesized file satisfies the preflight instead of tripping it.
-The ordering is not recoverable from the checkpoint - its `config` stores no gene list - so it must be retrieved from the training host (`/nobackupp17/woalvara/bridge-rna/data/archs4/train_orthologs/`).
-Owner: Joshua. The demo now warns loudly when using the fallback.
+**#1 - RESOLVED (see the 2026-07-20 gene-list entry at the top of this file).**
+`data/archs4/train_orthologs/canonical_genes.csv` was never committed, so both entry points fell back to a stand-in that reproduced the gene count but not the training gene order, leaving query and index in different gene spaces.
+Joshua supplied the real list and it is committed as `78aeca5`.
+Validity is now gated on a content digest rather than on a path comparison, so a stand-in or a wrong-order file at the authoritative path is caught rather than trusted.
 
 **#4 follow-up - publishing the artifacts.**
 Decision taken: host the checkpoint and embedding index on Zenodo for a citable DOI, keeping the OSDR CSVs in LFS.
