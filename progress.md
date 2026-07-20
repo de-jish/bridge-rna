@@ -42,6 +42,26 @@ Standard library only, so it runs before the virtualenv exists.
 Size is checked before hashing; downloads land in a `.part` file and are only moved into place after the checksum matches; transfers resume via HTTP range requests and correctly restart when a server ignores `Range` and replies 200 instead of 206.
 Validated against the three real artifacts plus a sandbox covering missing, corrupt, truncated, oversized-partial, resumed, unhosted, and unreachable-host cases.
 
+### Second round: adversarial verification of the above
+
+A verification pass (four review lenses plus a fresh-clone simulation, each finding refuted by execution before counting) found real defects in the first round's own work.
+
+**`fetch_artifacts.py` had three defects, all contradicting its own docstring (commit `b9050fd`).**
+The first-round testing only ever exercised a well-behaved server, which is why it missed them.
+
+- `download()` ended with an unconditional `os.replace`, and verification ran afterwards, so corrupt bytes were installed at the real artifact path before anything checked them.
+- A truncated body reads as a clean EOF rather than raising, so a dropped connection promoted a half-written file and destroyed the `.part`. The resume feature therefore never engaged for the case it exists to handle.
+- `--force` combined with `--verify-only` reported byte-perfect artifacts as FAILED.
+
+Now verified against a deliberately hostile server: short transfer keeps its `.part` and resumes; wrong-content-correct-size is discarded with the destination untouched; a valid local file survives a failed `--force`.
+
+**The invalidity warning did not reach anyone actually looking at results (commit `50ddb97`).**
+Commit `e7be19d` made the demo emit the warning on the app's code path but did not make the app display it - `run_real_retrieval` captures stdout and reads it only on failure, so a successful run discarded it. Saved reports had the same gap, and a report forwarded to a colleague was indistinguishable from a valid one. The README described what the tool retrieves with no caveat at all.
+Fixed in three places, with the wording centralized in `INVALID_GENE_ORDER_NOTICE` so they cannot drift: a persistent web-app banner, a warning block plus sibling `.INVALID_RESULTS.txt` in saved reports, and a README callout with a Known limitations section.
+
+**Un-pulled LFS clones and exhausted candidate loops (commit `313a850`).**
+Preflight tested existence only, so a clone without `git lfs pull` reported nothing missing and then failed inside `torch.load` with an error never mentioning Git LFS. Separately, a `--select-best` run where every candidate failed produced a `TypeError` about NoneType multiplication. Both now report their actual cause.
+
 ### Outstanding
 
 **#1 - BLOCKING: the authoritative canonical gene list is missing.**
@@ -59,11 +79,18 @@ Still to do: upload the files, fill in the `url`, `record_url`, and `doi` fields
 The recorded checksums are host-independent and already correct.
 Removing the files from LFS to reclaim quota would require a history rewrite and has deliberately not been done.
 
-**#6, #7, #8 - not yet addressed** (audited, fixes not authorized this session):
+**#6, #7, #8 - not yet addressed** (audited, fixes not authorized this session; all are now disclosed in the README's Known limitations section):
 
 - #6: `app_osdr_dash.py` has no argparse, so `--help` boots the server and blocks instead of printing help. `DASH_DEBUG` defaults on with `host="0.0.0.0"`, exposing the interactive traceback console on all interfaces.
 - #7: `demo_osdr_top5.py` loads the entire index into RAM (~1.93 GB, ~3.9 GB peak during normalization), and `--select-best N` re-normalizes the full index once per candidate. The Dash app already solves this with 25k-row chunking.
 - #8: `load_state_dict(strict=False)` with no reporting hides checkpoint mismatch; `feature_type` falls back to `"sqr"` when the deployed checkpoint is `"flash"`; query normalization hardcodes `log1p` instead of reading the checkpoint's `normalization` field.
+
+### Lesson worth keeping
+
+Both rounds of defects in this session's own work shared one cause: testing only the path where things go right.
+`fetch_artifacts.py` passed eleven sandbox cases against a cooperative server and still had three bugs that a hostile one exposed immediately.
+The gene-list warning was verified as "printed by the demo" without checking whether anything downstream displayed it.
+For work that ships to someone else, verify the failure path and the delivery path, not just the happy path.
 
 ### Notes
 
