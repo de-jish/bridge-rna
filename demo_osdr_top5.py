@@ -420,8 +420,24 @@ def topk_search(index_vecs: np.ndarray, q: np.ndarray, k: int, metric: str, l2_n
 def fetch_archs4_metadata(geo_accessions: list, human_h5: Path, mouse_h5: Path | None = None) -> pd.DataFrame:
     """Pull sample metadata from ARCHS4 HDF5 files (human and/or mouse)."""
     if not _ARCHS4PY_AVAILABLE:
-        print("[WARN] archs4py not installed — skipping metadata fetch. pip install archs4py")
+        print(
+            "[WARN] archs4py is not installed, so hits are reported as bare GSM\n"
+            "[WARN] accessions without tissue/title metadata. Retrieval itself is\n"
+            "[WARN] unaffected. To enable enrichment:\n"
+            "[WARN]   python -m pip install -r requirements-optional.txt\n"
+            "[WARN] and download the ARCHS4 HDF5 files from https://archs4.org/download"
+        )
         return pd.DataFrame({"geo_accession": geo_accessions})
+
+    missing_h5 = [p for p in (human_h5, mouse_h5) if p is not None and not p.exists()]
+    if missing_h5 and not any(p is not None and p.exists() for p in (human_h5, mouse_h5)):
+        print(
+            "[WARN] archs4py is installed but no ARCHS4 HDF5 file was found at:\n"
+            + "".join(f"[WARN]   {p}\n" for p in missing_h5)
+            + "[WARN] These files are not bundled with the repository. Download them\n"
+            "[WARN] from https://archs4.org/download and pass --archs4-h5 /\n"
+            "[WARN] --mouse-archs4-h5, or omit metadata enrichment."
+        )
 
     frames = []
     remaining = list(geo_accessions)

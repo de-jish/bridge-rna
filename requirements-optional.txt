@@ -1,0 +1,16 @@
+# Optional dependencies for hit metadata enrichment.
+#
+# Retrieval works without these. Installing them only adds descriptive metadata
+# (tissue, title, study context) to the ARCHS4 hits that retrieval returns.
+#
+#   .venv/bin/python -m pip install -r requirements-optional.txt
+#
+# archs4py reads sample metadata out of the ARCHS4 HDF5 files. Those files are
+# NOT bundled with this repository and are several GB each; download them from
+# https://archs4.org/download and point --archs4-h5 / --mouse-archs4-h5 at them.
+# Without the HDF5 files this package is installed but unused.
+archs4py>=1.0.4
+
+# biopython is already in requirements.txt because the Entrez GEO/PubMed lookups
+# behind --biopython-metadata need no extra downloads, only a network
+# connection and ENTREZ_EMAIL.

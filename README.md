@@ -68,6 +68,18 @@ py -3.11 -m venv .venv
 Calling the environment's Python directly (as above) avoids activation and execution-policy issues.
 The first install is large because it includes PyTorch and PyArrow.
 
+**Optional metadata enrichment.**
+`requirements.txt` covers everything needed for retrieval.
+To also label hits with tissue and study metadata read from the ARCHS4 HDF5 files, install the extras:
+
+```bash
+.venv/bin/python -m pip install -r requirements-optional.txt
+```
+
+This pulls in `archs4py`, which additionally needs the ARCHS4 HDF5 files from <https://archs4.org/download>.
+Those files are several GB each and are **not** bundled here.
+Without them, retrieval still works and hits are reported as bare GSM accessions.
+
 ### 3. Run the app
 
 ```bash
