@@ -277,8 +277,27 @@ def _call_ollama_summary(prompt: str) -> str:
         }
         return requests.post(url, json=payload, timeout=OLLAMA_TIMEOUT_SECONDS)
 
+    # AI summaries are the one feature that depends on software this repository
+    # cannot install for you, so failures here are the most likely thing a new
+    # user hits. Answer with what to do rather than with a connection traceback.
     try:
         resp = _generate(_pick_model())
+    except requests.exceptions.ConnectionError:
+        return (
+            f"Could not reach Ollama at {OLLAMA_BASE_URL}.\n\n"
+            "AI summaries are optional. Retrieval, the network graph, and all metadata "
+            "on this page work without them.\n\n"
+            "To enable them, install Ollama from https://ollama.com and then run:\n"
+            "    ollama serve\n"
+            f"    ollama pull {OLLAMA_MODEL}\n\n"
+            "To use AWS Bedrock instead, set AI_SUMMARY_PROVIDER=bedrock and BEDROCK_API_URL."
+        )
+    except requests.exceptions.Timeout:
+        return (
+            f"Ollama did not respond within {OLLAMA_TIMEOUT_SECONDS} seconds.\n\n"
+            "A local model is usually slowest on its first call, while the weights load "
+            "into memory. Try again, or set OLLAMA_MODEL to a smaller model."
+        )
     except Exception as exc:
         return f"AI Summary call failed (Ollama): {_safe_str(exc)}"
 
@@ -288,6 +307,12 @@ def _call_ollama_summary(prompt: str) -> str:
             err = err[:800] + "..."
         if resp.status_code == 404 and "not found" in err.lower():
             available = _get_available_models()
+            if not available:
+                return (
+                    f"Ollama is running at {OLLAMA_BASE_URL}, but no models are installed.\n\n"
+                    "Pull one first:\n"
+                    f"    ollama pull {OLLAMA_MODEL}"
+                )
             if available:
                 fallback = _pick_model()
                 if fallback != OLLAMA_MODEL:
@@ -1625,6 +1650,38 @@ def build_gene_list_banner() -> Any:
     )
 
 
+def build_setup_banner() -> Any:
+    """Persistent banner listing unmet prerequisites, shown before any search.
+
+    preflight_retrieval_requirements() is otherwise consulted only inside
+    run_real_retrieval, which raises on failure. A fresh clone whose Git LFS
+    payload never arrived therefore looks completely healthy: the app serves,
+    the sample dropdowns populate from ordinary Git files, and nothing hints
+    at a problem until someone picks a sample, clicks Search, and waits for
+    the error. Surfacing it at layout time costs one preflight call at import.
+    """
+    try:
+        missing, _ = preflight_retrieval_requirements()
+    except Exception as exc:  # never let a diagnostic stop the app from serving
+        missing = [f"preflight check failed: {exc}"]
+
+    if not missing:
+        return None
+
+    return html.Div(
+        className="setup-banner",
+        children=[
+            html.Span("Setup incomplete, so retrieval cannot run", className="setup-banner-title"),
+            html.Span(
+                "The interface loaded, but the files retrieval depends on are not ready. "
+                "Everything else on this page works; searching will fail until these are resolved.",
+                className="setup-banner-body",
+            ),
+            html.Ul(className="setup-banner-list", children=[html.Li(m) for m in missing]),
+        ],
+    )
+
+
 def build_status_banner(message: str, kind: str = "info", detail: str | None = None) -> Any:
     """One-line status banner. ``kind`` is info | good | error.
 
@@ -1913,6 +1970,7 @@ app.layout = html.Div(
                 ),
             ],
         ),
+        build_setup_banner(),
         build_gene_list_banner(),
         html.Div(
             className="app-grid",

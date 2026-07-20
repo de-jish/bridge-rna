@@ -100,6 +100,9 @@ Without them, retrieval still works and hits are reported as bare GSM accessions
 
 Open <http://localhost:8050> and stop the server with `Ctrl+C`.
 
+If anything retrieval depends on is missing, the app still starts and shows an amber banner naming exactly what is wrong and how to fix it, rather than failing only once you press Search.
+A clone whose Git LFS payload never arrived is the usual cause.
+
 By default the app binds to `127.0.0.1`, so it is reachable only from your own machine, and the debugger is off.
 `--host`, `--port`, and `--debug` (or `DASH_HOST`, `DASH_PORT`, `DASH_DEBUG`) change that:
 
