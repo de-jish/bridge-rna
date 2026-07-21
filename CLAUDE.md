@@ -58,6 +58,8 @@ Density rasters are a plain numpy 2D histogram rendered through PIL, deliberatel
 python precompute/embed_osdr.py         # 2,896 OSDR embeddings, gene-digest gated
 python precompute/fetch_archs4_meta.py  # ARCHS4 tissue metadata (needs the tens-of-GB gene H5 files)
 python precompute/build_projections.py  # PCA + UMAP coords, hnswlib index, density rasters
+python precompute/build_projections.py --density-only   # re-render just the rasters from cached coords
+python precompute/validate_artifacts.py --mixing        # gate the build; exits nonzero on failure
 python app_manifold.py                  # serves http://127.0.0.1:8051
 ```
 

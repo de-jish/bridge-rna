@@ -78,10 +78,25 @@ Found by an adversarial audit plus browser-driven testing; each was verified bef
 2. ~~Run `precompute/build_projections.py`~~ **DONE** 2026-07-21 08:51:44, rc=0 in 5 min 47 s.
 3. ~~Validate against the Phase 2/4 criteria~~ **DONE**. PC1 = 40.9% against the 57.8% pre-normalization figure, so invariant 2 holds.
    Codified as `precompute/validate_artifacts.py`, which exits nonzero on failure so it can gate a rebuild instead of relying on eyeballing a scatter plot.
-4. **Launch the app on the real corpus** and re-run the browser checks at 940k scale, watching frame rate at the 100k and 150k budgets. This is the next real task.
-5. Decide how the measured batch effect should surface in the UI. The cross-dataset warning already exists, but it was written before the magnitude was known; 54x tissue-controlled enrichment may justify making it harder to ignore on mixed-corpus lassos.
-6. Optional, if the ARCHS4 HDF5 files are ever downloaded: `pip install h5py`, run `fetch_archs4_meta.py`, and the tissue color-by appears by itself.
-7. Optional: `precompute/embed_osdr.py --metadata-only` if the metadata harmonization ever changes; it rewrites the parquet without re-embedding.
+4. ~~Launch the app on the real corpus~~ **DONE** 2026-07-21. Driven headless end to end against the real 942,563-point cache: initial render, zoom with viewport LOD re-sampling, and a lasso to a populated readout. Zero console errors. Two defects found and fixed (below).
+5. Decide how the measured batch effect should surface in the UI. The cross-dataset warning already exists and does fire correctly on mixed lassos, but it was written before the magnitude was known; 54x tissue-controlled enrichment may justify making it harder to ignore.
+6. Re-run the browser checks at the 60k and 150k point budgets and measure frame rate; only the 100k default has been exercised so far.
+7. Optional, if the ARCHS4 HDF5 files are ever downloaded: `pip install h5py`, run `fetch_archs4_meta.py`, and the tissue color-by appears by itself.
+8. Optional: `precompute/embed_osdr.py --metadata-only` if the metadata harmonization ever changes; it rewrites the parquet without re-embedding.
+
+## Defects found by running the real app (2026-07-21)
+
+Both were invisible against the synthetic test corpus and only appeared at real scale and real distribution.
+
+**1. The density ramp used 0.78% of its range.** `render_density` normalized `log1p(counts)` by the global max. Real occupancy is heavy-tailed - median occupied bin holds 2 points, max 638 - so dividing by the max crushed everything into the bottom of the scale. Only 0.78% of occupied bins cleared the 0.5 threshold where the navy-to-teal ramp turns teal, and alpha saturated at 0.4545, *before* that turn, so the densest cores were indistinguishable from merely-busy ones. Measured on the raster: 8 pixels total in the teal half.
+Fixed by normalizing against the 99.5th percentile of occupied bins (`DENSITY_CLIP_PCT`) and ramping alpha across the same span with a visibility floor (`DENSITY_ALPHA_FLOOR`). Teal-half pixels went 8 -> 2,377; mean occupied colour lifted RGB (21,50,82) -> (26,71,108). Filament structure that was a flat wash now reads.
+Added `build_projections.py --density-only` so ramp changes re-render from cached coordinates in seconds instead of repeating the 6-minute build.
+
+**2. The verdict contradicted its own statistics.** `cohesive` was `(z >= 3 and p < 0.05) or knn_fold >= 2`, and the sentence printed a flat "Coherent" followed by whichever numbers happened to exist. A real 1,015-point skin selection produced **"Coherent (z=-1.8, p=0.963, kNN-purity 384.2x)"** - a coherence claim next to a z and p that say the selection is *looser* than a matched random draw.
+The underlying logic is right: the two measures ask different questions, and a lasso over several tight but mutually distant groups is legitimately high on local purity and low on global tightness. The reporting was what failed. `cohesive_global` and `cohesive_local` are now tracked separately, and when only the local one fires the verdict says so and explains the shape: "Locally coherent (kNN-purity 384.2x), but looser overall than a matched random draw (z=-1.8, p=0.963): several close-knit groups sitting apart from each other rather than one cloud."
+Pinned by `test_verdict_does_not_claim_coherence_next_to_contradicting_statistics`.
+
+Checked and found **not** defective: the readout panel clips its cross-corpus warning at 1000px viewport height, but it is `overflow-y: auto` and genuinely scrollable, so nothing is unreachable.
 
 ## How the projection build was chained (2026-07-21, completed)
 

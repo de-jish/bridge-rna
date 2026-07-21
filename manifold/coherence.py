@@ -40,6 +40,17 @@ SEED = 12345
 # reaches q < 1e-10 on sample size alone.
 MIN_DRIVER_FOLD = 1.25
 
+# Two independent routes to "coherent", which measure different things and can
+# legitimately disagree. Global cohesion is mean cosine to the selection
+# centroid: it asks whether the selection is one tight cloud. kNN purity asks
+# whether each point's own neighbourhood lies inside the selection. A lasso over
+# several tight but mutually distant groups scores high on the second and low on
+# the first. The verdict has to say which one carries the claim, or it reads as
+# a contradiction - see _synthesize.
+MIN_COHESION_Z = 3.0
+MAX_COHESION_P = 0.05
+MIN_KNN_PURITY_FOLD = 2.0
+
 
 def _mean_cos_to_centroid(vecs: np.ndarray) -> float:
     """Mean cosine of a set of unit vectors to their own normalized centroid.
@@ -288,7 +299,9 @@ def analyze_selection(point_indices) -> dict:
     significant = [r for r in enrich if r["q"] < 0.05]
 
     cross_dataset = n_archs4_sel > 0 and n_osdr_sel > 0
-    cohesive = (z >= 3.0 and emp_p < 0.05) or (knn is not None and knn["fold"] >= 2.0)
+    cohesive_global = z >= MIN_COHESION_Z and emp_p < MAX_COHESION_P
+    cohesive_local = knn is not None and knn["fold"] >= MIN_KNN_PURITY_FOLD
+    cohesive = cohesive_global or cohesive_local
     has_enrichment = len(significant) > 0
 
     # Batch-confound guard on OSDR study. The flag asks "is the coherence we are
@@ -320,9 +333,12 @@ def analyze_selection(point_indices) -> dict:
         "batch": batch,
         "cross_dataset": cross_dataset,
         "cohesive": cohesive,
+        "cohesive_global": cohesive_global,
+        "cohesive_local": cohesive_local,
         "has_enrichment": has_enrichment,
         "verdict": _synthesize(z, emp_p, knn, significant, batch, cross_dataset,
-                               cohesive, has_enrichment),
+                               cohesive, has_enrichment,
+                               cohesive_global=cohesive_global),
         "verdict_class": _verdict_class(cohesive, significant, batch),
     }
 
@@ -363,8 +379,10 @@ CROSS_DATASET_NOTE = (
 
 
 def _synthesize(z, emp_p, knn, significant, batch, cross_dataset,
-                cohesive, has_enrichment) -> str:
+                cohesive, has_enrichment, cohesive_global=None) -> str:
     knn_txt = f", kNN-purity {knn['fold']:.1f}x" if knn else ""
+    if cohesive_global is None:  # callers that only know the combined flag
+        cohesive_global = z >= MIN_COHESION_Z and emp_p < MAX_COHESION_P
 
     if not cohesive and not has_enrichment:
         # The honest negative. It still carries the cross-corpus caution,
@@ -378,7 +396,22 @@ def _synthesize(z, emp_p, knn, significant, batch, cross_dataset,
         return "; ".join(parts) + "."
 
     parts = []
-    if cohesive:
+    if cohesive and not cohesive_global:
+        # The claim rests entirely on kNN purity while the global statistic
+        # says the opposite. Printing a bare "Coherent" beside a z of -1.8 and
+        # p=0.96 reads as a contradiction, or as a p-value nobody checked. Name
+        # which measure carries the verdict and what the disagreement means:
+        # tight neighbourhoods, spread apart. That shape is a real finding, not
+        # a caveat to bury.
+        shape = ("looser overall than a matched random draw" if z < 0
+                 else "not significantly tighter overall than a matched random draw")
+        local = f" ({knn_txt.lstrip(', ')})" if knn else ""
+        parts.append(
+            f"Locally coherent{local}, but {shape} (z={z:.1f}, {_fmt_p(emp_p)}): "
+            f"several close-knit groups sitting apart from each other rather "
+            f"than one cloud"
+        )
+    elif cohesive:
         parts.append(f"Coherent (z={z:.1f}, {_fmt_p(emp_p)}{knn_txt})")
     else:
         parts.append(f"Weak cohesion (z={z:.1f}, {_fmt_p(emp_p)}{knn_txt})")

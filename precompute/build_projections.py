@@ -38,6 +38,14 @@ from manifold import paths, preflight  # noqa: E402
 
 EMB_DIM = 512
 
+# Density raster ramp. Occupancy is heavy-tailed, so the colour scale is
+# normalized against this percentile of the OCCUPIED bins rather than the
+# global max; see render_density for the measurement that motivated it.
+DENSITY_CLIP_PCT = 99.5
+# Faintest visible alpha for a bin that has any points at all, so sparse
+# structure (thin filaments, small islands) does not vanish into the canvas.
+DENSITY_ALPHA_FLOOR = 0.22
+
 
 def log(msg: str) -> None:
     print(f"[proj] {msg}", flush=True)
@@ -175,8 +183,17 @@ def render_density(coords2d: np.ndarray, name: str, res: int = 2048) -> dict:
     )
     H = H.T  # histogram2d returns [x, y]; image wants [row=y, col=x]
     dens = np.log1p(H)
-    if dens.max() > 0:
-        dens = dens / dens.max()
+    # Normalize against a high percentile of the OCCUPIED bins, not the global
+    # max. Bin occupancy is heavy-tailed (median 2 points, max 638 on the real
+    # corpus), so dividing by the max crushes the whole ramp into its bottom
+    # fraction: measured, only 0.78% of occupied bins cleared the 0.5 threshold
+    # where the teal half begins, leaving the high end of the ramp unused and
+    # the map a flat two-tone wash. Clipping at a percentile spends the ramp on
+    # the range that actually has pixels in it.
+    occupied = dens > 0
+    if occupied.any():
+        ref = float(np.percentile(dens[occupied], DENSITY_CLIP_PCT))
+        dens = np.clip(dens / max(ref, 1e-9), 0.0, 1.0)
     # Map density -> RGBA: transparent where empty, navy->teal->white where dense.
     rgba = np.zeros((res, res, 4), dtype=np.uint8)
     # Colour ramp anchored to the plot navy.
@@ -188,9 +205,13 @@ def render_density(coords2d: np.ndarray, name: str, res: int = 2048) -> dict:
     hi = c1 + (c2 - c1) * np.clip((t - 0.5) * 2, 0, 1)
     col = np.where(t < 0.5, lo, hi).astype(np.uint8)
     rgba[..., :3] = col
-    # Alpha grows with density; empty cells stay fully transparent.
-    alpha = np.clip(dens * 2.2, 0, 1)
-    alpha[dens == 0] = 0.0
+    # Alpha grows with density; empty cells stay fully transparent. The old
+    # 2.2x slope saturated alpha at dens 0.4545, i.e. *before* the colour ramp
+    # reached its teal half at 0.5, so the densest cores were indistinguishable
+    # from merely-busy regions. Ramp alpha across the same 0..1 span the colour
+    # uses, with a floor so sparse-but-occupied bins still read.
+    alpha = np.where(occupied, DENSITY_ALPHA_FLOOR
+                     + (1.0 - DENSITY_ALPHA_FLOOR) * dens, 0.0)
     rgba[..., 3] = (alpha * 235).astype(np.uint8)
     # Flip vertically because image row 0 is the top but y increases upward.
     img = Image.fromarray(rgba[::-1], mode="RGBA")
@@ -257,6 +278,31 @@ def build_hnsw(mm, n_archs4, osdr_norm, ef_construction, M):
     log(f"hnsw index built in {time.time()-t0:.0f}s -> {paths.HNSW_INDEX.name}")
 
 
+def rerender_density_only() -> None:
+    """Redraw the density rasters from cached coordinates and refresh their extents.
+
+    The rasters are a pure function of the 2-d coordinates, so tuning the colour
+    ramp does not require repeating PCA, UMAP, or the index build.
+    """
+    if not paths.PROJECTION_STATS_JSON.exists():
+        raise SystemExit("ABORT: no projection_stats.json; run a full build first.")
+    stats = json.loads(paths.PROJECTION_STATS_JSON.read_text())
+    todo = [("pca2", paths.COORDS_PCA2), ("umap2", paths.COORDS_UMAP2)]
+    rendered = 0
+    for name, path in todo:
+        if not path.exists():
+            log(f"skipping {name}: {path.name} not present")
+            continue
+        coords = pd.read_parquet(path).to_numpy(dtype=np.float64)[:, :2]
+        stats[f"density_{name}"] = render_density(coords, name)
+        rendered += 1
+    if not rendered:
+        raise SystemExit("ABORT: no coordinate parquets found to render from.")
+    paths.PROJECTION_STATS_JSON.write_text(json.dumps(stats, indent=2))
+    log(f"re-rendered {rendered} density raster(s); extents refreshed in "
+        f"{paths.PROJECTION_STATS_JSON.name}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build joint PCA/UMAP/index/density artifacts.")
     ap.add_argument("--pca-fit-sample", type=int, default=60000)
@@ -269,9 +315,17 @@ def main() -> None:
     ap.add_argument("--skip-hnsw", action="store_true",
                     help="The index is ~2 GB on disk and resident in the serving "
                          "app; skipping it only costs the kNN-purity statistic.")
+    ap.add_argument("--density-only", action="store_true",
+                    help="Re-render the density rasters from the cached coordinate "
+                         "parquets and update their extents, then exit. For tuning "
+                         "the colour ramp without repeating the projection build.")
     args = ap.parse_args()
 
     paths.ensure_cache_dirs()
+
+    if args.density_only:
+        rerender_density_only()
+        return
     preflight.require(
         [("ARCHS4 memmap", paths.ARCHS4_MMAP), ("ARCHS4 locations", paths.ARCHS4_LOCATIONS),
          ("OSDR embeddings", paths.OSDR_EMBEDDINGS_NPY)],

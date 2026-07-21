@@ -167,6 +167,37 @@ def test_a_cluster_reads_as_coherent(corpus):
     assert "Coherent" in r["verdict"]
 
 
+def test_verdict_does_not_claim_coherence_next_to_contradicting_statistics():
+    """A bare "Coherent" beside z=-1.8, p=0.96 reads as a contradiction.
+
+    kNN purity and centroid cohesion measure different things and can honestly
+    disagree: a lasso over several tight but mutually distant groups is locally
+    pure and globally loose. Observed on the real corpus - a 1,015-point skin
+    selection scored kNN-purity 384x with z=-1.8, p=0.963. The sentence has to
+    say which measure carries the claim.
+    """
+    knn = {"fold": 384.2}
+    verdict = coherence._synthesize(
+        z=-1.8, emp_p=0.963, knn=knn, significant=[], batch=None,
+        cross_dataset=False, cohesive=True, has_enrichment=True,
+        cohesive_global=False)
+
+    assert "Locally coherent" in verdict
+    assert "384.2x" in verdict
+    assert "looser overall" in verdict, "a negative z must not be softened"
+    # The old output was literally "Coherent (z=-1.8, p=0.963, ...)".
+    assert not verdict.startswith("Coherent"), (
+        "verdict still leads with an unqualified coherence claim")
+
+    # When both measures agree, the plain wording is still used.
+    agree = coherence._synthesize(
+        z=9.0, emp_p=0.001, knn=knn, significant=[], batch=None,
+        cross_dataset=False, cohesive=True, has_enrichment=True,
+        cohesive_global=True)
+    assert agree.startswith("Coherent")
+    assert "Locally coherent" not in agree
+
+
 def test_a_scattered_selection_reads_as_incoherent(corpus):
     """The honest negative: a draw spanning every cluster must not claim structure."""
     n_archs4 = corpus["n_archs4"]
