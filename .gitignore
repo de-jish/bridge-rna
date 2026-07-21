@@ -1,0 +1,20 @@
+# Generated artifacts. Everything under cache/ is reproducible from the
+# precompute scripts and is far too large to track: the joint hnswlib index
+# alone is ~2 GB, the coordinate parquets ~30 MB each, and the OSDR expression
+# matrix ~130 MB.
+cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Tooling / editor
+.serena/
+.DS_Store
+.idea/
+.vscode/
