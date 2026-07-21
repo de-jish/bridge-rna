@@ -113,10 +113,8 @@ html, body {
   padding: 16px 16px 20px;
   overflow-y: auto;
 }
-.bm-rail::-webkit-scrollbar, .bm-readout::-webkit-scrollbar { width: 8px; }
-.bm-rail::-webkit-scrollbar-thumb, .bm-readout::-webkit-scrollbar-thumb {
-  background: #cfd9e6; border-radius: 4px;
-}
+.bm-rail::-webkit-scrollbar { width: 8px; }
+.bm-rail::-webkit-scrollbar-thumb { background: #cfd9e6; border-radius: 4px; }
 
 .bm-group { margin-bottom: 20px; }
 .bm-group-label {
@@ -243,10 +241,6 @@ html, body {
 .bm-plot-wrap .modebar-btn:hover .icon path { fill: #dceafd !important; }
 .bm-plot-wrap .modebar-btn.active .icon path { fill: var(--header-line) !important; }
 
-/* The lasso/select marquee itself, likewise drawn for a light background. */
-.bm-plot-wrap .select-outline { stroke: var(--header-line) !important; stroke-dasharray: 5 3; }
-.bm-plot-wrap .selectionlayer path { fill: rgba(34, 199, 189, 0.08) !important; }
-
 /* dcc.Loading overlays a white sheet by default, which flashes over the navy
    canvas on every control change. */
 .bm-plot-wrap .dash-loading-callback, .bm-plot-wrap ._dash-loading-callback { background: transparent !important; }
@@ -303,60 +297,39 @@ html, body {
 .bm-legend-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
 .bm-legend-count { margin-left: auto; color: #7f97ba; font-variant-numeric: tabular-nums; font-size: 11px; }
 
-/* ---- Right readout panel --------------------------------------------- */
-.bm-readout {
-  width: 340px; flex-shrink: 0;
-  background: var(--bg-panel);
-  border-left: var(--border);
-  padding: 18px 18px 22px;
-  overflow-y: auto;
+/* ---- Colour-by coverage readout ---------------------------------------
+   Sits directly under the colour-by control and states how much of the map
+   the selected field actually paints. This is the answer to "why is most of
+   my map not coloured?", given before the question is asked. */
+.bm-coverage { margin-top: 9px; }
+.bm-coverage-bar {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: #e3eaf3; margin-bottom: 6px;
 }
-.bm-readout-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 3px; }
-.bm-readout-sub { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.4; }
+.bm-coverage-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--accent-teal);
+  transition: width 0.18s ease;
+}
+/* Amber, not red: a field that only describes OSDR is working correctly, not
+   failing. The colour marks a limit worth knowing, not an error. */
+.bm-coverage-fill.partial { background: var(--accent-warm); }
+.bm-coverage-text {
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;
+}
+.bm-coverage-fix {
+  font-size: 11px; color: var(--status-warn); line-height: 1.45;
+  margin-top: 5px; background: #fdf6ea; border-radius: 6px; padding: 6px 8px;
+}
 
-.bm-verdict {
-  border-radius: 10px; padding: 13px 14px; margin-bottom: 16px;
-  font-size: 13.5px; line-height: 1.5; font-weight: 500;
-  border-left: 4px solid var(--text-muted);
-  background: var(--bg-inset); color: var(--text-primary);
+/* Standing caution about cross-corpus distance. Pinned to the bottom of the
+   rail because it qualifies the whole map, not any one control. */
+.bm-caution {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.5;
+  background: var(--bg-inset); border-radius: 8px;
+  border-left: 3px solid var(--accent-warm);
+  padding: 10px 11px; margin-top: 24px;
 }
-.bm-verdict.good { border-left-color: var(--status-good); background: #eefaf2; }
-.bm-verdict.warn { border-left-color: var(--status-warn); background: #fdf6ea; }
-.bm-verdict.null { border-left-color: var(--text-muted); background: var(--bg-inset); }
-
-.bm-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
-.bm-stat {
-  background: var(--bg-panel-raised); border: var(--border);
-  border-radius: 9px; padding: 11px 12px;
-}
-.bm-stat .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 600; }
-.bm-stat .v { font-size: 20px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; margin-top: 3px; }
-.bm-stat .v small { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
-
-.bm-section-h {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--text-muted); margin: 4px 0 9px;
-}
-.bm-enrich-row {
-  display: flex; align-items: center; gap: 9px; padding: 7px 0;
-  border-bottom: 1px solid #eef2f7; font-size: 12.5px;
-}
-.bm-enrich-row:last-child { border-bottom: none; }
-.bm-enrich-cat { flex: 1; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bm-enrich-cat .field { color: var(--text-muted); font-size: 11px; }
-.bm-enrich-fold { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
-.bm-enrich-q { color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; min-width: 62px; text-align: right; }
-
-.bm-empty {
-  color: var(--text-muted); font-size: 13px; line-height: 1.55;
-  padding: 30px 6px; text-align: center;
-}
-.bm-empty .bm-empty-icon { font-size: 26px; opacity: 0.5; margin-bottom: 10px; }
-
-.bm-note {
-  font-size: 11.5px; color: var(--text-secondary); line-height: 1.5;
-  background: var(--bg-inset); border-radius: 8px; padding: 9px 11px; margin-top: 14px;
-}
-.bm-note.warn { background: #fdf6ea; color: #7a5a1e; }
+.bm-caution b { color: var(--text-primary); font-weight: 600; }
 
 a, a:visited { color: var(--accent); }

@@ -14,27 +14,20 @@
 # depends on all three behaviours.
 
 # --- Serving app (manifold/ + app_manifold.py) ------------------------------
+# The app draws a precomputed map. It opens no embeddings and computes no
+# statistics, so it needs no scientific stack beyond the dataframe layer.
 dash>=4.4.0
 plotly>=6.8.0
 numpy>=2.4.0
 pandas>=3.0.0
 pyarrow>=20.0.0        # parquet engine for the coordinate and metadata tables
-scipy>=1.16.0          # hypergeometric enrichment
-hnswlib>=0.8.0         # 512-d cosine index for kNN-purity (optional at runtime)
 
 # --- Offline precompute (precompute/) ---------------------------------------
 torch>=2.12.0          # ExpressionPerformer inference, CPU fp32
 scikit-learn>=1.9.0    # IncrementalPCA
 umap-learn>=0.5.12     # landmark UMAP fit + transform
 pillow>=12.0.0         # density raster PNGs
-
-# --- Optional: ARCHS4 tissue join (precompute/fetch_archs4_meta.py) ---------
-# Needs the ARCHS4 gene HDF5 files (tens of GB) from https://archs4.org/download.
-# Without them the app colors ARCHS4 by species only and says so in the UI.
-# h5py is preferred; it reads the metadata columns in bulk instead of doing
-# ~940k per-accession lookups.
-# h5py>=3.11.0
-# archs4py>=1.0.4
+requests>=2.32.0       # ARCHS4 GEO metadata fetch (precompute/fetch_archs4_meta.py)
 
 # --- Development ------------------------------------------------------------
 # pytest>=9.0.0

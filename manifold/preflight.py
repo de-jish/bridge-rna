@@ -4,6 +4,10 @@ The checkpoint and the 963 MB ARCHS4 memmap are Git LFS objects in the Bridge
 RNA repository. On a fresh checkout they can arrive as ~130-byte text stubs
 rather than the real binary, and every downstream failure would then be
 mysterious. These guards turn that into one legible error at startup.
+
+Only the precompute scripts touch those LFS objects. The serving app reads its
+own cache and nothing else, which is why the two required-artifact lists have
+no overlap.
 """
 
 from __future__ import annotations
@@ -51,10 +55,16 @@ PRECOMPUTE_REQUIRED = [
     ("canonical gene list", paths.CANONICAL_GENES_CSV),
 ]
 
+# What the serving app genuinely opens. It draws a precomputed map and never
+# needs a 512-d vector, so neither the 963 MB memmap nor the OSDR embeddings
+# appear here - listing them made a machine with only the cache fail preflight
+# for artifacts it would never have read.
+#
+# points_meta is first because it is read first: layout.control_rail() calls
+# data.counts() while the layout is still being built, so a missing identity
+# table used to sail past preflight and crash during startup instead.
 APP_REQUIRED = [
-    ("ARCHS4 embedding memmap", paths.ARCHS4_MMAP),
-    ("ARCHS4 sample locations", paths.ARCHS4_LOCATIONS),
-    ("OSDR embeddings", paths.OSDR_EMBEDDINGS_NPY),
+    ("point identity table", paths.POINTS_META_PARQUET),
     ("OSDR metadata", paths.OSDR_METADATA_PARQUET),
     ("PCA 2D coordinates", paths.COORDS_PCA2),
 ]

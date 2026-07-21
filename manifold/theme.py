@@ -55,8 +55,25 @@ CATEGORICAL = [
     "#7d9a3c",  # 10 olive
     "#d84f96",  # 11 pink
 ]
-OTHER_COLOR = "#7f8ea3"  # neutral grey for the "Other" bucket
-ARCHS4_NEUTRAL = "#5f7391"  # ARCHS4 background when colored by an OSDR-only field
+# The neutral end of the palette. Two greys, because "Other" and "Unknown" are
+# different answers: something was recorded and could not be placed, versus
+# nothing was recorded at all. Unknown is the dimmer of the two so absence
+# recedes furthest.
+OTHER_COLOR = "#7f8ea3"
+UNKNOWN_COLOR = "#56657a"
+UNKNOWN_LABEL = "Unknown"
+
+
+def residual_color(label: str) -> str:
+    """Grey for a category that carries no information."""
+    return UNKNOWN_COLOR if label == UNKNOWN_LABEL else OTHER_COLOR
+
+# ARCHS4 drawn purely as spatial context, when the selected field describes only
+# OSDR and there is no density raster to carry the shape (3-D, or the underlay
+# switched off). Deliberately close to the plot background: it must read as
+# scenery rather than as a category, because the whole point of the context
+# state is that these points have no value under this field.
+ARCHS4_CONTEXT = "#43597c"
 
 # OSDR overlay marker: distinct symbol with a white ring so it pops above cloud.
 OSDR_SYMBOL = "diamond"
@@ -65,16 +82,6 @@ OSDR_OUTLINE = "#ffffff"
 # against the cool ARCHS4 palette, so the spaceflight corpus stays findable
 # without competing for a categorical slot.
 OSDR_HIGHLIGHT = "#f2a03d"
-
-# Binary spaceflight coloring uses two of the most-separated slots.
-SPACEFLIGHT_COLORS = {
-    "Space Flight": "#e66767",  # red - the treatment
-    "Ground Control": "#3987e5",  # blue - the control
-}
-SPECIES_COLORS = {
-    "human": "#3987e5",
-    "mouse": "#d95926",
-}
 
 
 def color_for_index(i: int) -> str:
@@ -101,7 +108,10 @@ def base_figure_layout(is_3d: bool = False) -> dict:
         font=dict(color=PLOT_TEXT, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
         margin=dict(l=0, r=0, t=0, b=0),
         showlegend=False,
-        dragmode="lasso",
+        # Pan, not select. There is no selection feature: the map is read, not
+        # queried, and a drag that draws a marquee doing nothing would be a
+        # promise the app does not keep. scrollZoom supplies the zoom.
+        dragmode="pan",
         hovermode="closest",
         uirevision="keep",
     )

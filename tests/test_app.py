@@ -1,4 +1,4 @@
-"""The serving app: layout wiring, callback plumbing, and readout rendering.
+"""The serving app: layout wiring, callback plumbing, and the coverage readout.
 
 A Dash app fails at runtime, in the browser, when a callback names a component
 that does not exist - there is no import-time check. These tests do that check
@@ -11,12 +11,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import numpy as np
 import pytest
 from dash import html
 
 import app_manifold
-from manifold import callbacks, coherence, data, layout, paths, preflight, theme
+from manifold import callbacks, colorby, data, layout, paths, preflight, theme
 
 
 # --- Layout / callback wiring ---------------------------------------------
@@ -60,25 +59,19 @@ def test_every_callback_target_exists_in_the_layout(app):
     assert not missing, f"callbacks reference components not in the layout: {sorted(missing)}"
 
 
-def test_the_graph_and_readout_exist(app):
+def test_the_required_controls_exist(app):
     ids = {getattr(c, "id", None) for c in _walk(app.layout)}
-    for required in ("manifold-graph", "readout-body", "color-by", "method",
-                     "dims", "layers", "budget", "plot-badges", "legend"):
+    for required in ("manifold-graph", "color-by", "coverage", "color-by-hint",
+                     "method", "dims", "layers", "budget", "plot-badges", "legend"):
         assert required in ids, f"layout is missing #{required}"
 
 
-def test_color_by_options_are_all_renderable(corpus):
-    """Every option the menu offers must actually produce a figure."""
-    for opt in layout.color_by_options():
-        fig, legend, badges = __import__("manifold.render", fromlist=["render"]).build_figure(
-            "pca", "2d", opt["value"], ["archs4", "osdr", "density"], 1000, None)
-        assert len(fig.data) > 0, f"color-by {opt['value']} drew nothing"
-
-
-def test_archs4_tissue_option_hidden_until_the_join_exists(corpus):
-    assert not data.archs4_tissue_available()
-    values = {o["value"] for o in layout.color_by_options()}
-    assert "archs4_tissue" not in values
+def test_the_selection_readout_is_gone(app):
+    """The lasso feature was removed; no part of its panel may survive."""
+    ids = {getattr(c, "id", None) for c in _walk(app.layout)}
+    assert "readout-body" not in ids and "readout" not in ids
+    classes = {getattr(c, "className", "") for c in _walk(app.layout)}
+    assert not any("bm-readout" in str(c) for c in classes)
 
 
 def test_legend_parts_are_static_so_dash_can_validate_them(app):
@@ -102,7 +95,7 @@ def test_every_output_has_exactly_one_writer(app):
 
 def test_legend_search_filters_the_rendered_rows():
     """The filter box has to actually filter - it was inert."""
-    store = {"title": "Study (OSDR)", "items": [
+    store = {"title": "Study", "items": [
         {"label": "OSD-100", "color": "#111", "count": 5},
         {"label": "OSD-200", "color": "#222", "count": 3},
         {"label": "Other", "color": "#333", "count": 1},
@@ -118,24 +111,20 @@ def test_legend_filter_survives_an_empty_store():
     assert callbacks.filtered_legend_rows(None, None) == []
 
 
-def test_readout_clears_when_the_view_changes(corpus):
-    """A statistic for a lasso that is no longer on screen is worse than none."""
-    sel = {"points": [{"customdata": [corpus["n_archs4"] + i]} for i in range(30)]}
+def test_graph_offers_no_selection_tool(app):
+    """Both selection tools must be gone from the modebar and the drag mode.
 
-    kept = callbacks.readout_for(sel, triggered_id="manifold-graph")
-    assert "No points selected" not in _readout_text(kept)
-
-    for control in ("color-by", "method", "dims", "budget", "layers"):
-        cleared = callbacks.readout_for(sel, triggered_id=control)
-        assert "No points selected" in _readout_text(cleared), (
-            f"readout survived a change to {control}")
-
-
-def test_graph_config_disables_the_plotly_logo_and_keeps_lasso(app):
+    Leaving lasso2d enabled would let a user draw a marquee that silently does
+    nothing - a promise the app no longer keeps. Note the old config removed
+    box-select but not the lasso, so this needs asserting, not assuming.
+    """
     graph = next(c for c in _walk(app.layout) if getattr(c, "id", None) == "manifold-graph")
     assert graph.config["displaylogo"] is False
     assert graph.config["scrollZoom"] is True
-    assert theme.base_figure_layout()["dragmode"] == "lasso"
+    removed = set(graph.config["modeBarButtonsToRemove"])
+    assert {"lasso2d", "select2d"} <= removed
+    for is_3d in (False, True):
+        assert theme.base_figure_layout(is_3d)["dragmode"] == "pan"
 
 
 # --- Viewport interpretation ----------------------------------------------
@@ -157,74 +146,11 @@ def test_autorange_resets_the_viewport():
 
 def test_non_zoom_events_leave_the_sample_alone():
     """A hover or dragmode change must not trigger a resample."""
-    assert callbacks._viewport_from_relayout({"dragmode": "lasso"}) == "unchanged"
+    assert callbacks._viewport_from_relayout({"dragmode": "pan"}) == "unchanged"
     assert callbacks._viewport_from_relayout({"hovermode": "closest"}) == "unchanged"
 
 
 # --- Selection extraction -------------------------------------------------
-
-def test_selection_indices_reads_customdata():
-    sel = {"points": [{"customdata": [5]}, {"customdata": [9]}, {"customdata": [5]}]}
-    assert list(callbacks.selection_indices(sel)) == [5, 9, 5]
-
-
-def test_selection_indices_skips_points_without_customdata():
-    sel = {"points": [{"customdata": [1]}, {"pointIndex": 3}, {"customdata": None}]}
-    assert list(callbacks.selection_indices(sel)) == [1]
-
-
-def test_selection_indices_handles_empty_and_missing():
-    for empty in (None, {}, {"points": []}):
-        assert len(callbacks.selection_indices(empty)) == 0
-
-
-def test_selection_indices_accepts_a_scalar_customdata():
-    assert list(callbacks.selection_indices({"points": [{"customdata": 7}]})) == [7]
-
-
-# --- Readout rendering ----------------------------------------------------
-
-def _readout_text(component) -> str:
-    """Flatten a Dash component tree to its visible text."""
-    if isinstance(component, str):
-        return component
-    if isinstance(component, (list, tuple)):
-        return " ".join(_readout_text(c) for c in component)
-    children = getattr(component, "children", None)
-    return _readout_text(children) if children is not None else ""
-
-
-def test_readout_renders_a_coherent_selection(corpus):
-    n_archs4 = corpus["n_archs4"]
-    sel = np.where(corpus["osdr_cluster"] == 0)[0] + n_archs4
-    result = coherence.analyze_selection(sel)
-    text = _readout_text(callbacks._render_readout(result))
-
-    assert "Coherent" in text
-    assert "Cohesion z" in text and "kNN-purity" in text
-    assert "Enriched features" in text
-
-
-def test_readout_renders_the_honest_negative(corpus):
-    result = {
-        "status": "ok", "n": 40, "n_archs4": 40, "n_osdr": 0,
-        "cohesion": {"obs": 0.1, "null_mean": 0.1, "null_std": 0.01, "z": 0.2, "emp_p": 0.5},
-        "knn": None, "enrichment": [], "batch": None, "cross_dataset": False,
-        "cohesive": False, "has_enrichment": False,
-        "verdict": "This selection resembles a random draw.", "verdict_class": "null",
-    }
-    text = _readout_text(callbacks._render_readout(result))
-    assert "random draw" in text
-    assert "No categorical feature enriched" in text
-
-
-def test_readout_refuses_a_tiny_selection(corpus):
-    result = coherence.analyze_selection(np.arange(corpus["n_archs4"],
-                                                   corpus["n_archs4"] + 3))
-    text = _readout_text(callbacks._render_readout(result))
-    assert "3 point" in text
-    assert str(coherence.MIN_SELECTION) in text
-
 
 def test_bold_markup_is_parsed_not_injected():
     parts = callbacks._html_with_bold("ARCHS4 live: <b>100,000</b> pts")
@@ -291,3 +217,65 @@ def test_preflight_passes_for_a_real_file(tmp_path):
     real.write_bytes(b"\x00" * 8192)
     assert not preflight.is_lfs_pointer(real)
     assert preflight.check_artifacts([("real", real)]) == []
+
+
+# --- The coverage readout ---------------------------------------------------
+
+def _text(component) -> str:
+    """Flatten a Dash component tree to its visible text."""
+    if isinstance(component, str):
+        return component
+    if isinstance(component, (list, tuple)):
+        return " ".join(_text(c) for c in component)
+    children = getattr(component, "children", None)
+    return _text(children) if children is not None else ""
+
+
+def test_coverage_states_the_exact_point_count(corpus):
+    """The answer to "why is most of my map not coloured?", given up front."""
+    text = _text(callbacks.coverage_children("flight_status"))
+    assert f"{corpus['n_osdr']:,}" in text
+    assert f"{corpus['total']:,}" in text
+    assert "density" in text.lower()
+
+
+def test_coverage_says_so_when_a_field_paints_everything(corpus):
+    text = _text(callbacks.coverage_children("species"))
+    assert f"{corpus['total']:,}" in text
+    assert "all" in text.lower()
+
+
+def test_coverage_bar_is_amber_only_for_a_partial_field(corpus):
+    def fill_class(key):
+        bar = callbacks.coverage_children(key)[0]
+        return bar.children.className
+
+    assert "partial" not in fill_class("species")
+    assert "partial" in fill_class("flight_status")
+
+
+def test_coverage_offers_the_fix_when_the_join_is_missing(
+        corpus, without_archs4_metadata):
+    text = _text(callbacks.coverage_children("tissue"))
+    assert "fetch_archs4_meta" in text
+
+
+def test_coverage_shows_no_fix_when_nothing_is_missing(corpus):
+    assert "fetch_archs4_meta" not in _text(callbacks.coverage_children("tissue"))
+
+
+def test_every_field_has_a_hint_or_deliberately_none(corpus):
+    """A hint is optional, but it must be a string the layout can render."""
+    for spec in colorby.REGISTRY:
+        assert isinstance(spec.hint, str)
+
+
+def test_the_batch_effect_caution_is_still_disclosed_somewhere(app):
+    """Removing the readout deleted the only place this was ever said.
+
+    The measured 54x cross-corpus effect is a property of the map, not of any
+    selection, so losing the panel must not lose the warning.
+    """
+    text = _text(app.layout)
+    assert "54x" in text
+    assert "corpora" in text.lower()

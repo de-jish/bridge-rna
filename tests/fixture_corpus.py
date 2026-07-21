@@ -41,6 +41,14 @@ HABITATS = ["Rodent Habitat", "Habitat Cage Unit (HCU)", "Vivarium Cage"]
 DIETS = ["Nutrient Upgraded Rodent Food Bar (NuRFB)", "Charles River Formula 1 (CRF-1)"]
 SPACEFLIGHT = ["Space Flight", "Ground Control", "Basal Control"]
 
+# ARCHS4's register is GEO free text, not a controlled vocabulary - which is the
+# whole reason manifold/tissue.py exists. These are written raw and mapped
+# through the real canonicalizer, so the fixture tests the mapping rather than
+# assuming it. Chosen to overlap the OSDR vocabulary above, since a shared
+# bucket for both corpora is what the "Tissue" color-by is for.
+ARCHS4_SOURCES = ["liver", "whole blood", "Brain cortex", "HeLa",
+                  "left kidney", "skeletal muscle biopsy"]
+
 
 def _cluster_vectors(
     rng: np.random.Generator,
@@ -66,13 +74,14 @@ def _cluster_vectors(
     return vecs.astype(np.float32), cluster_id
 
 
-def build_bridge_rna_stub(root: Path, n_archs4: int, seed: int = 7) -> np.ndarray:
+def build_bridge_rna_stub(root: Path, n_archs4: int,
+                          seed: int = 7) -> tuple[np.ndarray, np.ndarray]:
     """Write a miniature stand-in for the Bridge RNA ARCHS4 artifacts.
 
-    Produces the three files ``manifold.data`` and ``build_projections`` open:
-    the float16 embedding memmap, ``sample_locations.parquet``, and
-    ``embedding_manifest.json``. Returns the float32 vectors that were written,
-    so a caller can derive ground-truth coordinates from the same numbers.
+    Produces the three files ``build_projections`` opens: the float16 embedding
+    memmap, ``sample_locations.parquet``, and ``embedding_manifest.json``.
+    Returns ``(vectors, cluster_id)`` so a caller can derive both ground-truth
+    coordinates and cluster-correlated metadata from the same numbers.
     """
     rng = np.random.default_rng(seed)
     d = root / "archs4_sample_embeddings_full"
@@ -118,17 +127,16 @@ def build_bridge_rna_stub(root: Path, n_archs4: int, seed: int = 7) -> np.ndarra
         p.parent.mkdir(parents=True, exist_ok=True)
         if not p.exists():
             p.write_bytes(b"stub" * 2000)  # > 4096 B so the LFS guard passes
-    return vecs
+    return vecs, cluster_id
 
 
 def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
-                  with_umap, with_hnsw) -> dict:
-    """Write the coordinate, identity, density, and index artifacts.
+                  with_umap) -> dict:
+    """Write the coordinate, identity, and density artifacts.
 
     Coordinates are a genuine PCA of the L2-normalized joint corpus rather than
-    random numbers, so the 2D layout actually reflects the 512-d structure and a
-    lasso drawn around a visual cluster selects a real cluster - which is what
-    makes an end-to-end selection test meaningful.
+    random numbers, so the 2D layout actually reflects the 512-d structure and
+    what the tests measure about the picture is a property of the data.
     """
     from sklearn.decomposition import PCA
 
@@ -185,16 +193,6 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
         _write_coords(u3, cache_dir / "coords_umap3.parquet")
         stats["density_umap2"] = _write_density(u2, cache_dir / "density" / "umap2.png")
 
-    if with_hnsw:
-        import hnswlib
-
-        index = hnswlib.Index(space="cosine", dim=EMB_DIM)
-        index.init_index(max_elements=total, ef_construction=100, M=16)
-        index.add_items(np.vstack([archs4_vecs, osdr_vecs]).astype(np.float32),
-                        np.arange(total))
-        index.set_ef(64)
-        index.save_index(str(cache_dir / "joint_cosine.hnsw"))
-
     (cache_dir / "projection_stats.json").write_text(json.dumps(stats, indent=2))
     return {"n_archs4": n_archs4, "n_osdr": n_osdr, "total": total,
             "osdr_cluster": osdr_cluster, "coords": coords3, "stats": stats}
@@ -225,8 +223,39 @@ def _write_density(coords2d: np.ndarray, path: Path, res: int = 128) -> dict:
     return {"x0": xlo, "x1": xhi, "y0": ylo, "y1": yhi}
 
 
+def _write_archs4_metadata(cache_dir: Path, cluster_id: np.ndarray) -> None:
+    """A stand-in for the GEO metadata join, keyed to the latent clusters.
+
+    Tissue tracks cluster identity so the ARCHS4 half of the shared "Tissue"
+    color-by has real structure to find, exactly as species does. The raw values
+    are written in ARCHS4's own free-text register ("liver", "whole blood") and
+    canonicalized through ``manifold.tissue`` here, so the fixture exercises the
+    real mapping rather than pre-baking the answer.
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from manifold import tissue as tissue_map
+
+    n = len(cluster_id)
+    raw = [ARCHS4_SOURCES[int(c) % len(ARCHS4_SOURCES)] for c in cluster_id]
+    # A slice with no usable label at all, so the Unknown path is always covered.
+    for i in range(0, n, 37):
+        raw[i] = ""
+    pd.DataFrame({
+        "global_index": np.arange(n, dtype=np.int32),
+        "geo_accession": [f"GSM{9000000 + i}" for i in range(n)],
+        "series_id": [f"GSE{5000 + int(c)}" for c in cluster_id],
+        "title": [f"sample {i}" for i in range(n)],
+        "source_name": raw,
+        "characteristics": [f"tissue: {r}" if r else "" for r in raw],
+        "tissue": [tissue_map.canonical_tissue(r) for r in raw],
+    }).to_parquet(cache_dir / "archs4_metadata.parquet", index=False)
+
+
 def build_all(root: Path, n_archs4: int = 4000, n_osdr: int = 300,
-              seed: int = 7, with_umap: bool = True, with_hnsw: bool = True) -> dict:
+              seed: int = 7, with_umap: bool = True,
+              with_archs4_meta: bool = True) -> dict:
     """Build both halves of the fixture under ``root`` and return a descriptor.
 
     ``root/bridge_rna`` stands in for the Bridge RNA repository and
@@ -238,10 +267,12 @@ def build_all(root: Path, n_archs4: int = 4000, n_osdr: int = 300,
     cache_dir = root / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    archs4_vecs = build_bridge_rna_stub(rna_root, n_archs4, seed=seed)
+    archs4_vecs, archs4_cluster = build_bridge_rna_stub(rna_root, n_archs4, seed=seed)
     loc = pd.read_parquet(rna_root / "archs4_sample_embeddings_full" / "sample_locations.parquet")
     np.save(cache_dir / "_archs4_species.npy",
             loc["species_id"].to_numpy().astype(np.int8))
+    if with_archs4_meta:
+        _write_archs4_metadata(cache_dir, archs4_cluster)
 
     rng = np.random.default_rng(seed + 1)
     osdr_vecs, osdr_cluster = _cluster_vectors(rng, n_osdr, n_clusters=4, spread=0.28)
@@ -263,9 +294,10 @@ def build_all(root: Path, n_archs4: int = 4000, n_osdr: int = 300,
     meta.to_parquet(cache_dir / "osdr_metadata.parquet", index=False)
 
     desc = _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
-                         with_umap, with_hnsw)
+                         with_umap)
     (cache_dir / "_archs4_species.npy").unlink(missing_ok=True)
     desc["bridge_rna_root"] = rna_root
     desc["cache_dir"] = cache_dir
     desc["osdr_metadata"] = meta
+    desc["archs4_cluster"] = archs4_cluster
     return desc

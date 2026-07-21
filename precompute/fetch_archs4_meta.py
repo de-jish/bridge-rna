@@ -1,35 +1,64 @@
 #!/usr/bin/env python3
-"""Extract per-GSM tissue metadata for the ARCHS4 corpus into a parquet.
-
-The local ARCHS4 artifacts carry only ``geo_accession`` and ``species_id``, so
-until this step runs the 940,455-point background cloud can only be colored by
-species. Tissue lives in the ARCHS4 gene-level HDF5 files, which are tens of GB
-each and are downloaded separately from https://archs4.org/download.
+"""Fetch per-sample GEO metadata for the 940,455 ARCHS4 points.
 
     python precompute/fetch_archs4_meta.py
 
-Output: ``cache/archs4_metadata.parquet`` with one row per ARCHS4 point, in the
-same order as ``sample_locations.parquet`` (and therefore the same order as the
-first N rows of every other Bridge Manifold artifact).
+Output: ``cache/archs4_metadata.parquet``, one row per ARCHS4 point in the fixed
+global order, carrying ``geo_accession``, ``series_id``, ``title``,
+``source_name``, ``characteristics`` and the derived ``tissue`` bucket.
 
-Why this reads the HDF5 directly rather than calling Bridge RNA's
-``fetch_archs4_metadata``: that helper is built for retrieval, where a handful
-of accessions come back from a top-k query, and it looks samples up by
-accession. Asking it for all 940,455 accessions turns a bulk column read into
-close to a million lookups. The metadata group is a set of plain 1-D string
-datasets a few hundred MB in total, so this reads the columns whole and joins in
-pandas. ``archs4py`` remains the fallback when a direct read is not possible.
+Why this does not read the ARCHS4 HDF5 files
+--------------------------------------------
+The obvious route - and the one this script used to take - is the gene-level
+HDF5 files from archs4.org, where per-sample metadata lives in small 1-D
+datasets under ``meta/samples/``. That route works but is a bad trade, and the
+alternatives were measured rather than assumed:
 
-This step is optional. Nothing else in the pipeline depends on it, and the
-serving app checks for the parquet and degrades to species-only coloring with a
-visible note when it is absent.
+  * Full download: the current human build is 62.3 GB and mouse 50.7 GB. For a
+    few hundred MB of strings. This is what kept the ARCHS4 cloud grey.
+  * Partial read over HTTP range requests (fsspec + h5py): genuinely works, and
+    the whole ``meta/samples`` group is enumerable in ~18 s. But the fields are
+    gzip-chunked vlen strings, so one field costs ~5 min and ~272 MB of
+    transfer; the six useful fields across both species run to hours.
+  * The Maayan Lab sigpy JSON API, used here: **35 s, 39 requests, 216 MB, and
+    99.9% of the local corpus.** Three orders of magnitude better than either
+    HDF5 route for exactly the same information.
+
+Version skew was the risk worth checking, since these embeddings came from the
+older ARCHS4 v2.5 build. Measured coverage against the current release is
+99.911% (human 99.851%, mouse 99.982%), confirmed independently by a partial
+HDF5 read of ``meta/samples/geo_accession`` off the 62 GB remote file - both
+methods return exactly 509,949 human matches.
+
+The 839 unresolved samples are *not* GEO withdrawals, and it is worth being
+precise about that because the obvious explanation is wrong: they are present
+with full metadata in the release-matched v2.5 metadata files, and absent from
+the newer, larger v2.latest that this API serves. ARCHS4 releases are therefore
+not append-only - a rebuild can drop samples. Those 839 points get an
+``Unknown`` tissue and an empty series rather than being dropped or guessed at,
+which is 0.089% of the corpus.
+
+Closing that last 0.089% is possible but not worth it. ARCHS4 publishes
+metadata-only HDF5 files under *versioned* names - ``human_meta_v2.5.h5``
+(311.8 MB) and ``mouse_meta_v2.5.h5`` (350.9 MB); the unversioned "latest"
+spellings 403, which is why they are easy to miss. Reading those gives exactly
+100.000% coverage against this corpus and is release-matched. The cost is 663 MB
+and roughly 8.5 minutes against 216 MB and 35 seconds, plus an h5py dependency
+the serving app does not otherwise need. For a colour-by, 0.089% of points
+reading "Unknown" is not worth 15x the build time; if this ever needs to be a
+gate rather than a colour, switch to the versioned files and assert 100%.
+
+This step needs a network connection and nothing else - no h5py, no archs4py,
+no multi-GB download. It is still optional: without it the app colors ARCHS4 by
+species and by unsupervised embedding cluster, and the tissue color-by is
+offered but disabled with the reason attached.
 """
 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -37,180 +66,227 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from manifold import paths  # noqa: E402
+from manifold import paths, tissue as tissue_map  # noqa: E402
 
-# Candidate dataset names inside the ARCHS4 HDF5 metadata group. ARCHS4 has
-# moved these between releases, so each field lists the spellings seen in the
-# wild and the first one present wins.
-FIELD_CANDIDATES = {
-    "geo_accession": ["meta/samples/geo_accession", "meta/samples/Sample_geo_accession"],
-    "series": ["meta/samples/series_id", "meta/samples/Sample_series_id"],
-    "source": ["meta/samples/source_name_ch1", "meta/samples/Sample_source_name_ch1"],
-    "characteristics": ["meta/samples/characteristics_ch1",
-                        "meta/samples/Sample_characteristics_ch1"],
-    "title": ["meta/samples/title", "meta/samples/Sample_title"],
-}
+API_URL = "https://maayanlab.cloud/sigpy/meta/samplemeta"
+# Measured: 25,000 accessions per request sustains ~24k-42k samples/s with no
+# rate limiting observed, and the whole corpus fits in 39 requests.
+BATCH = 25_000
+RETRIES = 3
+TIMEOUT = 600
 
-# Keys inside the free-text characteristics field that name a tissue.
-TISSUE_KEYS = ("tissue", "organ", "source tissue", "tissue type", "cell type", "cell line")
+# The API returns these four keys per accession.
+API_FIELDS = ("series", "title", "source", "characteristics")
 
-_TISSUE_RE = re.compile(
-    r"(?:^|;|\|)\s*(?:" + "|".join(re.escape(k) for k in TISSUE_KEYS) + r")\s*:\s*([^;|]+)",
-    re.IGNORECASE,
-)
+# A response that resolves almost nothing means the request was malformed, not
+# that GEO lost the samples. The endpoint answers HTTP 200 with an empty object
+# when the payload key is wrong (`gsm_ids` instead of `samples`), which would
+# otherwise write a fully-empty metadata table and silently grey the map.
+MIN_HIT_RATE = 0.5
 
-
-def _decode(arr) -> np.ndarray:
-    """HDF5 string datasets come back as bytes; normalize to a str array."""
-    out = np.asarray(arr)
-    if out.dtype.kind in ("S", "O"):
-        return np.array([v.decode("utf-8", "replace") if isinstance(v, bytes) else str(v)
-                         for v in out], dtype=object)
-    return out.astype(str)
+# Keys inside GEO's free-text characteristics that name a tissue, best evidence
+# first. `cell type` is deliberately last: it often carries a cell-line name
+# where `tissue` would have carried an organ.
+TISSUE_KEYS = ("tissue", "organ", "organ part", "source tissue", "tissue type",
+               "tissue region", "anatomical site", "body site", "cell type",
+               "celltype", "cell line")
 
 
-def read_h5_metadata(h5_path: Path, species_label: str) -> pd.DataFrame:
-    """Read the metadata columns out of one ARCHS4 gene HDF5 file."""
-    import h5py
-
-    with h5py.File(str(h5_path), "r") as f:
-        cols: dict[str, np.ndarray] = {}
-        for field, candidates in FIELD_CANDIDATES.items():
-            for key in candidates:
-                if key in f:
-                    cols[field] = _decode(f[key][:])
-                    break
-        if "geo_accession" not in cols:
-            raise KeyError(
-                f"{h5_path.name} has no recognizable sample accession dataset; "
-                f"tried {FIELD_CANDIDATES['geo_accession']}"
-            )
-    n = len(cols["geo_accession"])
-    df = pd.DataFrame({k: v for k, v in cols.items() if len(v) == n})
-    df["species"] = species_label
-    print(f"[meta] {h5_path.name}: {len(df):,} samples, columns {sorted(df.columns)}",
-          flush=True)
-    return df
+def log(msg: str) -> None:
+    print(f"[meta] {msg}", flush=True)
 
 
-def read_via_archs4py(h5_path: Path, accessions: list[str], species_label: str) -> pd.DataFrame:
-    """Fallback path when h5py is unavailable but archs4py is."""
-    import archs4py as a4
+def fetch_species(session, species: str, accessions: np.ndarray) -> dict[str, dict]:
+    """POST every accession for one species, in batches, with retries."""
+    out: dict[str, dict] = {}
+    total = len(accessions)
+    if total == 0:
+        return out
+    t0 = time.time()
+    for start in range(0, total, BATCH):
+        chunk = [str(a) for a in accessions[start:start + BATCH]]
+        payload = {"species": species, "samples": chunk}
+        for attempt in range(1, RETRIES + 1):
+            try:
+                resp = session.post(API_URL, json=payload, timeout=TIMEOUT)
+                resp.raise_for_status()
+                body = resp.json()
+                if not isinstance(body, dict):
+                    raise ValueError(f"expected a JSON object, got {type(body).__name__}")
+                out.update(body)
+                break
+            except Exception as exc:  # noqa: BLE001 - retried, then re-raised
+                if attempt == RETRIES:
+                    raise SystemExit(
+                        f"ABORT: {species} batch at offset {start} failed after "
+                        f"{RETRIES} attempts: {exc}\n"
+                        "The ARCHS4 metadata step needs network access to "
+                        f"{API_URL}. It is optional - the app runs without it."
+                    ) from exc
+                wait = 2 ** attempt
+                log(f"  retry {attempt}/{RETRIES} for {species} offset {start} "
+                    f"in {wait}s ({exc})")
+                time.sleep(wait)
+        log(f"  {species}: {min(start + BATCH, total):,}/{total:,} "
+            f"({time.time() - t0:.1f}s)")
+    return out
 
-    df = a4.meta.samples(str(h5_path), accessions)
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return pd.DataFrame()
-    if "geo_accession" not in df.columns:
-        df = df.reset_index().rename(columns={"index": "geo_accession"})
-    df["species"] = species_label
-    return df
+
+def first_series(value: object) -> str:
+    """The primary GSE for a sample.
+
+    210,217 samples belong to several series and the API returns them
+    comma-separated. The first is the submitting series, which is the one that
+    defines the batch.
+
+    The isna guard is load-bearing, not defensive: the 839 accessions the API
+    cannot resolve arrive here as float NaN, and `value or ""` does not catch
+    them because NaN is truthy. Without it they became the literal string "nan",
+    which reads as a real GSE, becomes a phantom series, and overstates coverage
+    to a clean 100%.
+    """
+    if value is None or (isinstance(value, float) and value != value):
+        return ""
+    s = str(value).strip()
+    if not s or s.lower() in ("nan", "none"):
+        return ""
+    return s.split(",")[0].strip()
+
+
+def _characteristics_value(text: str, key: str) -> str:
+    """Pull ``key: value`` out of GEO's comma/semicolon-delimited characteristics.
+
+    The field is free text with no escaping, so this is deliberately simple:
+    find the key at a delimiter boundary, take everything up to the next
+    delimiter. Anything ambiguous falls through to the next key and ultimately
+    to source_name.
+    """
+    low = text.lower()
+    at = 0
+    while True:
+        at = low.find(key + ":", at)
+        if at < 0:
+            return ""
+        # Must sit at the start or just after a delimiter, so "cell type:" does
+        # not match inside "single cell type:".
+        if at == 0 or low[at - 1] in ",;|":
+            tail = text[at + len(key) + 1:]
+            for delim in (",", ";", "|"):
+                cut = tail.find(delim)
+                if cut >= 0:
+                    tail = tail[:cut]
+            return tail.strip()
+        at += 1
 
 
 def derive_tissue(df: pd.DataFrame) -> pd.Series:
-    """Best-effort tissue label from the characteristics, then the source name.
+    """Canonical tissue bucket per sample, from characteristics then source_name.
 
-    ARCHS4 has no curated tissue column; the information is embedded in GEO's
-    free-text ``characteristics_ch1`` as ``key: value`` pairs. Parsing it is
-    inherently lossy, so anything unrecognized becomes "Unknown" rather than a
-    guess - an honestly empty label beats a confidently wrong one on a plot
-    people will read biology off.
+    Both corpora go through ``manifold.tissue``, so an ARCHS4 liver and an OSDR
+    "Left Lobe of the Liver" land in the same bucket and one color-by can paint
+    the whole map.
     """
-    n = len(df)
-    tissue = pd.Series(["Unknown"] * n, index=df.index, dtype=object)
+    chars = df["characteristics"].astype(str).fillna("")
+    source = df["source_name"].astype(str).fillna("")
 
-    if "characteristics" in df.columns:
-        extracted = df["characteristics"].astype(str).str.extract(_TISSUE_RE, expand=False)
-        tissue = extracted.fillna(tissue)
+    # Extract each candidate key once across the whole column, then let
+    # coalesce_tissue pick the best-evidence non-empty answer per row.
+    columns = [chars.map(lambda t, k=key: _characteristics_value(t, k))
+               for key in TISSUE_KEYS]
+    columns.append(source)
 
-    if "source" in df.columns:
-        src = df["source"].astype(str).str.strip()
-        blank = tissue.isna() | tissue.astype(str).str.strip().isin(["", "Unknown", "nan"])
-        tissue = tissue.where(~blank, src)
-
-    # fillna before the replaces: pandas 3.0 keeps missing values as NA through
-    # astype(str), so they would never match the literal "nan" key below.
-    tissue = (
-        tissue.astype(str)
-        .fillna("Unknown")
-        .str.strip()
-        .str.replace(r"\s+", " ", regex=True)
-        .replace({"": "Unknown", "nan": "Unknown", "None": "Unknown", "NA": "Unknown"})
-        .fillna("Unknown")
+    stacked = pd.concat(columns, axis=1)
+    return pd.Series(
+        [tissue_map.coalesce_tissue(*row) for row in stacked.itertuples(index=False)],
+        index=df.index, dtype=object,
     )
-    # Fold casing variants onto the most common spelling, as for OSDR fields.
-    counts = tissue.value_counts()
-    canonical: dict[str, str] = {}
-    for label in counts.index:
-        canonical.setdefault(str(label).casefold(), str(label))
-    return tissue.map(lambda v: canonical.get(str(v).casefold(), str(v)))
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Cache ARCHS4 per-GSM tissue metadata.")
-    ap.add_argument("--human-h5", type=Path, default=paths.ARCHS4_HUMAN_H5)
-    ap.add_argument("--mouse-h5", type=Path, default=paths.ARCHS4_MOUSE_H5)
+    ap = argparse.ArgumentParser(description="Cache ARCHS4 per-sample GEO metadata.")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="Debug: only annotate the first N ARCHS4 points.")
     args = ap.parse_args()
 
-    paths.ensure_cache_dirs()
+    try:
+        import requests
+    except ImportError:
+        raise SystemExit("ABORT: this step needs `requests` (python -m pip install requests).")
 
-    present = [(p, label) for p, label in
-               ((args.human_h5, "human"), (args.mouse_h5, "mouse")) if p.exists()]
-    if not present:
+    paths.ensure_cache_dirs()
+    if not paths.ARCHS4_GEO_PARQUET.exists() or not paths.POINTS_META_PARQUET.exists():
         raise SystemExit(
-            "No ARCHS4 gene HDF5 file found. Expected at least one of:\n"
-            f"  {args.human_h5}\n  {args.mouse_h5}\n"
-            "These are tens of GB and are not bundled with either repository.\n"
-            "Download them from https://archs4.org/download, then re-run.\n"
-            "This step is optional: without it the app colors ARCHS4 by species "
-            "only and says so in the UI."
+            "ABORT: run precompute/build_projections.py first - this step joins "
+            f"onto {paths.ARCHS4_GEO_PARQUET.name} and {paths.POINTS_META_PARQUET.name}."
         )
 
-    loc = pd.read_parquet(paths.ARCHS4_LOCATIONS).sort_values("global_index")
-    loc = loc.reset_index(drop=True)
-    accessions = loc["geo_accession"].astype(str).tolist()
-    print(f"[meta] {len(accessions):,} ARCHS4 accessions to annotate", flush=True)
+    geo = pd.read_parquet(paths.ARCHS4_GEO_PARQUET)["geo_accession"].astype(str).to_numpy()
+    pmeta = pd.read_parquet(paths.POINTS_META_PARQUET)
+    species_id = pmeta.loc[pmeta["dataset"] == 0, "species_id"].to_numpy()
+    if len(species_id) != len(geo):
+        raise SystemExit(
+            f"ABORT: {paths.ARCHS4_GEO_PARQUET.name} has {len(geo):,} rows but "
+            f"points_meta marks {len(species_id):,} ARCHS4 points. These are "
+            "joined positionally; rebuild both with build_projections.py."
+        )
+    if args.limit:
+        geo, species_id = geo[:args.limit], species_id[:args.limit]
 
-    try:
-        import h5py  # noqa: F401
-        frames = [read_h5_metadata(p, label) for p, label in present]
-    except ImportError:
-        print("[meta] h5py unavailable; falling back to archs4py lookups", flush=True)
-        try:
-            import archs4py  # noqa: F401
-        except ImportError:
-            raise SystemExit(
-                "Neither h5py nor archs4py is installed. Install one of them:\n"
-                "  python -m pip install h5py        # preferred, bulk column read\n"
-                "  python -m pip install archs4py    # fallback, per-accession lookup"
-            )
-        frames = [read_via_archs4py(p, accessions, label) for p, label in present]
+    log(f"{len(geo):,} ARCHS4 accessions to annotate via {API_URL}")
 
-    frames = [f for f in frames if not f.empty]
-    if not frames:
-        raise SystemExit("No metadata could be read from the ARCHS4 HDF5 files.")
+    t0 = time.time()
+    session = requests.Session()
+    records: dict[str, dict] = {}
+    for sid, species in ((0, "human"), (1, "mouse")):
+        subset = geo[species_id == sid]
+        log(f"{species}: {len(subset):,} accessions")
+        records.update(fetch_species(session, species, subset))
 
-    meta = pd.concat(frames, ignore_index=True)
-    meta["geo_accession"] = meta["geo_accession"].astype(str).str.strip()
-    meta = meta.drop_duplicates(subset="geo_accession", keep="first")
-    meta["tissue"] = derive_tissue(meta)
+    hit_rate = len(records) / max(len(geo), 1)
+    log(f"fetched {len(records):,} records in {time.time() - t0:.1f}s "
+        f"({hit_rate * 100:.3f}% of requested)")
+    if hit_rate < MIN_HIT_RATE:
+        raise SystemExit(
+            f"ABORT: the API resolved only {hit_rate * 100:.1f}% of the requested "
+            "accessions. That is a malformed request, not missing data - the "
+            "payload key must be `samples`. Nothing was written."
+        )
 
-    keep = [c for c in ("geo_accession", "tissue", "source", "series", "title", "species")
-            if c in meta.columns]
-    joined = loc[["global_index", "geo_accession"]].merge(
-        meta[keep], on="geo_accession", how="left")
-    joined["tissue"] = joined["tissue"].fillna("Unknown")
+    # Reindex onto the fixed global order. Never trust response order: the
+    # returned object silently omits misses, so positional assembly would shift
+    # every label after the first gap.
+    frame = pd.DataFrame(
+        [records.get(acc) or {} for acc in geo],
+        index=pd.RangeIndex(len(geo)),
+        columns=list(API_FIELDS),
+    )
+    out = pd.DataFrame({
+        "global_index": np.arange(len(geo), dtype=np.int32),
+        "geo_accession": geo,
+        "series_id": frame["series"].map(first_series).astype(str),
+        "title": frame["title"].fillna("").astype(str),
+        "source_name": frame["source"].fillna("").astype(str),
+        "characteristics": frame["characteristics"].fillna("").astype(str),
+    })
 
-    matched = int((joined["tissue"] != "Unknown").sum())
-    print(f"[meta] matched tissue for {matched:,}/{len(joined):,} "
-          f"({matched / len(joined) * 100:.1f}%)", flush=True)
-    top = joined["tissue"].value_counts().head(10)
-    for label, count in top.items():
-        print(f"        {label[:48]:50s} {count:,}", flush=True)
+    log("deriving canonical tissue buckets")
+    out["tissue"] = derive_tissue(out)
 
-    assert len(joined) == len(loc), "the join changed the row count; ordering is not safe"
-    joined.to_parquet(paths.ARCHS4_METADATA_PARQUET, index=False)
-    print(f"[done] wrote {paths.ARCHS4_METADATA_PARQUET.name} ({len(joined):,} rows)",
-          flush=True)
+    assert len(out) == len(geo), "the join changed the row count; ordering is not safe"
+
+    matched = int((out["series_id"] != "").sum())
+    placed = int((~out["tissue"].isin([tissue_map.UNKNOWN, tissue_map.OTHER])).sum())
+    log(f"metadata resolved for {matched:,}/{len(out):,} ({matched / len(out) * 100:.3f}%)")
+    log(f"tissue placed in an anatomical bucket for {placed:,}/{len(out):,} "
+        f"({placed / len(out) * 100:.1f}%)")
+    log(f"{out['series_id'].nunique():,} distinct GEO series")
+    log("top tissue buckets:")
+    for label, count in out["tissue"].value_counts().head(15).items():
+        log(f"        {str(label)[:32]:34s} {count:>9,}  {count / len(out) * 100:5.1f}%")
+
+    out.to_parquet(paths.ARCHS4_METADATA_PARQUET, index=False)
+    log(f"[done] wrote {paths.ARCHS4_METADATA_PARQUET.name} ({len(out):,} rows, "
+        f"{paths.ARCHS4_METADATA_PARQUET.stat().st_size / 1e6:.1f} MB)")
 
 
 if __name__ == "__main__":

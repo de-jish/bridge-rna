@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Bridge Manifold - the serving Dash app.
 
-Loads only precomputed artifacts (coordinate parquets, the ARCHS4 memmap, the
-hnswlib index) and draws them. It never runs the model or UMAP. Run the
-`precompute/` scripts first to build the cache.
+Loads only small precomputed artifacts (coordinate parquets, the point identity
+table, the OSDR labels, the ARCHS4 GEO metadata join, and the density rasters)
+and draws them. It never runs the model, never runs UMAP, and never opens the
+963 MB ARCHS4 embedding memmap, so BRIDGE_RNA_ROOT is needed to build the cache
+but not to serve it. Run the `precompute/` scripts first to build the cache.
 
     python app_manifold.py            # http://127.0.0.1:8051
 """
@@ -12,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 
-import dash
 from dash import Dash
 
 from manifold import callbacks, layout, paths, preflight

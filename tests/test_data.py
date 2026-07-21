@@ -1,8 +1,8 @@
-"""The data layer: global point order, vector gathers, and color-by lookups.
+"""The data layer: global point order and color-by lookups.
 
 These are the tests that matter most, because every defect they catch is silent.
-A point index that resolves to the wrong row does not raise; it just labels a
-liver sample as kidney and reports a confident, wrong statistic.
+A row that resolves to the wrong point does not raise; it just paints a liver
+sample with the kidney colour, and nothing on screen says so.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import numpy as np
 
 import pytest
 
-from manifold import data, paths
+from manifold import colorby, data, paths
 
 
 def test_global_order_is_archs4_then_osdr(corpus):
@@ -36,50 +36,6 @@ def test_every_artifact_shares_the_global_order(corpus):
             c = data.coords(method, dims)
             assert c.shape == (total, width), f"{method}/{dims} has shape {c.shape}"
     assert len(data.osdr_metadata()) == n_osdr
-    assert len(data.archs4_geo()) == n_archs4
-
-
-def test_normalized_vectors_resolve_the_right_rows(corpus):
-    """A gather over mixed corpora must place each vector at its request position.
-
-    The ARCHS4 branch sorts indices for memmap locality and then scatters the
-    results back. An inverted permutation there would silently return every
-    selected point's vector under a different point's identity.
-    """
-    n_archs4, n_osdr, total = data.counts()
-    rng = np.random.default_rng(3)
-    # Deliberately unsorted, with duplicates removed, spanning both corpora.
-    idx = np.concatenate([
-        rng.choice(n_archs4, size=25, replace=False),
-        rng.choice(np.arange(n_archs4, total), size=10, replace=False),
-    ])
-    rng.shuffle(idx)
-
-    got = data.normalized_vectors(idx)
-    assert got.shape == (len(idx), 512)
-    assert np.allclose(np.linalg.norm(got, axis=1), 1.0, atol=1e-5)
-
-    # Reference: fetch each index one at a time, which needs no permutation.
-    for pos, i in enumerate(idx):
-        one = data.normalized_vectors(np.array([i]))[0]
-        assert np.allclose(got[pos], one, atol=1e-6), f"row {pos} (index {i}) misplaced"
-
-
-def test_normalized_vectors_match_the_source_arrays(corpus):
-    """The gather reads the real memmap/npy, not a reordered copy of them."""
-    n_archs4, _, total = data.counts()
-    mm = data._archs4_memmap()
-    osdr = data._osdr_embeddings()
-
-    def unit(v):
-        return v / np.linalg.norm(v)
-
-    for i in (0, 1, n_archs4 - 1):
-        assert np.allclose(data.normalized_vectors(np.array([i]))[0],
-                           unit(np.asarray(mm[i], dtype=np.float32)), atol=1e-5)
-    for j in (0, 5, len(osdr) - 1):
-        assert np.allclose(data.normalized_vectors(np.array([n_archs4 + j]))[0],
-                           unit(osdr[j].astype(np.float32)), atol=1e-6)
 
 
 def test_species_labels_cover_the_whole_corpus(corpus):
@@ -92,7 +48,9 @@ def test_species_labels_cover_the_whole_corpus(corpus):
 
 def test_osdr_field_values_align_with_metadata_rows(corpus):
     n_osdr = corpus["n_osdr"]
-    for field in data.OSDR_FIELDS:
+    osdr_fields = [s.key for s in colorby.REGISTRY if s.scope == (colorby.OSDR,)]
+    assert osdr_fields, "no OSDR-only fields registered"
+    for field in osdr_fields:
         vals = data.osdr_field_values(field)
         assert len(vals) == n_osdr, f"{field} has {len(vals)} values for {n_osdr} points"
         assert vals.index[0] == 0 and vals.index[-1] == n_osdr - 1
@@ -130,7 +88,8 @@ def test_control_arms_stay_distinct_under_the_raw_field(corpus):
     them is fine for the headline contrast but must not be the only option, or
     real structure becomes invisible.
     """
-    assert "spaceflight" in data.OSDR_FIELDS and "flight_status" in data.OSDR_FIELDS
+    keys = {s.key for s in colorby.REGISTRY}
+    assert "spaceflight" in keys and "flight_status" in keys
     arms = set(data.osdr_field_values("spaceflight"))
     statuses = set(data.osdr_field_values("flight_status"))
     assert len(arms) >= len(statuses)
@@ -158,3 +117,30 @@ def test_cache_dir_is_the_fixture_not_the_repo():
     """Guard the guard: a leaked env override would make the suite test prod data."""
     assert "bridge-manifold-fixture-" in str(paths.CACHE_DIR)
     assert "bridge-manifold-fixture-" in str(paths.BRIDGE_RNA_ROOT)
+
+
+# --- Tissue loaders ---------------------------------------------------------
+
+def test_archs4_tissue_spans_the_archs4_block(corpus):
+    labels = data.archs4_tissue()
+    assert labels is not None, "the fixture writes a metadata join; it should load"
+    assert len(labels) == corpus["n_archs4"]
+
+
+def test_archs4_tissue_is_none_without_the_join(corpus, without_archs4_metadata):
+    assert data.archs4_tissue() is None
+
+
+def test_osdr_tissue_is_canonicalized_not_raw(corpus):
+    """OSDR's raw values are hyper-specific; the loader must fold them.
+
+    If this returned raw values, the "Tissue" color-by would put ARCHS4 and
+    OSDR in disjoint category sets and the shared legend would be a fiction.
+    """
+    from manifold import tissue
+
+    labels = data.osdr_tissue()
+    assert len(labels) == corpus["n_osdr"]
+    assert set(labels) <= set(tissue.BUCKETS)
+    raw = set(data.osdr_field_values("tissue"))
+    assert set(labels) != raw, "loader returned raw OSDR values, not buckets"

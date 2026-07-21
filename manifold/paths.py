@@ -48,19 +48,11 @@ COORDS_PCA3 = CACHE_DIR / "coords_pca3.parquet"
 COORDS_UMAP2 = CACHE_DIR / "coords_umap2.parquet"
 COORDS_UMAP3 = CACHE_DIR / "coords_umap3.parquet"
 
-# hnswlib cosine index over the full 512-d ARCHS4 + OSDR space.
-HNSW_INDEX = CACHE_DIR / "joint_cosine.hnsw"
-HNSW_META_PARQUET = CACHE_DIR / "joint_index_meta.parquet"
-
 # Datashader-style density rasters (built with numpy, no datashader dep).
 DENSITY_DIR = CACHE_DIR / "density"
 
 PROJECTION_STATS_JSON = CACHE_DIR / "projection_stats.json"
 
-# Exact per-corpus mean and covariance of the L2-normalized 512-d vectors. The
-# coherence null is built from these, so they describe the whole population
-# rather than a sample; see manifold/data.py:population_moments.
-POPULATION_MOMENTS_NPZ = CACHE_DIR / "population_moments.npz"
 
 # --- Bridge RNA source artifacts (read-only) -------------------------------
 CHECKPOINT = BRIDGE_RNA_ROOT / "checkpoints_performer" / "r7hnr92k" / "best_model.pt"
@@ -80,10 +72,10 @@ CANONICAL_GENES_CSV = (
     BRIDGE_RNA_ROOT / "data" / "archs4" / "train_orthologs" / "canonical_genes.csv"
 )
 
-# Optional ARCHS4 gene-level HDF5 files (tens of GB, usually absent). When
-# present, precompute/fetch_archs4_meta.py can add a tissue join.
-ARCHS4_HUMAN_H5 = BRIDGE_RNA_ROOT / "data" / "archs4" / "human_gene_v2.5.h5"
-ARCHS4_MOUSE_H5 = BRIDGE_RNA_ROOT / "data" / "archs4" / "mouse_gene_v2.5.h5"
+# Per-sample GEO metadata for the ARCHS4 corpus (series, title, source name,
+# characteristics, and the derived tissue bucket), fetched over the network by
+# precompute/fetch_archs4_meta.py. Optional: without it ARCHS4 colors by
+# species only, and the app says so rather than showing a grey cloud.
 ARCHS4_METADATA_PARQUET = CACHE_DIR / "archs4_metadata.parquet"
 
 

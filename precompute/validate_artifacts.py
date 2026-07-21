@@ -23,7 +23,7 @@ Three groups of checks:
    by biology.
 
     python precompute/validate_artifacts.py            # structural + invariant
-    python precompute/validate_artifacts.py --mixing   # also load the 2 GB index
+    python precompute/validate_artifacts.py --mixing   # also stream the memmap
 """
 from __future__ import annotations
 
@@ -114,10 +114,54 @@ def validate_structure() -> tuple[int, np.ndarray]:
     return total, is_osdr
 
 
-def validate_mixing(total: int) -> None:
-    """Stratified cross-corpus mixing. Loads the ~2 GB index, so it is opt-in."""
-    import hnswlib
+def _osdr_neighbours(n_a4: int, total: int, k: int):
+    """Exact top-k neighbours of every OSDR sample across the whole corpus.
 
+    Brute force, not an ANN index. There are only 2,108 queries, so one
+    streaming pass over the 963 MB memmap answers them exactly in well under a
+    minute - and an exact answer is what an honesty check should rest on. The
+    approximate index this replaced cost 2.07 GB on disk and was the app's
+    single largest artifact despite being read by nothing but this function.
+
+    Returns (labels, cosines), both (n_osdr, k), sorted by descending cosine.
+    """
+    manifest = json.loads(paths.ARCHS4_MANIFEST.read_text())
+    mm = np.memmap(paths.ARCHS4_MMAP, dtype=np.float16, mode="r",
+                   shape=(int(manifest["total_samples"]), 512))
+
+    emb = np.load(paths.OSDR_EMBEDDINGS_NPY).astype(np.float32)
+    emb /= np.linalg.norm(emb, axis=1, keepdims=True)
+    n = len(emb)
+
+    best_cos = np.full((n, 0), 0.0, dtype=np.float32)
+    best_lab = np.full((n, 0), 0, dtype=np.int64)
+
+    def merge(cos, lab):
+        """Keep the running top-k after folding in one block of candidates."""
+        nonlocal best_cos, best_lab
+        cos = np.concatenate([best_cos, cos], axis=1)
+        lab = np.concatenate([best_lab, lab], axis=1)
+        take = min(k, cos.shape[1])
+        part = np.argpartition(-cos, take - 1, axis=1)[:, :take]
+        rows = np.arange(n)[:, None]
+        cos, lab = cos[rows, part], lab[rows, part]
+        order = np.argsort(-cos, axis=1)
+        best_cos, best_lab = cos[rows, order], lab[rows, order]
+
+    block = 50_000
+    for start in range(0, n_a4, block):
+        stop = min(start + block, n_a4)
+        chunk = np.asarray(mm[start:stop], dtype=np.float32)
+        chunk /= np.linalg.norm(chunk, axis=1, keepdims=True)
+        merge(emb @ chunk.T, np.broadcast_to(
+            np.arange(start, stop), (n, stop - start)))
+    merge(emb @ emb.T, np.broadcast_to(
+        np.arange(n_a4, n_a4 + n), (n, n)))
+    return best_lab, best_cos, emb
+
+
+def validate_mixing(total: int) -> None:
+    """Stratified cross-corpus mixing. Streams the ARCHS4 memmap, so it is opt-in."""
     print("\n=== 6. cross-corpus mixing in 512-d, stratified ===")
     stats = json.loads(paths.PROJECTION_STATS_JSON.read_text())
     n_a4 = stats["n_archs4"]
@@ -126,16 +170,13 @@ def validate_mixing(total: int) -> None:
     study = meta["study"].astype(str).to_numpy()
     tissue = meta["tissue"].astype(str).to_numpy()
 
-    idx = hnswlib.Index(space="cosine", dim=512)
-    idx.load_index(str(paths.HNSW_INDEX), max_elements=total)
-    idx.set_ef(200)
-
-    emb = np.load(paths.OSDR_EMBEDDINGS_NPY).astype(np.float32)
-    emb /= np.linalg.norm(emb, axis=1, keepdims=True)
-    n = len(emb)
-
     K = 51  # one self-match plus 50
-    labels, dists = idx.knn_query(emb, k=K)
+    print(f"  computing exact top-{K} neighbours for every OSDR sample "
+          f"over {total:,} points")
+    labels, cosines, emb = _osdr_neighbours(n_a4, total, K)
+    n = len(emb)
+    # Downstream code was written against hnswlib's cosine *distance*.
+    dists = 1.0 - cosines
 
     cnt = {("same", "same"): 0, ("same", "diff"): 0,
            ("diff", "same"): 0, ("diff", "diff"): 0}
@@ -202,7 +243,8 @@ def validate_mixing(total: int) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--mixing", action="store_true",
-                    help="Also run the cross-corpus mixing analysis (loads the ~2 GB index).")
+                    help="Also run the cross-corpus mixing analysis (streams the "
+                         "963 MB ARCHS4 memmap; needs BRIDGE_RNA_ROOT).")
     args = ap.parse_args()
 
     total, _ = validate_structure()

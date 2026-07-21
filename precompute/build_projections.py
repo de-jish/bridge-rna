@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Phase 2+4: build the joint projection artifacts the serving app loads.
 
-Produces, for the union of ARCHS4 (940,455) and OSDR (2,896) embeddings:
+Produces, for the union of ARCHS4 (940,455) and OSDR (2,108) embeddings:
   - cache/coords_pca2.parquet, coords_pca3.parquet   (L2 -> IncrementalPCA-50)
   - cache/coords_umap2.parquet, coords_umap3.parquet  (landmark UMAP on PCA-50)
-  - cache/joint_cosine.hnsw (+ meta)                  (hnswlib cosine index, 512-d)
   - cache/density/*.png                               (numpy density rasters)
   - cache/projection_stats.json                       (variance, extents, timings)
 
@@ -221,63 +220,6 @@ def render_density(coords2d: np.ndarray, name: str, res: int = 2048) -> dict:
     return {"x0": float(xlo), "x1": float(xhi), "y0": float(ylo), "y1": float(yhi)}
 
 
-def build_population_moments(mm, n_archs4, osdr_norm, batch):
-    """Exact per-corpus mean and covariance of the L2-normalized vectors.
-
-    The lasso coherence null is built from these (see coherence._permutation_null),
-    and they must describe the whole population rather than a sample: an
-    estimate from a subsample leaves a fixed offset between the estimated and
-    the true mean, and since the null's spread shrinks as the selection grows,
-    that offset becomes a z-bias that grows without bound.
-
-    Computing them here means the serving app never has to stream 963 MB on the
-    user's first lasso.
-    """
-    log("computing exact population moments (mean + covariance) per corpus")
-    t0 = time.time()
-    out = {}
-
-    acc_sum = np.zeros(EMB_DIM, dtype=np.float64)
-    acc_outer = np.zeros((EMB_DIM, EMB_DIM), dtype=np.float64)
-    for s, e in chunks(n_archs4, batch):
-        block = l2_normalize(np.asarray(mm[s:e], dtype=np.float32)).astype(np.float64)
-        acc_sum += block.sum(axis=0)
-        acc_outer += block.T @ block
-    mu = acc_sum / n_archs4
-    out["archs4_mu"] = mu
-    out["archs4_cov"] = acc_outer / n_archs4 - np.outer(mu, mu)
-
-    o = osdr_norm.astype(np.float64)
-    mu_o = o.mean(axis=0)
-    out["osdr_mu"] = mu_o
-    out["osdr_cov"] = (o.T @ o) / len(o) - np.outer(mu_o, mu_o)
-
-    np.savez(paths.POPULATION_MOMENTS_NPZ, **out)
-    log(f"population moments done in {time.time()-t0:.0f}s -> "
-        f"{paths.POPULATION_MOMENTS_NPZ.name} "
-        f"(||mu_archs4||={np.linalg.norm(mu):.4f}, "
-        f"||mu_osdr||={np.linalg.norm(mu_o):.4f})")
-
-
-def build_hnsw(mm, n_archs4, osdr_norm, ef_construction, M):
-    import hnswlib
-
-    total = n_archs4 + len(osdr_norm)
-    log(f"building hnswlib cosine index over {total} points (M={M}, ef={ef_construction})")
-    index = hnswlib.Index(space="cosine", dim=EMB_DIM)
-    index.init_index(max_elements=total, ef_construction=ef_construction, M=M)
-    t0 = time.time()
-    batch = 50000
-    for s, e in chunks(n_archs4, batch):
-        block = np.asarray(mm[s:e], dtype=np.float32)  # cosine space normalizes internally
-        index.add_items(block, np.arange(s, e))
-        log(f"  index {e}/{n_archs4} ({time.time()-t0:.0f}s)")
-    index.add_items(osdr_norm.astype(np.float32), np.arange(n_archs4, total))
-    index.set_ef(64)
-    index.save_index(str(paths.HNSW_INDEX))
-    log(f"hnsw index built in {time.time()-t0:.0f}s -> {paths.HNSW_INDEX.name}")
-
-
 def rerender_density_only() -> None:
     """Redraw the density rasters from cached coordinates and refresh their extents.
 
@@ -304,7 +246,7 @@ def rerender_density_only() -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build joint PCA/UMAP/index/density artifacts.")
+    ap = argparse.ArgumentParser(description="Build joint PCA/UMAP/density artifacts.")
     ap.add_argument("--pca-fit-sample", type=int, default=60000)
     ap.add_argument("--umap-fit-sample", type=int, default=120000)
     ap.add_argument("--pca-components", type=int, default=50)
@@ -312,9 +254,6 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--archs4-limit", type=int, default=0, help="Debug: cap ARCHS4 rows.")
     ap.add_argument("--skip-umap", action="store_true")
-    ap.add_argument("--skip-hnsw", action="store_true",
-                    help="The index is ~2 GB on disk and resident in the serving "
-                         "app; skipping it only costs the kNN-purity statistic.")
     ap.add_argument("--density-only", action="store_true",
                     help="Re-render the density rasters from the cached coordinate "
                          "parquets and update their extents, then exit. For tuning "
@@ -361,6 +300,7 @@ def main() -> None:
         """Persist after every stage, so a later failure does not lose the earlier work."""
         paths.PROJECTION_STATS_JSON.write_text(json.dumps(stats, indent=2))
 
+
     # --- Identity table (dataset + src_index), fixed global order ----------
     dataset = np.concatenate([np.zeros(n_archs4, np.int8), np.ones(len(osdr_norm), np.int8)])
     src_index = np.concatenate([np.arange(n_archs4, dtype=np.int32),
@@ -375,9 +315,6 @@ def main() -> None:
     pd.DataFrame({"geo_accession": geo}).to_parquet(
         paths.ARCHS4_GEO_PARQUET, index=False)
     log("wrote points_meta.parquet + archs4_geo.parquet")
-
-    # --- Population moments (cheap, and the lasso null depends on them) -----
-    build_population_moments(mm, n_archs4, osdr_norm, args.batch)
 
     # --- PCA ---------------------------------------------------------------
     rng = np.random.default_rng(args.seed)
@@ -402,10 +339,6 @@ def main() -> None:
         umap3 = run_umap(pca_all, n_archs4, species, 3, args.umap_fit_sample, args.seed, args.batch)
         write_coords(umap3, paths.COORDS_UMAP3)
         save_stats()
-
-    # --- hnswlib cosine index ---------------------------------------------
-    if not args.skip_hnsw:
-        build_hnsw(mm, n_archs4, osdr_norm, ef_construction=120, M=16)
 
     save_stats()
     log(f"ALL DONE. stats -> {paths.PROJECTION_STATS_JSON.name}")

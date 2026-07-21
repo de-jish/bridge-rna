@@ -40,7 +40,24 @@ def corpus() -> dict:
     return _DESC
 
 
-@pytest.fixture(scope="session")
-def osdr_cluster(corpus):
-    """Latent cluster id per OSDR point - the ground truth the tests assert against."""
-    return corpus["osdr_cluster"]
+@pytest.fixture
+def without_archs4_metadata(monkeypatch):
+    """Run a test as if the optional GEO metadata fetch had never been run.
+
+    This is the degraded state the coverage UI exists for, and it is the state a
+    fresh clone starts in, so it needs real coverage rather than being assumed.
+    Pointing the path at a non-existent file is enough: every reader gates on
+    ``.exists()``. The caches must be cleared on both sides of the patch, since
+    they would otherwise carry the metadata in or out of the test.
+    """
+    from manifold import colorby, data, paths
+
+    def clear():
+        data.archs4_metadata.cache_clear()
+        data.archs4_tissue.cache_clear()
+
+    clear()
+    monkeypatch.setattr(paths, "ARCHS4_METADATA_PARQUET",
+                        paths.CACHE_DIR / "does-not-exist.parquet")
+    yield colorby
+    clear()
