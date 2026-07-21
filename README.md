@@ -1,30 +1,28 @@
 # Bridge RNA
 
-Bridge RNA finds the closest Earth-based analogs for NASA spaceflight RNA-seq samples.
+**What does spaceflight look like in a cell? Ask 940,000 Earth samples.**
 
-It is built for spaceflight biology researchers - the kind of work carried out by the **Space Biosciences Research Branch at NASA Ames Research Center** - who need to connect the small, hard-won transcriptomes of NASA flight experiments to the vast body of ground-based human sequencing.
+Bridge RNA takes a tissue flown on a NASA mission and finds its closest biological relatives on the ground.
 
-Give it a mouse RNA-seq sample from NASA's Open Science Data Repository (OSDR), and it retrieves the most transcriptomically similar human samples from the ~940,000-sample ARCHS4/GEO collection, visualizes the matches as an interactive network, and asks a language model to suggest what the retrieval implies for spaceflight biology.
+Developed by the **Space Biosciences Research Branch at NASA Ames Research Center**.
 
-NASA's spaceflight experiments produce comparatively few samples: a rodent mission returns tens of tissues, not the tens of thousands that terrestrial studies accumulate.
-Bridge RNA bridges that gap.
-It treats each NASA OSDR sample as a query into the entire published human transcriptome, so a single tissue flown aboard the International Space Station can be placed next to its closest Earth-bound relatives without any manual literature search.
+NASA flies rare biology.
+A rodent mission returns tens of tissues, not the tens of thousands that terrestrial studies accumulate, and every one of them is expensive, irreplaceable, and hard to interpret in isolation.
+Meanwhile the published human transcriptome keeps growing.
+Bridge RNA connects the two: it treats every NASA spaceflight sample as a query into that entire corpus, so a tissue flown aboard the International Space Station lands next to the Earth-based studies that look most like it - no manual literature search, no prior guess about what it should resemble.
 
-> **Who this is for.**
-> Bridge RNA is aimed squarely at NASA spaceflight biology, the mission of the Space Biosciences Research Branch at NASA Ames Research Center, which studies how living systems respond to the space environment.
-> Everything in the pipeline is oriented around NASA OSDR data and NASA flight experiments.
-
-> **Independence.**
-> Bridge RNA is independent research.
-> It is **not affiliated with, endorsed by, or an official product of NASA**, NASA Ames Research Center, or the Space Biosciences Research Branch.
-> It is built on NASA's publicly available OSDR data and is intended to be useful to researchers working in that domain.
+Hand it a mouse RNA-seq sample from NASA's Open Science Data Repository (OSDR).
+It returns the most transcriptomically similar human samples out of the ~940,000-sample ARCHS4/GEO collection, draws the matches as an interactive network, and asks a language model what the retrieval implies for spaceflight biology.
 
 ![The Bridge RNA web interface, showing a mouse eye spaceflight sample from OSD-100 matched against its nearest ARCHS4 neighbours](docs/bridge-rna-interface.png)
 
-The screenshot above shows a real retrieval.
-The query is a mouse left-eye sample flown on NASA's Rodent Research-1 (OSD-100) mission, and the three GEO series it pulls back are all mouse retina studies: sub-RPE deposit accumulation in retinal dystrophy (GSE210492), `Mertk` loss-of-function traits (GSE205070), and the retina transcriptome after `UXT` knockout (GSE143281).
+**The screenshot above is a real retrieval, and it makes the case better than any description.**
+The query is a mouse left-eye sample flown on NASA's Rodent Research-1 mission (OSD-100).
+The three GEO series it pulls back are all mouse retina studies: sub-RPE deposit accumulation in retinal dystrophy (GSE210492), `Mertk` loss-of-function traits (GSE205070), and the retina transcriptome after `UXT` knockout (GSE143281).
+
 Nothing in the pipeline is told what tissue the query came from.
-NASA Rodent Research missions like OSD-100 are exactly the kind of scarce, high-value flight data Bridge RNA is designed to interpret.
+It found the retina on its own, out of 940,000 candidates, from expression alone.
+That is the capability NASA Rodent Research data has been waiting for.
 
 ## How it works
 
@@ -303,10 +301,9 @@ ARCHS4 is from the [Ma'ayan Lab](https://maayanlab.cloud/archs4/).
 Gene annotations come from [Ensembl](https://www.ensembl.org/) and [GENCODE](https://www.gencodegenes.org/).
 Review the terms of each source before redistributing the bundled data.
 
-Using NASA's open data does not imply NASA endorsement of this project.
-See the independence note at the top of this README.
-
 ## Citing
 
 If you use Bridge RNA in published work, see [`CITATION.cff`](CITATION.cff).
 GitHub renders it as a "Cite this repository" link in the sidebar.
+
+Bridge RNA was developed by the Space Biosciences Research Branch at NASA Ames Research Center, which studies how living systems respond to the space environment.

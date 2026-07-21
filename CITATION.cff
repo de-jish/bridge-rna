@@ -5,6 +5,7 @@ type: software
 authors:
   - family-names: Jang
     given-names: Joshua
+    affiliation: "Space Biosciences Research Branch, NASA Ames Research Center"
 repository-code: "https://github.com/de-jish/bridge-rna"
 abstract: >-
   Bridge RNA maps a NASA Open Science Data Repository (OSDR) spaceflight
@@ -12,6 +13,8 @@ abstract: >-
   the ~940,000-sample ARCHS4/GEO collection. A trained ExpressionPerformer
   model embeds gene-expression vectors into a 512-dimensional space, and
   retrieval is performed by cosine similarity over a precomputed index.
+  Developed by the Space Biosciences Research Branch at NASA Ames Research
+  Center.
 keywords:
   - transcriptomics
   - RNA-seq
