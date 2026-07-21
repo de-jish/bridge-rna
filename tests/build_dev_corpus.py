@@ -35,6 +35,10 @@ def main() -> None:
     ap.add_argument("--osdr", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--clean", action="store_true", help="Remove --out first.")
+    ap.add_argument("--no-archs4-meta", action="store_true",
+                    help="Omit the ARCHS4 metadata join, to see the degraded UI "
+                         "a fresh clone starts in: Tissue drops to OSDR-only and "
+                         "the coverage readout names the script that fixes it.")
     args = ap.parse_args()
 
     if args.clean and args.out.exists():
@@ -42,7 +46,8 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
 
     desc = fixture_corpus.build_all(args.out, n_archs4=args.archs4, n_osdr=args.osdr,
-                                    seed=args.seed)
+                                    seed=args.seed,
+                                    with_archs4_meta=not args.no_archs4_meta)
     print(f"built {desc['total']:,} points "
           f"({desc['n_archs4']:,} ARCHS4 + {desc['n_osdr']:,} OSDR)")
     print(f"  BRIDGE_RNA_ROOT={desc['bridge_rna_root']}")

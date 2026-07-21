@@ -150,7 +150,7 @@ def test_non_zoom_events_leave_the_sample_alone():
     assert callbacks._viewport_from_relayout({"hovermode": "closest"}) == "unchanged"
 
 
-# --- Selection extraction -------------------------------------------------
+# --- Plot badge markup ------------------------------------------------------
 
 def test_bold_markup_is_parsed_not_injected():
     parts = callbacks._html_with_bold("ARCHS4 live: <b>100,000</b> pts")

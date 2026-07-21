@@ -209,7 +209,7 @@ def _osdr_customdata(display: np.ndarray) -> list[list]:
     keys = (meta["sample_key"].astype(str).to_numpy()
             if "sample_key" in meta.columns
             else np.array([f"OSDR {i}" for i in range(len(meta))]))
-    return [[str(k), "—" if v == colorby.NOT_COVERED else str(v)]
+    return [[str(k), "-" if v == colorby.NOT_COVERED else str(v)]
             for k, v in zip(keys, display)]
 
 

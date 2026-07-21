@@ -50,8 +50,8 @@ gate rather than a colour, switch to the versioned files and assert 100%.
 
 This step needs a network connection and nothing else - no h5py, no archs4py,
 no multi-GB download. It is still optional: without it the app colors ARCHS4 by
-species and by unsupervised embedding cluster, and the tissue color-by is
-offered but disabled with the reason attached.
+species only, and the tissue color-by is offered but disabled with the reason
+attached.
 """
 
 from __future__ import annotations

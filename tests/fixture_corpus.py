@@ -9,11 +9,17 @@ artifacts, because the only difference is scale.
 
 The synthetic embeddings are deliberately not random noise. Points are drawn
 around a small number of latent cluster centers in 512-d, and the metadata
-labels are generated *from* those clusters. That gives the tests real ground
-truth: a selection that follows one cluster must read as coherent and must
-enrich for that cluster's tissue, and a selection scattered across clusters must
-read as incoherent. A uniform-noise fixture could not distinguish a correct
-coherence implementation from one that always says "yes".
+labels are generated *from* those clusters. That gives the render and color-by
+tests real category structure to assert against: a category occupies a coherent
+region of the projection, so a test can check that a palette assignment, a
+legend count, or a viewport sample tracks real structure. A uniform-noise
+fixture would make every one of those assertions vacuous.
+
+The ARCHS4 half also gets a synthetic ``archs4_metadata.parquet`` whose source
+strings are written in ARCHS4's free-text register ("liver", "whole blood",
+"Brain cortex", "HeLa") and mapped through the *real* canonicalizer, so
+``manifold/tissue.py`` is exercised against GEO-shaped strings rather than
+against its own rule list.
 
 Used by ``tests/conftest.py`` for the automated suite and by
 ``tests/build_dev_corpus.py`` to produce a browsable corpus for the running app.
