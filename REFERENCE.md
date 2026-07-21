@@ -58,7 +58,44 @@ PCA variance (25k sample, before normalization): PC1 = 57.8% of variance; cumula
 PCA-50 fit on 25k x 512 = 11.7 s; projecting 200k to 2D via fitted components = 1.44 s, extrapolating to ~6.7 s for all 940k.
 
 UMAP (on PCA-50 input, L2-normalized): fit on 40k = 171 s; `.transform()` 60k = 21.5 s.
-Landmark hybrid (fit ~200k subsample, transform the rest) is the tractable path, roughly 30 to 90 minutes for the full corpus offline.
+Landmark hybrid (fit ~200k subsample, transform the rest) is the tractable path.
+
+### Full-corpus build, actually measured (2026-07-21)
+
+The 30-to-90-minute estimate above was wrong by an order of magnitude.
+The real `build_projections.py` run over 942,563 points (940,455 ARCHS4 + 2,108 OSDR) took **5 min 47 s end to end** on defaults.
+
+| stage | measured |
+| --- | --- |
+| population moments, exact mean + covariance per corpus | 4 s |
+| IncrementalPCA-50 fit (60k ARCHS4 + 2,108 OSDR) | 1 s |
+| PCA transform, all 942,563 points | 1 s |
+| UMAP-2d landmark fit, 122,108 points | 71 s |
+| UMAP-2d transform, remaining 820,455 | 71 s |
+| UMAP-3d fit + transform | 143 s |
+| hnswlib cosine index, 942,563 points, M=16 ef=120 | 52 s |
+| **total** | **347 s** |
+
+Peak RSS ~2.5 GB against 17 GB. The index is 2,070,363,764 B on disk, matching the ~2 GB estimate.
+
+UMAP emits `n_jobs value 1 overridden to 1 by setting random_state`: seeding forces a single-threaded layout.
+At 71 s per fit that is not worth trading determinism for, so `random_state=42` stays.
+
+**PCA after L2 normalization: PC1 = 40.9%, cumulative over 50 PCs = 95.1%.**
+Contrast with the 57.8% above, which is the *pre-normalization* depth axis.
+This pair is the objective test for invariant 2 - see `precompute/validate_artifacts.py`.
+
+### Cross-corpus separation, measured (2026-07-21)
+
+Of the 50 nearest neighbours of each OSDR sample in the 512-d cosine space: 34.2% same-study OSDR, 22.9% cross-study OSDR, 42.9% ARCHS4.
+Against a per-sample chance model that is 5,227x for same-study (replicate structure, expected and biological) and **105x for cross-study** (a corpus-level effect).
+
+Controlling for tissue, the dominant axis of variation in bulk expression: OSDR neighbour pairs sharing **neither study nor tissue** occur at 11.49% against 0.211% expected, **54x over chance**.
+Biology does not make liver cluster with brain, so this is a technical batch effect from fp32/CPU versus bf16/CUDA inference and preprocessing differences, not spaceflight signal.
+
+Corroborating asymmetry: ARCHS4 queries find OSDR neighbours only 0.0300% of the time against 0.224% chance, a 7.5x *depletion*.
+OSDR is a small dense island - dominant in its own neighbourhoods, nearly invisible from ARCHS4's.
+Cosine gap: OSDR to its OSDR neighbours 0.9979, to its ARCHS4 neighbours 0.9966, against an ARCHS4 self-baseline of 0.9971.
 
 ## 5. Environment (re-verified 2026-07-20 at build time)
 

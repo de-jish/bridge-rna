@@ -3,15 +3,17 @@
 Living status log.
 Update after each meaningful change so another session can resume without losing context.
 
-## Current status: 2026-07-20 (build session)
+## Current status: 2026-07-21 - the real cache is built
 
-The application is written, tested, and running.
-101 tests pass against a hermetic synthetic corpus, and the app has been driven end to end in a real browser (controls, color-bys, 2D/3D, lasso -> readout).
+**The full offline pipeline has run to completion on real data.** `cache/` now holds the real 942,563-point manifold: 940,455 ARCHS4 (510,709 human, 429,746 mouse) plus 2,108 OSDR.
 
-The one thing still outstanding is **data**: `precompute/embed_osdr.py` is mid-run.
-As of 2026-07-21 08:37 it is at 2,062 / 2,108 samples with roughly 15 minutes left, after ~11 h elapsed.
-The realized rate was ~10 s/sample in the fast stretches but degraded to ~49 s/sample between 05:44 and 08:26 under machine contention, so the original ~6.5 s/sample estimate was optimistic.
-Until it finishes, the real `cache/` cannot be built - `build_projections.py` is queued to start automatically on completion (see below).
+- `embed_osdr.py` finished 2026-07-21 08:45:51 after ~11.3 h, all 2,108 samples, gene-digest gate passed.
+  Realized rate was ~10 s/sample in fast stretches, degrading to ~49 s/sample between 05:44 and 08:26 under machine contention, so the original ~6.5 s/sample estimate was optimistic.
+- `build_projections.py` ran 08:45:57 to 08:51:44, **5 min 47 s**, rc=0. The 30-90 min estimate in `REFERENCE.md` was wrong by an order of magnitude; measured per-stage timings are now recorded there.
+- `precompute/validate_artifacts.py --mixing` passes all structural and invariant checks, with one substantive warning: the cross-corpus batch effect (see Notes and risks).
+
+The application itself was already written, tested, and running: 101 tests pass against a hermetic synthetic corpus, and the app has been driven end to end in a real browser (controls, color-bys, 2D/3D, lasso -> readout).
+It has **not** yet been launched against this real 940k cache - that is the next step.
 
 ### What is done
 
@@ -72,31 +74,28 @@ Found by an adversarial audit plus browser-driven testing; each was verified bef
 
 ## Next steps
 
-1. **Wait for `embed_osdr.py`** to finish (monitor `cache/osdr_sample_embeddings.progress.json`). It resumes if interrupted.
-2. Run `precompute/embed_osdr.py --metadata-only` afterwards if the metadata harmonization changed since the run started.
-3. ~~Run `precompute/build_projections.py`~~ - **already queued, see "Queued projection build" below.** Expect: PCA minutes, UMAP 30-90 min, hnswlib index ~2 GB.
-4. Validate against the Phase 2/4 criteria: PC1 **well below** the 57.8% recorded in `REFERENCE.md` section 4, and OSDR points landing in sensible neighborhoods.
-   The 57.8% figure is measured *before* L2 normalization and is the sequencing-depth/magnitude axis (`REFERENCE.md:57`).
-   `build_projections.py` normalizes first, so a correct run must report a substantially lower `pca_pc1_pct` in `projection_stats.json`.
-   Seeing ~58% again would be evidence that normalization silently did not happen, which is invariant 2 in `CLAUDE.md` - treat it as a build failure, not a pass.
-5. Launch the app on the real corpus and re-run the browser checks at 940k scale, watching frame rate at the 100k and 150k budgets.
+1. ~~Wait for `embed_osdr.py`~~ **DONE** 2026-07-21 08:45:51, all 2,108 samples.
+2. ~~Run `precompute/build_projections.py`~~ **DONE** 2026-07-21 08:51:44, rc=0 in 5 min 47 s.
+3. ~~Validate against the Phase 2/4 criteria~~ **DONE**. PC1 = 40.9% against the 57.8% pre-normalization figure, so invariant 2 holds.
+   Codified as `precompute/validate_artifacts.py`, which exits nonzero on failure so it can gate a rebuild instead of relying on eyeballing a scatter plot.
+4. **Launch the app on the real corpus** and re-run the browser checks at 940k scale, watching frame rate at the 100k and 150k budgets. This is the next real task.
+5. Decide how the measured batch effect should surface in the UI. The cross-dataset warning already exists, but it was written before the magnitude was known; 54x tissue-controlled enrichment may justify making it harder to ignore on mixed-corpus lassos.
 6. Optional, if the ARCHS4 HDF5 files are ever downloaded: `pip install h5py`, run `fetch_archs4_meta.py`, and the tissue color-by appears by itself.
+7. Optional: `precompute/embed_osdr.py --metadata-only` if the metadata harmonization ever changes; it rewrites the parquet without re-embedding.
 
-## Queued projection build (2026-07-21 08:37)
+## How the projection build was chained (2026-07-21, completed)
 
-`build_projections.py` is **queued to launch automatically** when `embed_osdr.py` exits.
-A detached watcher polls the embed PID, verifies the run actually succeeded, and only then starts the projection build with default parameters.
+`build_projections.py` was queued behind the in-flight embed run rather than waited on by hand.
+A detached watcher polled the embed PID, verified the run actually succeeded, and only then started the projection build with default parameters.
+It fired correctly: embed exited 08:45:51, the gates passed, and the build launched 08:45:57 - a 6-second unattended handoff.
 
-The watcher refuses to launch unless all of these hold, because `build_projections.py` joins OSDR metadata to embeddings *positionally* and a truncated embedding would silently mislabel every OSDR point rather than fail:
+The watcher refused to launch unless all of these held, because `build_projections.py` joins OSDR metadata to embeddings *positionally* and a truncated embedding would silently mislabel every OSDR point rather than fail:
 
 - the embed log contains a `[done] wrote` line (clean completion, not a crash or a kill),
 - `osdr_sample_embeddings.float32.npy` and `osdr_metadata.parquet` both exist and are non-empty,
 - their row counts agree, the embedding dim is 512, and the values are finite.
 
-On any failure it logs the reason and exits without starting the 30-90 minute job.
-
-Logs: `chain.log` (watcher decisions) and `build_projections.log` (the build itself), in the session scratchpad.
-These live under `/private/tmp` and are ephemeral; the durable outputs are the artifacts in `cache/` and `projection_stats.json`.
+That gate is worth rebuilding if this is ever re-run, since the failure it guards against is silent rather than loud.
 
 **Preflight verified before queuing** (2026-07-21):
 
@@ -104,10 +103,28 @@ These live under `/private/tmp` and are ephemeral; the durable outputs are the a
 - Every import `build_projections.py` needs is installed: numpy 2.4.6, pandas 3.0.3, sklearn 1.9.0, umap 0.5.12, hnswlib, pyarrow 20.0.0, PIL 12.2.0.
 - Disk 44 GiB free against a ~2 GB index; RAM 17 GB against a peak of roughly 2.5 GB.
 - **Full-path smoke test passed** end to end in an isolated `MANIFOLD_CACHE_DIR` with synthetic OSDR embeddings and `--archs4-limit 4000`, exercising population moments, IncrementalPCA, PCA transform, density rasters, UMAP 2-d and 3-d, the hnswlib index, and every parquet write. Exit 0, all twelve artifacts produced.
+  Running the real pipeline against a throwaway cache first is cheap insurance and is worth repeating before any long rebuild.
+
+### Built artifacts in `cache/` (2026-07-21)
+
+| file | size | contents |
+| --- | --- | --- |
+| `joint_cosine.hnsw` | 2.07 GB | cosine index over all 942,563 points |
+| `coords_pca3.parquet` / `coords_umap3.parquet` | 13.2 MB each | 3-d coordinates |
+| `coords_pca2.parquet` / `coords_umap2.parquet` | 8.8 MB each | 2-d coordinates |
+| `archs4_geo.parquet` | 4.6 MB | GEO accessions for study context |
+| `points_meta.parquet` | 4.4 MB | dataset / src_index / species_id identity table |
+| `population_moments.npz` | 4.2 MB | exact per-corpus mean + covariance for the lasso null |
+| `osdr_sample_embeddings.float32.npy` | 4.3 MB | the 2,108 x 512 OSDR embeddings |
+| `osdr_metadata.parquet` | 27 KB | OSDR labels, joined positionally |
+| `density/{pca2,umap2}.png` | 838 KB / 621 KB | density underlays |
+| `projection_stats.json` | 1.8 KB | variance profile and raster extents |
+
+`embed_osdr.py` cleaned up its own partial memmap and progress JSON on success, as designed.
 
 ## Notes and risks
 
 - The hnswlib index holds raw float32 vectors: ~2 GB on disk and resident in the app. `--skip-hnsw` is supported and costs only the kNN-purity statistic.
-- OSDR (fp32/CPU) versus ARCHS4 (bf16/CUDA) introduces a precision batch effect between corpora. The cross-dataset warning is wired; the magnitude has not yet been measured on real embeddings, and should be once Phase 1 lands.
-- UMAP quality at 940k via landmark fit-and-transform is unverified until the job runs.
+- **The cross-corpus batch effect is real and now measured (2026-07-21).** Controlling for both study and tissue, OSDR samples that share neither still neighbour each other 54x above chance. Tissue is the dominant axis of bulk expression, so biology cannot explain it - this is the fp32/CPU versus bf16/CUDA precision and preprocessing difference. The app's cross-dataset warning is therefore load-bearing and must stay prominent; cross-corpus distances are not trustworthy at face value. Full numbers in `REFERENCE.md` section 4. Re-check with `python precompute/validate_artifacts.py --mixing`.
+- UMAP quality at 940k via landmark fit-and-transform ran clean, but *visual* quality on the real map is still unreviewed.
 - `tests/` never touches the real data, so the suite stays fast and runs on a machine with neither the memmap nor the checkpoint.
