@@ -184,8 +184,9 @@ Found by adversarial audit, browser-driven testing, and by running against the r
 4. ~~Launch the app on the real corpus~~ **DONE** 2026-07-21, driven headless end to end against the real 942,563-point cache. Zero console errors.
 5. ~~Give ARCHS4 a real biological color-by~~ **DONE** 2026-07-21: the sigpy metadata join, the shared tissue vocabulary, and the coverage-aware registry.
 6. ~~Remove the lasso tool and its readout~~ **DONE** 2026-07-21, including the artifacts and dependencies that existed only to serve it.
-7. Delete the two dead cache files, `cache/joint_cosine.hnsw` (2.07 GB) and `cache/population_moments.npz` (4.2 MB). Nothing reads them and nothing writes them.
-8. `cache/projection_stats.json` still carries `cluster_k`, `cluster_sizes_archs4`, `cluster_sizes_osdr` and `cluster_osdr_span` from the cut k-means build. Nothing reads them and the current script does not write them; they will disappear on the next full build.
+7. ~~Delete the two dead cache files~~ **DONE** 2026-07-21. `cache/` went from 2.1 GB to 214 MB; the suite and `validate_artifacts.py` both pass without them.
+   Neither was source data, so nothing was lost: both were derived from embeddings that are still intact, and `build_hnsw` / `build_population_moments` are recoverable from commit `3840ab3` if fast approximate kNN is ever wanted for an experiment.
+8. ~~Strip the stale `cluster_*` keys from `cache/projection_stats.json`~~ **DONE** 2026-07-21, left behind by the cut k-means build.
 9. Re-run the browser checks at the 60k and 150k point budgets and measure frame rate; only the 100k default has been exercised so far.
 10. Review the *visual* quality of the real UMAP map, which is still unreviewed at 940k.
 11. Optional: switch the metadata fetch to the versioned metadata-only HDF5 files (`human_meta_v2.5.h5` 311.8 MB, `mouse_meta_v2.5.h5` 350.9 MB) if tissue ever needs to be a build **gate** rather than a color.
@@ -237,7 +238,7 @@ Full inventory, with which of them the app opens, is `REFERENCE.md` section 12.
 Total live cache **219.2 MB**, of which the serving app opens **82.3 MB**.
 `embed_osdr.py` cleaned up its own partial memmap and progress JSON on success, as designed.
 
-Two files are still on disk but are **no longer produced by anything**: `joint_cosine.hnsw` (2,070.4 MB) and `population_moments.npz` (4.2 MB), which is why `cache/` currently measures 2,293.8 MB.
+`joint_cosine.hnsw` (2,070.4 MB) and `population_moments.npz` (4.2 MB) were deleted on 2026-07-21 once nothing produced or read them, which is what took `cache/` from 2.1 GB to 214 MB.
 
 ## Notes and risks
 

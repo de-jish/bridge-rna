@@ -472,14 +472,17 @@ Judge a candidate against a structure-free null **of the same form**, and check 
 
 Total live cache: **219.2 MB**: 82.3 MB is what the serving app actually opens, 132.3 MB is embedding intermediates that exist so a re-embed never re-reads the counts CSVs, and 4.6 MB is the accession sidecar the metadata fetch joins onto.
 
-Two artifacts are **no longer produced** and can be deleted:
+Two artifacts are **no longer produced**, and were deleted on 2026-07-21:
 
 | removed artifact | size | why it is gone |
 | --- | --- | --- |
 | `joint_cosine.hnsw` | 2,070.4 MB | the ANN index existed only for the lasso's kNN-purity statistic and for the mixing check, which now computes exact neighbours in 10.3 s |
 | `population_moments.npz` | 4.2 MB | the exact per-corpus mean and covariance existed only for the lasso's analytic null |
 
-On this machine both files are still present as leftovers from the 2026-07-21 build, which is why `cache/` measures 2,293.8 MB rather than 219.2 MB.
+`cache/` measured 2.1 GB before the deletion and 214 MB after it, and both the suite and `validate_artifacts.py` pass without them.
+Neither was source data: both were derived from embeddings that are still intact, so nothing was lost that cannot be recomputed.
+The two irreplaceable inputs are the ARCHS4 memmap in the Bridge RNA repo (918.4 MB, never written by this project) and `cache/osdr_sample_embeddings.float32.npy` (4.1 MB), which is the output of the 11.3-hour embedding job and is the one file here that is genuinely expensive to recreate.
+The functions that built the two deleted artifacts, `build_hnsw` and `build_population_moments`, are recoverable from commit `3840ab3` if fast approximate kNN is ever wanted for an experiment; a rebuild of the index was a measured 52 s.
 
 `manifold/preflight.APP_REQUIRED` lists exactly three artifacts, in the order they are read: `points_meta.parquet`, `osdr_metadata.parquet`, `coords_pca2.parquet`.
 It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSDR embeddings, none of which the app opens, while omitting `points_meta.parquet`, which `layout.control_rail()` reads first - so a missing identity table passed preflight and crashed during startup.
