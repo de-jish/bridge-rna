@@ -21,14 +21,14 @@ When plans change, update these docs so they reflect what was actually built, no
 
 ## Architecture: the offline/online split is the load-bearing decision
 
-Everything expensive is precomputed once and cached; the app only ever loads artifacts. This is forced by measured cost (UMAP fit is 30-90 min for the full corpus) and is what keeps the app responsive. Do not move model inference, UMAP, datashader rasterization, or index building into the serving app.
+Everything expensive is precomputed once and cached; the app only ever loads artifacts. This is forced by measured cost (UMAP fit is 30-90 min for the full corpus) and is what keeps the app responsive. Do not move model inference, UMAP, density rasterization, or index building into the serving app.
 
 ```
 OFFLINE (precompute/, run once -> cache/)      ONLINE (app_manifold.py, loads artifacts only)
 embed_osdr.py     -> osdr embeddings npy        loads coord parquets + ARCHS4 memmap + hnswlib
-build_projections.py -> pca/umap coord parquets renders go.Scattergl + datashader PNG underlay
+build_projections.py -> pca/umap coord parquets renders go.Scattergl + density PNG underlay
                      -> hnswlib cosine index     lasso -> coherence.py -> 512-d readout
-                     -> datashader density PNGs
+                     -> density raster PNGs
 fetch_archs4_meta.py -> archs4_metadata parquet
 ```
 
@@ -50,7 +50,8 @@ Bridge Manifold is a standalone Dash app that **imports/copies reusable function
 
 ## Environment and planned commands
 
-Shares the Bridge RNA venv at `/Users/josh/Bridge-RNA/.venv` (has torch, umap-learn, sklearn, plotly, datashader). Bridge Manifold adds `dash`, `hnswlib`, and `archs4py` on top. Record a `requirements.txt` here once dependencies are pinned.
+Shares the Bridge RNA venv at `/Users/josh/Bridge-RNA/.venv` (has torch, umap-learn, sklearn, plotly). Bridge Manifold adds `dash`, `hnswlib`, and `archs4py` on top.
+Density rasters are a plain numpy 2D histogram rendered through PIL, deliberately not datashader, to keep the dependency surface small - datashader is not installed and is not required. Record a `requirements.txt` here once dependencies are pinned.
 
 ```bash
 # run from the Bridge RNA venv

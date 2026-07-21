@@ -9,7 +9,9 @@ The application is written, tested, and running.
 101 tests pass against a hermetic synthetic corpus, and the app has been driven end to end in a real browser (controls, color-bys, 2D/3D, lasso -> readout).
 
 The one thing still outstanding is **data**: `precompute/embed_osdr.py` is mid-run.
-It is a multi-hour CPU job (~6.5 s/sample x 2,108 samples). Until it finishes, the real `cache/` cannot be built.
+As of 2026-07-21 08:37 it is at 2,062 / 2,108 samples with roughly 15 minutes left, after ~11 h elapsed.
+The realized rate was ~10 s/sample in the fast stretches but degraded to ~49 s/sample between 05:44 and 08:26 under machine contention, so the original ~6.5 s/sample estimate was optimistic.
+Until it finishes, the real `cache/` cannot be built - `build_projections.py` is queued to start automatically on completion (see below).
 
 ### What is done
 
@@ -70,12 +72,38 @@ Found by an adversarial audit plus browser-driven testing; each was verified bef
 
 ## Next steps
 
-1. **Wait for `embed_osdr.py`** to finish (~6 h from 21:20, monitor `cache/osdr_sample_embeddings.progress.json`). It resumes if interrupted.
+1. **Wait for `embed_osdr.py`** to finish (monitor `cache/osdr_sample_embeddings.progress.json`). It resumes if interrupted.
 2. Run `precompute/embed_osdr.py --metadata-only` afterwards if the metadata harmonization changed since the run started.
-3. Run `precompute/build_projections.py`. Expect: PCA minutes, UMAP 30-90 min, hnswlib index ~2 GB.
-4. Validate against the Phase 2/4 criteria: PC1 ~58% of variance, and OSDR points landing in sensible neighborhoods.
+3. ~~Run `precompute/build_projections.py`~~ - **already queued, see "Queued projection build" below.** Expect: PCA minutes, UMAP 30-90 min, hnswlib index ~2 GB.
+4. Validate against the Phase 2/4 criteria: PC1 **well below** the 57.8% recorded in `REFERENCE.md` section 4, and OSDR points landing in sensible neighborhoods.
+   The 57.8% figure is measured *before* L2 normalization and is the sequencing-depth/magnitude axis (`REFERENCE.md:57`).
+   `build_projections.py` normalizes first, so a correct run must report a substantially lower `pca_pc1_pct` in `projection_stats.json`.
+   Seeing ~58% again would be evidence that normalization silently did not happen, which is invariant 2 in `CLAUDE.md` - treat it as a build failure, not a pass.
 5. Launch the app on the real corpus and re-run the browser checks at 940k scale, watching frame rate at the 100k and 150k budgets.
 6. Optional, if the ARCHS4 HDF5 files are ever downloaded: `pip install h5py`, run `fetch_archs4_meta.py`, and the tissue color-by appears by itself.
+
+## Queued projection build (2026-07-21 08:37)
+
+`build_projections.py` is **queued to launch automatically** when `embed_osdr.py` exits.
+A detached watcher polls the embed PID, verifies the run actually succeeded, and only then starts the projection build with default parameters.
+
+The watcher refuses to launch unless all of these hold, because `build_projections.py` joins OSDR metadata to embeddings *positionally* and a truncated embedding would silently mislabel every OSDR point rather than fail:
+
+- the embed log contains a `[done] wrote` line (clean completion, not a crash or a kill),
+- `osdr_sample_embeddings.float32.npy` and `osdr_metadata.parquet` both exist and are non-empty,
+- their row counts agree, the embedding dim is 512, and the values are finite.
+
+On any failure it logs the reason and exits without starting the 30-90 minute job.
+
+Logs: `chain.log` (watcher decisions) and `build_projections.log` (the build itself), in the session scratchpad.
+These live under `/private/tmp` and are ephemeral; the durable outputs are the artifacts in `cache/` and `projection_stats.json`.
+
+**Preflight verified before queuing** (2026-07-21):
+
+- All inputs resolve and are real data, not Git LFS stubs: the ARCHS4 memmap is 963,025,920 bytes, exactly 940,455 x 512 x 2, matching `embedding_manifest.json`.
+- Every import `build_projections.py` needs is installed: numpy 2.4.6, pandas 3.0.3, sklearn 1.9.0, umap 0.5.12, hnswlib, pyarrow 20.0.0, PIL 12.2.0.
+- Disk 44 GiB free against a ~2 GB index; RAM 17 GB against a peak of roughly 2.5 GB.
+- **Full-path smoke test passed** end to end in an isolated `MANIFOLD_CACHE_DIR` with synthetic OSDR embeddings and `--archs4-limit 4000`, exercising population moments, IncrementalPCA, PCA transform, density rasters, UMAP 2-d and 3-d, the hnswlib index, and every parquet write. Exit 0, all twelve artifacts produced.
 
 ## Notes and risks
 
