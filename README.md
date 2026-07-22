@@ -211,7 +211,7 @@ It exists to test the instrument, not to be read.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 194 tests, about two seconds
+.venv/bin/python -m pytest tests/ -q        # 193 tests, about two seconds
 .venv/bin/python tests/e2e_check.py         # 29 browser checks, about a minute
 ```
 
@@ -275,7 +275,7 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `bridge_rna/` | The retrieval half: config, preflight, OSDR loading, retrieval, GEO enrichment, AI, figures, panels, layout, callbacks. |
 | `manifold/` | The map half: paths, artifact loaders, the tissue vocabulary, the coverage-aware color-by registry, the layered renderer. |
 | `precompute/` | Offline jobs that build the map cache, plus the validator that gates a build. |
-| `tests/` | 194 pytest tests over a synthetic corpus, plus the browser and join checks. |
+| `tests/` | 193 pytest tests over a synthetic corpus, plus the browser and join checks. |
 | `assets/` | Stylesheets, layered by load order: tokens, shell, retrieve, map. |
 | `demo_osdr_top5.py` | The subprocess retrieval path, also usable as a CLI. |
 | `generate_archs4_embeddings.py` | `ExpressionPerformer` and the batch job that builds the embedding index. |

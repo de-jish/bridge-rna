@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 194 tests pass in about two seconds, plus 29 browser checks in `tests/e2e_check.py`.
+**Current state: built, run on the real corpus, and tested.** 193 tests pass in about two seconds, plus 29 browser checks in `tests/e2e_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
