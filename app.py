@@ -189,6 +189,17 @@ def build_app() -> Dash:
                 dcc.Location(id="url", refresh=False),
                 html.Div(header(route["key"]), id="app-header-slot"),
                 html.Div(view_for(route), id="page-content"),
+                # Cross-view state lives on the shell, not in a view.
+                #
+                # `hits-store` began inside the retrieval sidebar, which was
+                # fine while that was the whole app. Under the router a view is
+                # destroyed when you leave it, so a retrieval held there would
+                # not survive the walk over to the map - and the map showing
+                # you where your hits landed is the entire reason the two
+                # halves are one app. session storage additionally keeps a
+                # result across a reload, which matters more now that a
+                # retrieval is a half-second rather than a coffee break.
+                dcc.Store(id="hits-store", storage_type="session"),
             ],
         )
 
