@@ -4,13 +4,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Bridge Manifold is the exploratory map companion to **Bridge RNA** (a separate repo at `/Users/josh/Bridge-RNA`).
-Bridge RNA retrieves the closest Earth analogs for one NASA spaceflight RNA-seq sample.
-Bridge Manifold zooms out: it dimensionally reduces the 512-d ExpressionPerformer embeddings of both corpora - OSDR (2,108 NASA GeneLab spaceflight samples) and ARCHS4 (940,455 GEO samples) - into one shared 2D/3D space, renders every one of the 942,563 points as a live WebGL glyph, and colors them by biology.
+**Bridge RNA is one application with two views**, developed by the Space Biosciences Research Branch at NASA Ames Research Center.
 
-**Current state: built, run on the real corpus, and tested.**
-`manifold/` and `precompute/` are complete, the full offline pipeline has been executed against the real 942,563-point corpus, and 160 tests pass in about a second.
+- **Retrieve** (`/`) takes one NASA OSDR spaceflight RNA-seq sample and returns its closest Earth analogs out of the 940,455-sample ARCHS4/GEO index, as a network graph with an inspector and an optional LLM summary. Code in `bridge_rna/`.
+- **Map** (`/map`) zooms out to the whole space: the 512-d ExpressionPerformer embeddings of both corpora - OSDR (2,108 NASA GeneLab spaceflight samples) and ARCHS4 (940,455 GEO samples) - reduced into one shared 2D/3D space, every one of the 942,563 points drawn as a live WebGL glyph and coloured by biology. Code in `manifold/` and `precompute/`.
+
+`app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
+
+**Current state: built, run on the real corpus, and tested.** 176 tests pass in about two seconds, plus 27 browser checks in `tests/e2e_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
+
+### The join between the halves, and why retrieval is fast
+
+The two halves address the same things by the same keys, and nothing translates between them:
+
+- An OSDR sample is `"<accession>|<sample name>"` on both sides - `bridge_rna.osdr.load_osdr_samples` builds it as `sample_id`, `precompute/embed_osdr.py` writes it as `sample_key`. Pinned by a test.
+- An ARCHS4 hit's memmap row **is** its point index on the map, because ARCHS4 occupies rows `0..940,454` of the global point order. Also pinned by a test.
+
+That is what makes `bridge_rna/retrieval.py`'s **cached path** possible, and it is the most valuable thing the merge produced.
+The manifold precompute had already embedded all 2,108 eligible OSDR samples (gene-digest gated, preprocessing checked bit-for-bit against the retrieval's own single-sample path) and already joined GEO metadata for all 940,455 ARCHS4 samples.
+So a query needs no subprocess and no network: **0.8 s against 22.1 s**, with `gse`/`title`/`tissue` populated where the subprocess path returned empty strings, and identical scores to six decimal places.
+
+`search_hits` returns `(hits, mode)` where mode is `cached`, `precomputed`, or `demo`, and **the interface must always say which ran**.
+It did not, once: the status banner special-cased only `precomputed`, so every cached result was announced as "real demo script output".
 
 Three features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), the hnswlib ANN index and population-moment artifacts that existed only to serve it, and the precomputed density raster underlay (with its PNGs, its `--density-only` flag, and the Pillow dependency).
 Where that history is instructive it is recorded as history, clearly marked.
@@ -34,7 +50,7 @@ UMAP over 942,563 points is a job measured in tens of minutes and gigabytes, whi
 Do not move model inference or UMAP into the serving app.
 
 ```
-OFFLINE (precompute/, run once -> cache/)        ONLINE (app_manifold.py, loads artifacts only)
+OFFLINE (precompute/, run once -> cache/)        ONLINE (app.py /map, loads artifacts only)
 embed_osdr.py        -> osdr embeddings npy       coord parquets + points_meta + osdr_metadata
 build_projections.py -> pca/umap coord parquets   + archs4_metadata                (80.8 MB opened)
                      -> points_meta identity      renders every point as go.Scattergl
@@ -51,7 +67,9 @@ The whole live cache measures 217.8 MB, of which the app opens 80.8 MB; the rest
 ### Package layout
 
 ```
-app_manifold.py          entry point; preflight then Dash on :8051
+app.py                   the only entry point: header, router, both views on :8050
+bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, geo,
+                         figures, retrieval, panels, layout, callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable
 manifold/preflight.py    PRECOMPUTE_REQUIRED vs APP_REQUIRED, LFS pointer guard
 manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, archs4 tissue
@@ -65,9 +83,12 @@ manifold/theme.py        chrome tokens, dark plot canvas, validated categorical 
 manifold/bridge_rna.py   thin import shim for the reusable Bridge RNA functions
 ```
 
-Only `precompute/` imports `torch`, `umap`, `pynndescent`, `sklearn`, or `requests`.
+`umap`, `pynndescent`, and `sklearn` are imported only by `precompute/`, and nothing in the serving path touches them.
 `PIL` is no longer a dependency of anything, because the density raster was the only thing that used it.
-The serving app's dependency surface is `dash`, `plotly`, `numpy`, `pandas`, `pyarrow` and nothing scientific.
+
+The map's dependency surface is still `dash`, `plotly`, `numpy`, `pandas`, `pyarrow` and nothing scientific - it draws precomputed coordinates and opens no embeddings.
+The retrieval half adds `requests` (`bridge_rna/ai.py`, `bridge_rna/geo.py`) and reaches `torch` **only** on the `demo` path, through a subprocess, plus a few lazy `import torch` calls inside `bridge_rna/preflight.py` that read the checkpoint's config.
+Nothing imports `torch` at module scope, so the app starts without it and the map works on a machine that has no model at all.
 
 ## Non-negotiable invariants
 
@@ -162,11 +183,13 @@ Thirty arbitrary random directions in 512-d score eta-squared 0.874 +/- 0.025 on
 Every candidate in the 0.89 to 0.94 band is indistinguishable from an arbitrary projection, and species (0.985) is the only one that clearly clears it.
 Judge a candidate against a structure-free null of the same *form*, and check whether it is recoverable from the coordinates themselves or from transcriptome concentration.
 
-## Relationship to Bridge RNA
+## How the two halves relate
 
-Bridge Manifold is a standalone Dash app that **imports/copies reusable functions from Bridge RNA rather than editing its 2,470-line retrieval app** - isolation without losing the shared-instrument feel.
-It never retrains the model and never re-embeds ARCHS4; those 940k embeddings already exist and are consumed as-is from the Bridge RNA repo.
-The reusable interfaces (OSDR preprocessing, `ExpressionPerformer`/`encode`, digest helpers, ortholog maps, memmap loaders, LFS guards) are catalogued with signatures and line numbers in `REFERENCE.md` section 6.
+They share a model, an embedding index, a visual language, and the exact index join described at the top of this file.
+The map never retrains the model and never re-embeds ARCHS4; those 940k embeddings already exist and are consumed as-is.
+The reusable interfaces (OSDR preprocessing, `ExpressionPerformer`/`encode`, digest helpers, ortholog maps, memmap loaders, LFS guards) are catalogued with signatures and line numbers in `REFERENCE.md` section 6; `manifold/bridge_rna.py` is the one file that imports them, so the coupling stays visible in one place.
+
+`hits-store` lives on the **shell** (`app.py`), not in the retrieval view, because the router destroys a view when you leave it and the map has to be able to draw a retrieval you ran before walking over to it.
 
 The cross-corpus batch effect is a property of the shared space and is disclosed on the control rail (`layout.control_rail`, `.bm-caution`): OSDR pairs sharing neither study nor tissue still neighbour each other 54x above chance, because the two corpora were embedded on different hardware and in different precisions.
 Compare within a corpus, not across.
@@ -184,12 +207,13 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~50 min.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
-/Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                  # http://127.0.0.1:8051
+/Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q   # 160 tests, about a second
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 176 tests, about two seconds
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 27 browser checks, about a minute
 ```
 
-The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.
+The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--densmap`, `--dens-lambda`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.
 Three flags that appear in older prose no longer exist: `--skip-hnsw` (there is no index to skip), `--density-only` (there is no raster to re-render), and `--pca-fit-sample` / `--umap-fit-sample` (neither reduction is fit on a subsample any more).
 
 There is no multi-gigabyte download anywhere in this pipeline.

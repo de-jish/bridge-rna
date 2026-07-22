@@ -225,6 +225,36 @@ def test_bold_markup_survives_text_without_tags():
 
 # --- Styling --------------------------------------------------------------
 
+def test_the_serving_app_does_not_import_the_scientific_stack():
+    """Starting the app must not pull in torch, umap, sklearn, or pynndescent.
+
+    The map draws precomputed coordinates and the retrieval's fast path is a
+    memmap scan, so neither needs a model at import time. Keeping it that way is
+    what lets the app start on a machine with no checkpoint, and what keeps
+    startup off the multi-second torch import. A stray module-scope `import
+    torch` would not fail anything - it would just quietly make that untrue.
+    """
+    import ast
+
+    heavy = {"torch", "umap", "sklearn", "pynndescent"}
+    offenders = []
+    files = (list((paths.REPO_ROOT / "bridge_rna").glob("*.py"))
+             + list((paths.REPO_ROOT / "manifold").glob("*.py"))
+             + [paths.REPO_ROOT / "app.py"])
+    for py in sorted(files):
+        for node in ast.parse(py.read_text()).body:  # module scope only
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                continue
+            for name in names:
+                if name.split(".")[0] in heavy:
+                    offenders.append(f"{py.name}: {name}")
+    assert not offenders, f"module-scope scientific imports: {offenders}"
+
+
 def _all_css() -> str:
     """Every stylesheet Dash serves, concatenated in the order it serves them."""
     return "\n".join(p.read_text()
