@@ -155,29 +155,56 @@ def build_app() -> Dash:
     )
     app.index_string = INDEX_STRING
 
-    app.layout = html.Div(
-        className="app-shell",
-        children=[
-            dcc.Location(id="url", refresh=False),
-            html.Div(id="app-header-slot"),
-            html.Div(id="page-content"),
-        ],
-    )
+    def view_for(route: dict):
+        if route["key"] == "map":
+            if not _manifold_available():
+                return map_unavailable_view()
+            from manifold import layout as manifold_layout
+
+            return manifold_layout.build_view()
+        return rna_layout.build_view()
+
+    def serve_layout():
+        """Build the page for the path this request actually asked for.
+
+        Dash calls a layout *function* once per request, so the requested view
+        is in the first HTML response instead of arriving a callback round trip
+        later. Beyond the round trip it removes, this is what stops a direct
+        link to /map from painting the retrieval view first and then replacing
+        it.
+
+        `flask.request` is absent when the layout is built outside a request -
+        Dash does exactly that once at startup to validate the callback graph -
+        so the default route is the fallback rather than an error.
+        """
+        try:
+            from flask import request
+
+            route = _route_for(request.path)
+        except Exception:
+            route = DEFAULT_ROUTE
+        return html.Div(
+            className="app-shell",
+            children=[
+                dcc.Location(id="url", refresh=False),
+                html.Div(header(route["key"]), id="app-header-slot"),
+                html.Div(view_for(route), id="page-content"),
+            ],
+        )
+
+    app.layout = serve_layout
 
     @app.callback(
         Output("page-content", "children"),
         Output("app-header-slot", "children"),
         Input("url", "pathname"),
+        # The initial view is already in the served layout; without this the
+        # router would rebuild it on load and pay the cost this design avoids.
+        prevent_initial_call=True,
     )
     def render_page(pathname: str | None):
         route = _route_for(pathname)
-        if route["key"] == "map":
-            if not _manifold_available():
-                return map_unavailable_view(), header("map")
-            from manifold import layout as manifold_layout
-
-            return manifold_layout.build_view(), header("map")
-        return rna_layout.build_view(), header("retrieve")
+        return view_for(route), header(route["key"])
 
     rna_callbacks.register(app)
     if _manifold_available():
