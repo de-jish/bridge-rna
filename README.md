@@ -192,3 +192,13 @@ A `without_archs4_metadata` fixture runs the degraded path - the state a fresh c
 
 `tests/test_projections.py` is the exception to the "never touch the real artifacts" rule in one narrow sense: it imports from `precompute/` to score the exact PCA against `sklearn.decomposition.PCA` on synthetic data.
 The claim that a streaming second-moment pass reproduces a full fit is the kind that has to be checked against a reference implementation rather than asserted in a docstring.
+
+One check deliberately sits outside pytest, because a green suite says nothing about whether 942,563 WebGL glyphs actually reach a browser:
+
+```bash
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py           # about a minute
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py --headed  # watch it
+```
+
+It boots the real app against the real `cache/`, drives Chromium, and asserts on what the page reports about itself: that the default view really draws all 942,563 points, that no layout image is left underneath them, that each budget tier draws exactly the count it advertises, that an OSDR-only field produces a faint context trace outside the palette, and that the console is clean.
+It needs the built cache, so it is a local check rather than something a fresh clone can run.

@@ -588,6 +588,7 @@ Bridge Manifold/
     test_render.py           # shared palette, context-not-grey, budgets, viewport, legend
     test_projections.py      # the exact PCA against sklearn, sign stability, global point order
     test_app.py              # callback wiring, coverage readout, CSS class coverage
+    e2e_check.py             # outside pytest: boots the real app + browser against the real cache
   assets/
     manifold.css             # Bridge RNA tokens, Dash 4 token remap, dark-canvas + legend rules
   cache/                     # generated (gitignored): embeddings, coords, metadata

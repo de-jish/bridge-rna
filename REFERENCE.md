@@ -622,6 +622,17 @@ The fixture writes a synthetic `archs4_metadata.parquet` whose source strings ar
 `tests/conftest.py` provides a `without_archs4_metadata` fixture that points `ARCHS4_METADATA_PARQUET` at a non-existent file and clears the loader caches on both sides, because the degraded state is what a fresh clone starts in and needs real coverage.
 `render._colour_plan` is cleared there alongside the two data loaders: it memoizes a label array derived from the metadata, and a test proved that leaving it warm let Tissue keep colouring 940,455 ARCHS4 points from a join that no longer existed.
 
+`tests/e2e_check.py` sits outside that suite and outside pytest's collection, because it needs the opposite of a hermetic fixture: it boots the real Dash app against the real `cache/` and drives a real browser.
+
+```bash
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py          # about a minute
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py --headed # watch it
+```
+
+It exists because a green pytest run says nothing about whether 942,563 WebGL glyphs reach a browser.
+Measured by it on 2026-07-22: first interactive frame **1.3 s** with all **942,563** glyphs, budget switches re-rendering in 0.1 to 0.3 s and drawing exactly the counts they advertise (102,108 / 502,108 / 942,563), zero console errors.
+One trap it encodes: under plotly 6 the coordinates arrive as base64 typed-array specs, so `gd.data[i].x` has no `.length` and a naive glyph count silently yields `NaN`, which is indistinguishable from an empty plot; read `gd._fullData`, where the decoded `Float32Array` lives.
+
 ### Commands, in build order
 
 ```bash
