@@ -378,8 +378,18 @@ def register(app) -> None:
                 )
                 if not has_context:
                     enriched_one = _enrich_hits_from_ncbi_eutils(one.copy(), entrez_email)
+                    row_mask = hits_df["gsm"] == gsm
                     for col in enriched_one.columns:
-                        if col in hits_df.columns:
-                            hits_df.loc[hits_df["gsm"] == gsm, col] = enriched_one.iloc[0][col]
+                        # Add the column first if the cached path never created
+                        # it. Without this, the `_biopython` fields the NCBI
+                        # fetch returns - platform, entry type, GDS type,
+                        # release date, FTP link, and the whole Publication
+                        # section - were dropped for a cached hit, because the
+                        # cached schema has none of them and the copy only kept
+                        # columns that already existed. Ten fetched fields, ten
+                        # blank rows in the inspector.
+                        if col not in hits_df.columns:
+                            hits_df[col] = ""
+                        hits_df.loc[row_mask, col] = enriched_one.iloc[0][col]
 
         return build_details_panel(query=q_row, selected_payload=selected_node, hits_df=hits_df)

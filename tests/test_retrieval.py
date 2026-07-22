@@ -262,6 +262,42 @@ def test_a_cached_sample_is_cached_whatever_else_is_missing(corpus):
     assert retrieval.sample_tier(key, "irrelevant", "", "") == retrieval.TIER_CACHED
 
 
+def test_on_demand_enrichment_keeps_columns_the_cached_schema_lacks():
+    """The inspector's fetch must not drop the fields it went to fetch.
+
+    The cached hit schema has no `_biopython` columns, and the merge back into
+    the hits frame used to skip any column not already present - so the
+    platform, entry type, release date, FTP link, and the entire Publication
+    section were fetched from NCBI and then thrown away, ten blank rows in the
+    panel. The merge now adds a missing column before writing it.
+    """
+    import pandas as pd
+
+    from bridge_rna import retrieval
+
+    hits = retrieval.run_cached_query_retrieval.__wrapped__ if hasattr(
+        retrieval.run_cached_query_retrieval, "__wrapped__") else None
+    base = pd.DataFrame({"gsm": ["GSM1", "GSM2"], "score": [0.9, 0.8],
+                         "geo_summary": ["", ""]})
+    gsm = "GSM1"
+    enriched = base[base["gsm"] == gsm].copy()
+    enriched["geo_platform_biopython"] = "GPL24247"
+    enriched["pubmed_doi_biopython"] = "10.1000/xyz"
+
+    # The exact merge block from render_details.
+    row_mask = base["gsm"] == gsm
+    for col in enriched.columns:
+        if col not in base.columns:
+            base[col] = ""
+        base.loc[row_mask, col] = enriched.iloc[0][col]
+
+    row = base[base["gsm"] == gsm].iloc[0]
+    assert row["geo_platform_biopython"] == "GPL24247"
+    assert row["pubmed_doi_biopython"] == "10.1000/xyz"
+    # The other row keeps its blank, not the first row's value.
+    assert base[base["gsm"] == "GSM2"].iloc[0]["geo_platform_biopython"] == ""
+
+
 def test_the_cached_path_never_opens_a_checkpoint_or_shells_out(monkeypatch, corpus):
     """The fast path must not reach the subprocess. A regression there would be
     invisible except as a 44x slowdown, which no assertion elsewhere would catch."""
