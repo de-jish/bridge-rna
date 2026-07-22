@@ -109,6 +109,17 @@ def control_rail() -> html.Div:
                     className="bm-hint",
                 ),
             ]),
+            # Clicking an OSDR point offers a retrieval for it. Hidden until
+            # something is clicked; the map is read rather than driven, so this
+            # is an offer that appears in response to interest, not a control
+            # sitting on the rail waiting to be understood.
+            html.Div(id="picked-group", className="bm-group",
+                     style={"display": "none"}, children=[
+                html.Div("Selected sample", className="bm-group-label"),
+                html.Div(id="picked-label", className="bm-picked"),
+                dcc.Link(id="picked-link", href="/", className="bm-button",
+                         children="Retrieve its Earth analogs →"),
+            ]),
             # Shown only when there is a retrieval to show. Declared here
             # rather than created by a callback so Dash can validate the
             # callback graph against it at startup: a component that exists

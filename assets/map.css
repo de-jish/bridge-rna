@@ -267,3 +267,15 @@ a, a:visited { color: var(--accent); }
 }
 .bm-button:hover { background: var(--accent-soft); border-color: var(--accent-dim); }
 .bm-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The clicked-sample offer on the control rail. */
+.bm-picked {
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-word;
+  line-height: 1.35;
+}
+.bm-picked-study { color: var(--text-muted); }
+
+/* dcc.Link renders an <a>; .bm-button is written for a <button>. */
+a.bm-button { display: block; text-align: center; text-decoration: none; }

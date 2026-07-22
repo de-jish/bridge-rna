@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import parse_qs
 
 import pandas as pd
-from dash import Input, Output, State, html
+from dash import Input, Output, State, html, no_update
 
 from .ai import (
     _call_ai_summary,
@@ -35,15 +36,46 @@ from .retrieval import (
 from .util import _format_count, _last_nonempty_line, _safe_str
 
 
+def _requested_sample(search: str | None) -> str:
+    """The `q` parameter of a `/?q=<sample_id>` URL, or "".
+
+    This is how the map hands a sample to the retrieval view. It is a URL
+    parameter rather than a shared store so the link is a real link: it can be
+    opened in a new tab, bookmarked, or pasted to a colleague.
+    """
+    if not search:
+        return ""
+    return _safe_str(parse_qs(search.lstrip("?")).get("q", [""])[0])
+
+
 def register(app) -> None:
     """Attach every retrieval callback to `app`. Called once by the shell."""
+
+    @app.callback(
+        Output("study-dropdown", "value"),
+        Input("url", "search"),
+        prevent_initial_call=True,
+    )
+    def study_from_query_string(search: str | None):
+        """Follow a `/?q=<sample_id>` link from the map to the right study.
+
+        The map offers a real link rather than mutating a store, so arriving
+        here means the study dropdown has to catch up before the sample list
+        can contain the requested sample.
+        """
+        sample_id = _requested_sample(search)
+        if not sample_id:
+            return no_update
+        match = samples_df.loc[samples_df["sample_id"].astype(str) == sample_id]
+        return _safe_str(match.iloc[0]["study_id"]) if not match.empty else no_update
 
     @app.callback(
         Output("sample-dropdown", "options"),
         Output("sample-dropdown", "value"),
         Input("study-dropdown", "value"),
+        State("url", "search"),
     )
-    def update_sample_options(study_id: str):
+    def update_sample_options(study_id: str, search: str | None = None):
         """List a study's samples, and say up front which ones can be answered.
 
         71 of the 2,896 samples name no column in their own study's counts
@@ -72,6 +104,11 @@ def register(app) -> None:
         # opts[0] there would arm Search with a query that cannot succeed.
         # Selecting nothing is the honest state, and the preview explains it.
         enabled = [o for o in opts if not o["disabled"]]
+        # A `?q=` link from the map wins, provided that sample is in this study
+        # and is actually retrievable. Otherwise the first enabled option.
+        requested = _requested_sample(search)
+        if requested and any(o["value"] == requested for o in enabled):
+            return opts, requested
         return opts, (enabled[0]["value"] if enabled else None)
 
 

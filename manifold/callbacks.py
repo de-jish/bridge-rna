@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from dash import Input, Output, State, html, no_update
 
 from . import colorby, data, layout, render
@@ -192,6 +194,39 @@ def register(app):
         return (fig, badge_children, legend_style, title, search_style,
                 legend_data, coverage_children(color_by),
                 colorby.get(color_by).hint)
+
+    @app.callback(
+        Output("picked-group", "style"),
+        Output("picked-label", "children"),
+        Output("picked-link", "href"),
+        Input("manifold-graph", "clickData"),
+    )
+    def pick_osdr_point(click_data):
+        """Offer a retrieval for a clicked OSDR point.
+
+        Only the OSDR overlay carries customdata - the ARCHS4 cloud has none,
+        deliberately, because 940,455 rows of it cost about 600 KB of dead
+        payload per figure. So a click that returns no customdata is a click on
+        the cloud, and nothing is offered rather than something being guessed.
+
+        The link goes to `/?q=<sample_id>` rather than mutating a store,
+        because it is a navigation: it should be a real link that middle-clicks
+        into a new tab and shows its destination on hover.
+        """
+        points = (click_data or {}).get("points") or []
+        custom = points[0].get("customdata") if points else None
+        if not custom:
+            return {"display": "none"}, "", "/"
+        sample_key = str(custom[0])
+        # An OSDR key is "<accession>|<sample name>". Anything else is not one.
+        if "|" not in sample_key:
+            return {"display": "none"}, "", "/"
+        study, name = sample_key.split("|", 1)
+        return (
+            {},
+            [html.B(name), html.Span(f"  ·  {study}", className="bm-picked-study")],
+            f"/?q={quote(sample_key)}",
+        )
 
     @app.callback(
         Output("retrieval-group", "style"),
