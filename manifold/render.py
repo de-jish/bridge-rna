@@ -325,6 +325,15 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     # `markers+text` reliably.
     Scatter = go.Scatter3d if is_3d else go.Scatter
 
+    # Scatter3d takes a much smaller symbol set than Scatter and rejects the
+    # rest outright rather than falling back - `star` raises, which took the
+    # whole figure callback down with a 500 the first time 3-D was opened with
+    # a retrieval showing. `diamond` is the closest available mark that is
+    # still not a plain circle, so the query stays distinguishable from a hit.
+    query_symbol = "diamond" if is_3d else "star"
+    # `cliponaxis` is a 2-D-only property and is likewise a hard error in 3-D.
+    text_extras = {} if is_3d else {"cliponaxis": False}
+
     def _xyz(points):
         arr = np.asarray(points)
         out = dict(x=coords[arr, 0], y=coords[arr, 1])
@@ -367,13 +376,13 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
             customdata=rows,
             hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[1]}"
                            "<br>%{customdata[2]}<extra></extra>"),
-            cliponaxis=False, showlegend=False))
+            showlegend=False, **text_extras))
 
     if has_query:
         label = str(retrieval.get("query_label") or "OSDR query")
         traces.append(Scatter(
             **_xyz([int(query)]), mode="markers", name="query",
-            marker=dict(size=theme.RETRIEVAL_QUERY_SIZE, symbol="star",
+            marker=dict(size=theme.RETRIEVAL_QUERY_SIZE, symbol=query_symbol,
                         color=theme.RETRIEVAL_QUERY,
                         line=dict(width=2, color="#ffffff")),
             customdata=[[label]],

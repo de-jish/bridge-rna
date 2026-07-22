@@ -16,6 +16,79 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+
+# --- The retrieval overlay ---------------------------------------------------
+
+_RETRIEVAL = {
+    "hit_points": [1, 2, 3],
+    "hit_labels": ["GSM1", "GSM2", "GSM3"],
+    "hit_scores": [0.997, 0.995, 0.993],
+    "query_point": 10,
+    "query_label": "OSD-100|Mmus_EYE",
+}
+
+
+@pytest.mark.parametrize("dims,is_3d", [("2d", False), ("3d", True)])
+def test_the_overlay_builds_in_both_dimensionalities(dims, is_3d):
+    """3-D took the whole figure callback down with a 500.
+
+    `Scatter3d` accepts a much smaller symbol set than `Scatter` and rejects
+    the rest outright rather than degrading: `star` raises, and so does the
+    2-D-only `cliponaxis`. Nothing caught it because the overlay had no test
+    and the browser check does not open 3-D with a retrieval showing.
+    """
+    from manifold import render
+
+    coords = np.random.default_rng(0).normal(size=(50, 3 if is_3d else 2))
+    traces = render._retrieval_traces(coords.astype(np.float32), is_3d, _RETRIEVAL)
+    assert traces, "the overlay drew nothing"
+    expected = "scatter3d" if is_3d else "scatter"
+    assert all(t.type == expected for t in traces)
+
+
+@pytest.mark.parametrize("is_3d", [False, True])
+def test_the_overlay_never_emits_a_line_trace(is_3d):
+    """The one prohibition that must never be relaxed.
+
+    A line between the query and a hit has a length; that length is a UMAP
+    distance; a UMAP distance is not quantitative. Reading it as similarity is
+    exactly the misreading the whole overlay is designed to prevent.
+    """
+    from manifold import render
+
+    coords = np.random.default_rng(1).normal(size=(50, 3 if is_3d else 2))
+    traces = render._retrieval_traces(coords.astype(np.float32), is_3d, _RETRIEVAL)
+    for t in traces:
+        assert "lines" not in (t.mode or ""), f"{t.name} draws lines"
+
+
+def test_every_hit_ring_is_identical():
+    """No size, opacity, or colour ramp across rank: the top hits differ by
+    about 0.004 cosine, and any ramp asserts a difference that is not there."""
+    from manifold import render
+
+    coords = np.random.default_rng(2).normal(size=(50, 2)).astype(np.float32)
+    hits = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+                if t.name == "retrieved hit")
+    assert np.isscalar(hits.marker.size) or isinstance(hits.marker.size, (int, float))
+    assert isinstance(hits.marker.color, str), "a per-point colour array is a ramp"
+
+
+def test_the_overlay_ignores_out_of_range_points():
+    """A stale retrieval must not index past the end of a rebuilt corpus."""
+    from manifold import render
+
+    coords = np.random.default_rng(3).normal(size=(5, 2)).astype(np.float32)
+    traces = render._retrieval_traces(
+        coords, False,
+        {**_RETRIEVAL, "hit_points": [1, 999999], "query_point": 42})
+    hits = next((t for t in traces if t.name == "retrieved hit"), None)
+    assert hits is not None and len(hits.x) == 1
+    assert not any(t.name == "query" for t in traces), "an out-of-range query was drawn"
+
+import numpy as np
+import pytest
+
 from manifold import colorby, data, render, sampling, theme
 
 
