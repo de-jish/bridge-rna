@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from dash import html
 
-import app_manifold
+import app as shell
 from manifold import callbacks, colorby, layout, paths, preflight, theme
 
 
@@ -35,18 +35,50 @@ def _walk(component):
 
 @pytest.fixture(scope="module")
 def app():
-    return app_manifold.build_app()
+    return shell.build_app()
+
+
+@pytest.fixture(scope="module")
+def map_view():
+    """The map view alone.
+
+    Everything below asserting on the map's own controls takes this rather than
+    `app.layout`, which is now the shell and mounts the *retrieval* view on the
+    default route.
+    """
+    return layout.build_view()
+
+
+@pytest.fixture(scope="module")
+def mounted_ids(app):
+    """Every component id that any route can put on the page.
+
+    The router mounts one view at a time, so no single layout contains them
+    all - and `suppress_callback_exceptions` is on, which means a callback
+    pointing at an id that exists in *neither* view fails silently in the
+    browser instead of loudly at startup. That is precisely the failure this
+    file exists to catch, so the union is what a callback is checked against.
+    """
+    ids: set = set()
+    trees = [shell.map_unavailable_view()]
+    from bridge_rna import layout as rna_layout
+
+    trees.append(rna_layout.build_view())
+    trees.append(layout.build_view())
+    # The shell itself, built outside a request so it takes the default route.
+    trees.append(app.layout() if callable(app.layout) else app.layout)
+    for tree in trees:
+        ids |= {getattr(c, "id", None) for c in _walk(tree)}
+    ids.discard(None)
+    return ids
 
 
 def test_app_builds(app):
     assert app.layout is not None
-    assert app.title == "Bridge Manifold"
+    assert app.title == "Bridge RNA"
 
 
-def test_every_callback_target_exists_in_the_layout(app):
-    ids = {getattr(c, "id", None) for c in _walk(app.layout)}
-    ids.discard(None)
-
+def test_every_callback_target_exists_in_some_view(app, mounted_ids):
     referenced = set()
     for cb in app.callback_map.values():
         for item in list(cb["inputs"]) + list(cb.get("state", [])):
@@ -55,27 +87,36 @@ def test_every_callback_target_exists_in_the_layout(app):
         for part in re.findall(r"([A-Za-z0-9_-]+)\.[A-Za-z]", key):
             referenced.add(part)
 
-    missing = {r for r in referenced if r not in ids}
-    assert not missing, f"callbacks reference components not in the layout: {sorted(missing)}"
+    missing = {r for r in referenced if r not in mounted_ids}
+    assert not missing, f"callbacks reference components no view mounts: {sorted(missing)}"
 
 
-def test_the_required_controls_exist(app):
-    ids = {getattr(c, "id", None) for c in _walk(app.layout)}
+def test_both_halves_register_their_callbacks(app):
+    """A router that mounts a view but forgets its callbacks looks fine until
+    a control is touched. Assert one signature callback from each half."""
+    keys = " ".join(app.callback_map)
+    assert "manifold-graph.figure" in keys, "the map's render callback is missing"
+    assert "network-graph.figure" in keys, "the retrieval's search callback is missing"
+    assert "page-content.children" in keys, "the router callback is missing"
+
+
+def test_the_required_controls_exist(map_view):
+    ids = {getattr(c, "id", None) for c in _walk(map_view)}
     for required in ("manifold-graph", "color-by", "coverage", "color-by-hint",
                      "method", "dims", "layers", "budget", "plot-badges", "legend"):
         assert required in ids, f"layout is missing #{required}"
 
 
-def test_the_selection_readout_is_gone(app):
+def test_the_selection_readout_is_gone(map_view):
     """The lasso feature was removed; no part of its panel may survive."""
-    ids = {getattr(c, "id", None) for c in _walk(app.layout)}
+    ids = {getattr(c, "id", None) for c in _walk(map_view)}
     assert "readout-body" not in ids and "readout" not in ids
-    classes = {getattr(c, "className", "") for c in _walk(app.layout)}
+    classes = {getattr(c, "className", "") for c in _walk(map_view)}
     assert not any("bm-readout" in str(c) for c in classes)
 
 
-def test_legend_parts_are_static_so_dash_can_validate_them(app):
-    ids = {getattr(c, "id", None) for c in _walk(app.layout)}
+def test_legend_parts_are_static_so_dash_can_validate_them(map_view):
+    ids = {getattr(c, "id", None) for c in _walk(map_view)}
     for required in ("legend-title", "legend-search", "legend-list", "legend-store"):
         assert required in ids, f"{required} is only created at runtime"
 
@@ -111,14 +152,14 @@ def test_legend_filter_survives_an_empty_store():
     assert callbacks.filtered_legend_rows(None, None) == []
 
 
-def test_graph_offers_no_selection_tool(app):
+def test_graph_offers_no_selection_tool(map_view):
     """Both selection tools must be gone from the modebar and the drag mode.
 
     Leaving lasso2d enabled would let a user draw a marquee that silently does
     nothing - a promise the app no longer keeps. Note the old config removed
     box-select but not the lasso, so this needs asserting, not assuming.
     """
-    graph = next(c for c in _walk(app.layout) if getattr(c, "id", None) == "manifold-graph")
+    graph = next(c for c in _walk(map_view) if getattr(c, "id", None) == "manifold-graph")
     assert graph.config["displaylogo"] is False
     assert graph.config["scrollZoom"] is True
     removed = set(graph.config["modeBarButtonsToRemove"])
@@ -271,12 +312,12 @@ def test_every_field_has_a_hint_or_deliberately_none(corpus):
         assert isinstance(spec.hint, str)
 
 
-def test_the_batch_effect_caution_is_still_disclosed_somewhere(app):
+def test_the_batch_effect_caution_is_still_disclosed_somewhere(map_view):
     """Removing the readout deleted the only place this was ever said.
 
     The measured 54x cross-corpus effect is a property of the map, not of any
     selection, so losing the panel must not lose the warning.
     """
-    text = _text(app.layout)
+    text = _text(map_view)
     assert "54x" in text
     assert "corpora" in text.lower()
