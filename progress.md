@@ -125,13 +125,13 @@ Tissue was then validated as biology rather than as batch, to the same standard 
 Recorded with their evidence so nobody re-proposes them.
 Full write-ups in `IMPLEMENTATION.md` section 7.5 and `REFERENCE.md` section 11.
 
-- **Cosine similarity to an OSDR reference** (mean / flight / ground centroid, and a flight-minus-ground "spaceflight-likeness" axis). One field wearing four names, pairwise r 0.996-1.000. The interesting axis correlates r = -0.990 with PC1 and r = -0.779 with the raw L2 norm: it is the sequencing-depth axis relabelled as biology. 1 in 10 random flight/ground relabelings beat it on spatial structure, 46.5% under a within-study permutation.
+- **Cosine similarity to an OSDR reference** (mean / flight / ground centroid, and a flight-minus-ground "spaceflight-likeness" axis). One field wearing four names, pairwise r 0.996-1.000. The interesting axis correlates r = -0.990 with PC1 and r = -0.779 with the raw L2 norm, and PC1 is a transcriptome-concentration axis, so the candidate measured concentration and called it resemblance to spaceflight. 1 in 10 random flight/ground relabelings beat it on spatial structure, 46.5% under a within-study permutation.
 - **kNN tissue-label transfer from OSDR to ARCHS4.** Median best-match cosine 0.964 with 100% of points above 0.7, so no confidence threshold discriminates anything, and the winner beats the runner-up by a median of 0.00089 cosine. 54% of the targets are human samples that would have received mouse labels.
 - **Unsupervised k-means cluster id (k=24).**
-  Built, run on the real corpus, measured, then deleted along with its precompute stage. 81.9% of the label is recoverable from the 2-D UMAP coordinates alone (15-NN over a 120k sample, against a 12.4% majority-class baseline); a structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points; seed-to-seed ARI ~0.45; 81% species-pure; explains 80.7% of the raw-L2-norm depth variance.
+  Built, run on the real corpus, measured, then deleted along with its precompute stage. 81.9% of the label is recoverable from the 2-D UMAP coordinates alone (15-NN over a 120k sample, against a 12.4% majority-class baseline); a structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points; seed-to-seed ARI ~0.45; 81% species-pure; explains 80.7% of the raw-L2-norm variance.
   A comment in `manifold/colorby.py` records the decision where someone would add it back.
 - **Local UMAP density.** Redundant with the raster already drawn underneath.
-- **PC1-3.** Free but redundant with the axes on screen, and PC1 is the depth axis.
+- **PC1-3.** Free but redundant with the axes on screen.
 - **GEO series (GSE).** 51,284 distinct values, so a Top-11 legend would color ~3% of the map and dump the rest in "Other".
   Also a pure batch label (333x lift).
   Kept in the parquet for provenance, not offered as a color.
@@ -263,6 +263,11 @@ The scoring code and every embedding are in the session scratchpad; the metrics 
 The two changes compose and both are far larger than seed noise: three seeds per configuration gave a standard deviation of 0.001 to 0.002 on both metrics, so these are 8 to 37 standard deviations, not luck.
 This was the control run deliberately, because shipping a "new method" that is really a parameter change would be embarrassing.
 
+**Applied 2026-07-21.** The retune is shipped and the full corpus was rebuilt with it.
+On the real 942,563-point map, 25-NN tissue purity over the 853,989 points with a real tissue bucket went **0.6448 to 0.6756 (+4.8%)** against a 0.0761 permuted null, and the OSDR spread ratio went 0.827 to 0.850.
+The build cost roughly tripled, from 347 s to 950 s, entirely in `.transform()`; the landmark fit got slightly faster.
+`validate_artifacts.py` passes, 144 tests pass, and the 27 browser checks pass against the rebuilt cache.
+
 **If a third method is added, it is openTSNE at perplexity 30 with PCA initialization.**
 It is the only candidate that beats UMAP on local fidelity (0.581 against 0.426 for the best UMAP) and on biological fidelity (0.668 against 0.646) at the same time, and its global fidelity is 2.6x UMAP's.
 Its out-of-sample transform works and preserves *more* structure than UMAP's on the same test (recall 0.534 against 0.472), so the landmark fit-and-transform pattern the pipeline already uses would carry it to all 942,563 points.
@@ -277,9 +282,13 @@ Perplexity 200 is not an option at 3.5 hours for 60,000 points.
 - **PHATE** has *negative* density fidelity and produces the crescent it produces when there is no trajectory. It is a tool for developmental data being pointed at a heterogeneous grab-bag of GEO.
 - **Keeping PCA is validated.** Its global fidelity of 0.849 is 3x the best neighbour embedding, and no nonlinear method comes close. The two shipped methods really do occupy the two ends.
 
-**The open question, unresolved.** Sequencing depth is recoverable from the *normalized* 512-d direction at R^2 = 0.9917, so L2 normalization does not remove it and every projection here is partly a depth map.
-Whether projecting that direction out before reducing makes the map more biological (higher tissue purity) or merely destroys structure was set up but not measured; the inputs are built.
-This is a larger question than the choice of reducer and is the most valuable follow-up.
+**The open question, now answered (2026-07-21).** The premise was wrong.
+The pre-normalization L2 norm is not sequencing depth: the encoder's input is log1p-TPM, which is depth-normalized by construction, and measured against the exact OSDR expression matrix the norm correlates r = +0.987 with the share of expression held by a sample's top 100 genes and r = -0.930 with Shannon entropy.
+It is a transcriptome-*concentration* axis, and the tissue ordering is the textbook one: liver 13.57, skeletal muscle 12.92 and heart 12.62 at the top, brain 8.31 and skin 7.84 at the bottom.
+So the axis should not be projected out - it is biology, and 26.2% of its variance is explained by tissue identity alone.
+Projecting it out does not work in any case: removing the single best-fitting direction moves a probe for it from held-out R^2 0.977 to only 0.975, because the signal is spread across many directions.
+L2 normalization stays, for the reason that it removes a redundant encoding of something the direction already carries rather than because it removes an artifact.
+Full measurement in `REFERENCE.md` section 4.
 
 ## Notes and risks
 

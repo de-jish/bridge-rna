@@ -128,35 +128,69 @@ def stratified_fit_index(n_archs4, species, n_sample, seed):
     return np.sort(pick)
 
 
-def run_umap(pca_all, n_archs4, species, n_components, fit_sample, seed, transform_batch):
+def run_umap(mm, n_archs4, osdr_norm, species, n_components, fit_sample, seed,
+             transform_batch, n_neighbors):
+    """Landmark UMAP over the L2-normalized 512-d vectors, streamed from the memmap.
+
+    Two settings here were chosen by measurement rather than by default, and both
+    matter more than they look. Scored against the original 512-d space on a
+    60,000-point sample, with three seeds per configuration to establish that the
+    differences are real (seed sd was 0.001-0.002 on both metrics):
+
+        n_neighbors=30, euclidean on PCA-50   kNN recall 0.380   tissue purity 0.630
+        n_neighbors=15, euclidean on PCA-50               0.417                0.638
+        n_neighbors=30, cosine on raw 512-d               0.398                0.642
+        n_neighbors=15, cosine on raw 512-d               0.426                0.646
+
+    So the two changes compose, and together they buy 12% more local fidelity and
+    a 25-NN tissue purity of 0.646 against a 0.073 permuted null. Reducing to
+    PCA-50 first was discarding the 4.9% of variance those 50 components do not
+    carry, and n_neighbors=30 was over-smoothing the local structure this map
+    exists to show.
+
+    This is why the reducer now reads the 512-d vectors instead of `pca_all`.
+    The full normalized corpus would be 1.93 GB in float32, so it is never
+    materialized: the landmark block is gathered once, and the rest is streamed
+    through .transform() in batches.
+    """
     import umap
 
-    total = pca_all.shape[0]
+    total = n_archs4 + len(osdr_norm)
     fit_idx = stratified_fit_index(n_archs4, species, fit_sample, seed)
-    # Always include all OSDR points (the tail) in the landmark fit.
-    osdr_idx = np.arange(n_archs4, total)
-    landmark_idx = np.concatenate([fit_idx, osdr_idx])
-    log(f"UMAP-{n_components}d landmark fit on {len(landmark_idx)} points "
-        f"({len(fit_idx)} ARCHS4 + {len(osdr_idx)} OSDR)")
+    log(f"UMAP-{n_components}d landmark fit on {len(fit_idx) + len(osdr_norm)} points "
+        f"({len(fit_idx)} ARCHS4 + {len(osdr_norm)} OSDR), "
+        f"n_neighbors={n_neighbors}, cosine on 512-d")
+
+    # Always include all OSDR points in the landmark fit; there are only 2,108 of
+    # them and leaving them to .transform() would place the corpus the whole tool
+    # is about into a space fitted without it.
+    landmark = np.vstack([
+        l2_normalize(np.asarray(mm[fit_idx], dtype=np.float32)),
+        osdr_norm,
+    ])
     reducer = umap.UMAP(
         n_components=n_components,
-        n_neighbors=30,
+        n_neighbors=n_neighbors,
         min_dist=0.1,
-        metric="euclidean",  # PCA-50 space is already L2-normalized + linear
+        metric="cosine",
         random_state=seed,
         verbose=True,
     )
     t0 = time.time()
-    emb_landmark = reducer.fit_transform(pca_all[landmark_idx])
+    emb_landmark = reducer.fit_transform(landmark).astype(np.float32)
     log(f"UMAP fit done in {time.time()-t0:.0f}s; transforming remaining points")
+    del landmark
 
     out = np.empty((total, n_components), dtype=np.float32)
-    out[landmark_idx] = emb_landmark.astype(np.float32)
-    remaining = np.setdiff1d(np.arange(total), landmark_idx, assume_unique=False)
+    out[fit_idx] = emb_landmark[:len(fit_idx)]
+    out[n_archs4:] = emb_landmark[len(fit_idx):]
+
+    remaining = np.setdiff1d(np.arange(n_archs4), fit_idx, assume_unique=True)
     t1 = time.time()
     for s, e in chunks(len(remaining), transform_batch):
         idx = remaining[s:e]
-        out[idx] = reducer.transform(pca_all[idx]).astype(np.float32)
+        block = l2_normalize(np.asarray(mm[idx], dtype=np.float32))
+        out[idx] = reducer.transform(block).astype(np.float32)
         log(f"  umap transform {e}/{len(remaining)} ({time.time()-t1:.0f}s)")
     log(f"UMAP transform done in {time.time()-t1:.0f}s")
     return out
@@ -249,6 +283,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Build joint PCA/UMAP/density artifacts.")
     ap.add_argument("--pca-fit-sample", type=int, default=60000)
     ap.add_argument("--umap-fit-sample", type=int, default=120000)
+    ap.add_argument("--umap-neighbors", type=int, default=15,
+                    help="UMAP n_neighbors. 15 beat the previous 30 on both local "
+                         "fidelity and tissue purity by 8-37 seed standard "
+                         "deviations; see run_umap.")
     ap.add_argument("--pca-components", type=int, default=50)
     ap.add_argument("--batch", type=int, default=50000)
     ap.add_argument("--seed", type=int, default=42)
@@ -329,14 +367,23 @@ def main() -> None:
     write_coords(pca_all[:, :3], paths.COORDS_PCA3)
     stats["density_pca2"] = render_density(pca_all[:, :2], "pca2")
     save_stats()
+    # The reducer reads the 512-d vectors now, so the 188 MB PCA-50 array has no
+    # further use once the PCA coordinates are written.
+    del pca_all
 
     # --- UMAP --------------------------------------------------------------
     if not args.skip_umap:
-        umap2 = run_umap(pca_all, n_archs4, species, 2, args.umap_fit_sample, args.seed, args.batch)
+        stats["umap_neighbors"] = int(args.umap_neighbors)
+        stats["umap_metric"] = "cosine"
+        stats["umap_input"] = "raw 512-d L2-normalized"
+        umap2 = run_umap(mm, n_archs4, osdr_norm, species, 2, args.umap_fit_sample,
+                         args.seed, args.batch, args.umap_neighbors)
         write_coords(umap2, paths.COORDS_UMAP2)
         stats["density_umap2"] = render_density(umap2, "umap2")
         save_stats()
-        umap3 = run_umap(pca_all, n_archs4, species, 3, args.umap_fit_sample, args.seed, args.batch)
+        del umap2
+        umap3 = run_umap(mm, n_archs4, osdr_norm, species, 3, args.umap_fit_sample,
+                         args.seed, args.batch, args.umap_neighbors)
         write_coords(umap3, paths.COORDS_UMAP3)
         save_stats()
 

@@ -213,7 +213,8 @@ Ordering matters: `fetch_archs4_meta.py` joins onto `archs4_geo.parquet` and `po
 ### 5.1 The reduction spine: L2-normalize -> PCA-50 -> UMAP
 
 Measured on a 25k ARCHS4 sample before normalization, PC1 alone captures 57.8% of variance and the first 50 PCs capture 96.4%.
-That giant PC1 is a magnitude and depth axis, which is exactly why we L2-normalize first.
+That giant PC1 is a magnitude axis, which is exactly why we L2-normalize first.
+It is *not* a sequencing-depth axis, though this document said so for a long time; see `REFERENCE.md` section 4 for the measurement that corrected it.
 PCA to 50 dimensions then denoises and compresses the input to UMAP, which makes UMAP both faster and cleaner.
 
 ### 5.2 PCA
@@ -404,7 +405,8 @@ Each of them is an obvious thing to propose, and each of them is wrong for a rea
 Four variants were computed for every one of the 942,563 points: similarity to the OSDR mean centroid, to the flight centroid, to the ground centroid, and the flight-minus-ground difference, the last presented as a continuous "spaceflight-likeness" axis.
 The four scores are one field wearing four names: pairwise correlations run from r = 0.996 to r = 1.000.
 The interesting one, the flight-minus-ground axis, correlates r = -0.990 with PC1 and r = -0.779 with the raw L2 norm.
-It **is** the sequencing-depth axis, relabelled as biology, which is exactly the failure that L2 normalization exists to prevent, reintroduced one layer higher up.
+PC1 is neither spaceflight nor sequencing depth: it is a transcriptome-concentration axis (`REFERENCE.md` section 4).
+The candidate therefore measured how concentrated a sample's transcriptome is and offered it as resemblance to spaceflight, which is a real biological quantity wearing the wrong name.
 Against a null of random flight/ground relabelings of the same sample sizes, 1 in 10 random relabelings beat the real axis on spatial structure, and under a within-study permutation 46.5% did.
 An axis a coin flip can reproduce half the time is not a measurement of spaceflight.
 
@@ -428,7 +430,7 @@ A comment in `manifold/colorby.py` records the decision at the point where someo
 The density raster is already rendered underneath every 2-D view, so a density color-by would encode the same quantity twice, once as color and once as the picture it sits on.
 
 **(e) PC1 to PC3 as color-bys. Rejected.**
-They are free, since they already sit in `coords_pca3.parquet`, but they are redundant with the axes on screen, and PC1 is the depth axis, so offering it as a color would advertise sequencing depth as a feature.
+They are free, since they already sit in `coords_pca3.parquet`, but they are redundant with the axes on screen, and PC1 is a transcriptome-concentration axis, which is interesting in its own right but is not what a user reaches for a spaceflight map to see.
 
 **(f) GEO series (GSE) as a color-by. Rejected, and kept as provenance.**
 There are 51,284 distinct series, so a Top-11 legend would color about 3% of the map and dump the rest into "Other": a grey map reached by a different route.
@@ -445,7 +447,7 @@ They score that well because the UMAP was fit on those same vectors, so any line
 Every candidate scoring in the 0.89 to 0.94 band is therefore indistinguishable from an arbitrary projection.
 Species, at 0.985, is the only field that clearly clears the bar, which is why it is the reference for what a working color-by looks like.
 
-The rule that follows: judge a candidate against a structure-free null **of the same form** (permuted labels for a categorical field, random directions for a continuous one, a Voronoi partition for a clustering), and then check whether the candidate is recoverable from the coordinates themselves or from sequencing depth.
+The rule that follows: judge a candidate against a structure-free null **of the same form** (permuted labels for a categorical field, random directions for a continuous one, a Voronoi partition for a clustering), and then check whether the candidate is recoverable from the coordinates themselves or from transcriptome concentration.
 A field that passes the eta-squared eye test and fails both of those checks is a picture of the projection, not a measurement of biology.
 
 ## 8. Key design decisions and tradeoffs
@@ -480,7 +482,8 @@ The artifact existed, the precompute stage ran on the real corpus, and it was de
 Recording this as a decision rather than quietly dropping it matters: the work was not wasted, it produced the measurement that says the feature would have misled people, and that measurement is cheaper to read than to repeat.
 
 **L2-normalize before reducing.**
-Because retrieval is cosine and the raw vectors carry a 4x magnitude spread that dominates PC1 (57.8% before normalization, 40.9% after), we normalize first so the manifold reflects transcriptomic direction rather than sequencing depth.
+Because retrieval is cosine and the raw vectors carry a 3.9x magnitude spread that dominates PC1 (57.8% before normalization, 40.9% after), we normalize first so the manifold reflects transcriptomic direction rather than magnitude.
+The magnitude is redundant rather than technical: it is recoverable from the normalized direction at held-out R^2 = 0.977, and it measures transcriptome concentration.
 
 **Make batch visible, do not correct it (final).**
 Rather than applying Harmony or ComBat and risking erasure of real biology, the tool exposes study and species as color-by dimensions and discloses the measured 54x tissue-controlled cross-corpus effect on the control rail.

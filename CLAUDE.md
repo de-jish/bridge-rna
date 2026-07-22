@@ -70,7 +70,7 @@ These are correctness gates, not style preferences.
 Violating them produces output that looks fine but is scientifically wrong.
 
 1. **Gene-digest gate.** `embed_osdr.py` must compute `canonical_gene_order_digest(genes)` and assert it equals `CANONICAL_GENES_SHA256` (`3f887ac8d329dce3c54d26448964904c07a345940cd3d9ebab18dd1f603194c5`). Abort the build on mismatch. An embedding built with the wrong gene order is silently invalid.
-2. **L2-normalize before any reduction.** Raw ARCHS4 vectors are NOT normalized (norms 6.7-25.5); unnormalized, PC1 captures 57.8% of variance and is essentially a magnitude/depth axis. The real normalized build lands at PC1 = 40.9%, and `validate_artifacts.py` fails if it drifts back above 50%.
+2. **L2-normalize before any reduction.** Raw ARCHS4 vectors are NOT normalized (norms 6.7-26.4, a 3.9x spread); unnormalized, PC1 captures 57.8% of variance and is a magnitude axis. The real normalized build lands at PC1 = 40.9%, and `validate_artifacts.py` fails if it drifts back above 50%. **Do not describe that magnitude as sequencing depth** - the docs said so for a long time and it is wrong. The encoder's input is log1p-TPM, which is depth-normalized by construction, and the norm was measured on OSDR against the exact matrix that produced each embedding: it correlates **r = +0.987** with the share of expression held by the top 100 genes and **r = -0.930** with Shannon entropy. It is a transcriptome-*concentration* axis, and it is biology: liver 13.6, skeletal muscle 12.9 and heart 12.6 sit at the top, brain 8.3 and skin 7.8 at the bottom, which is the textbook ordering. Normalizing is still right, because a 3.9x magnitude spread would otherwise dominate the map, but it removes a redundant encoding rather than an artifact - the norm stays recoverable from the normalized direction at held-out R^2 = 0.977. See `REFERENCE.md` section 4.
 3. **Read model hyperparameters from `ckpt['config']`, not the demo's fallback constants.** The demo defaults differ from the true trained config.
 4. **Verify Git LFS pointers resolve before any run that touches Bridge RNA.** The checkpoint and memmap live in Bridge RNA as LFS objects and can arrive as stub pointers. This now applies to `precompute/` only: the serving app reads its own cache and never opens an LFS object, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` in `manifold/preflight.py` have no overlap. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
 5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must let the density raster carry those 940,455 points, or, where there is no raster (3-D, or the underlay switched off), draw them as a deliberately faint context cloud in their own color at 0.35 opacity. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4".
@@ -131,7 +131,8 @@ Each was measured on the real corpus and cut on the evidence.
 
 **Cosine similarity to an OSDR reference** (mean centroid, flight centroid, ground centroid, and a flight-minus-ground "spaceflight-likeness" axis).
 The four scores are one field wearing four names, pairwise r 0.996 to 1.000.
-The "spaceflight-likeness" axis correlates r = -0.990 with PC1 and r = -0.779 with the raw L2 norm: it is the sequencing-depth axis relabelled as biology.
+The "spaceflight-likeness" axis correlates r = -0.990 with PC1 and r = -0.779 with the raw L2 norm.
+PC1 is neither spaceflight nor sequencing depth: it is a transcriptome-concentration axis (`REFERENCE.md` section 4), so the candidate measured how concentrated a sample's transcriptome is and called it resemblance to spaceflight.
 One in ten random flight/ground relabelings of the same sample sizes beat the real axis on spatial structure, and 46.5% did under a within-study permutation.
 
 **kNN tissue-label transfer from OSDR to ARCHS4.**
@@ -141,18 +142,18 @@ Median best-match cosine is 0.964 with 100% of points above 0.7, so no confidenc
 **Unsupervised k-means cluster id (k=24).**
 Built, run on the real corpus, measured, then deleted along with its precompute stage.
 81.9% of the cluster label is recoverable from the 2-D UMAP coordinates alone (15-NN over a 120k sample, against a 12.4% majority-class baseline), so coloring by it mostly redraws the shape already on screen, and a structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points of modal agreement.
-It is arbitrary (seed-to-seed ARI about 0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm depth variance.
+It is arbitrary (seed-to-seed ARI about 0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm variance.
 Numbering an arbitrary partition "Cluster 1..24" on a scientific instrument invites exactly the over-reading the rest of the design prevents.
 
 **Local UMAP density** is redundant with the density raster already rendered underneath.
-**PC1-3 as color-bys** are free (already in `coords_pca3.parquet`) but redundant with the axes on screen, and PC1 is the depth axis.
+**PC1-3 as color-bys** are free (already in `coords_pca3.parquet`) but redundant with the axes on screen.
 **GEO series (GSE)** has 51,284 distinct values, so a Top-11 legend would color about 3% of the map and dump the rest in "Other", a grey map by another route; it is also a pure batch label (333x lift). It stays in the parquet for provenance and is not offered as a color.
 
 **Methodological note for whoever evaluates the next candidate.**
 A between-bin/total variance ratio (spatial eta-squared) is not sufficient evidence that a color-by shows real structure.
 Thirty arbitrary random directions in 512-d score eta-squared 0.874 +/- 0.025 on this UMAP, because the UMAP was fit on those same vectors.
 Every candidate in the 0.89 to 0.94 band is indistinguishable from an arbitrary projection, and species (0.985) is the only one that clearly clears it.
-Judge a candidate against a structure-free null of the same *form*, and check whether it is recoverable from the coordinates or from sequencing depth.
+Judge a candidate against a structure-free null of the same *form*, and check whether it is recoverable from the coordinates themselves or from transcriptome concentration.
 
 ## Relationship to Bridge RNA
 

@@ -57,7 +57,7 @@ The serving app never opens it, so `BRIDGE_RNA_ROOT` is required to *build* the 
 ## 4. Measured vector statistics and timings (on Josh's Mac)
 
 Vector L2 norms (25k random sample): mean 10.57, std 2.26, min 6.75, max 25.47; no NaN or Inf.
-The 4x magnitude spread is why L2 normalization is required before reduction.
+The 3.9x magnitude spread is why L2 normalization is required before reduction; see "What the embedding norm actually is" below for what that magnitude turned out to measure.
 
 PCA variance (25k sample, before normalization): PC1 = 57.8% of variance; cumulative PC2 63.2%, PC5 71.3%, PC10 78.6%, PC20 87.2%, PC50 96.4%.
 PCA-50 fit on 25k x 512 = 11.7 s; projecting 200k to 2D via fitted components = 1.44 s, extrapolating to ~6.7 s for all 940k.
@@ -70,26 +70,70 @@ Landmark hybrid (fit ~200k subsample, transform the rest) is the tractable path.
 The 30-to-90-minute estimate above was wrong by an order of magnitude.
 The real `build_projections.py` run over 942,563 points (940,455 ARCHS4 + 2,108 OSDR) took **5 min 47 s end to end** on defaults.
 
-| stage | measured | still run? |
-| --- | --- | --- |
-| population moments, exact mean + covariance per corpus | 4 s | no, removed with the lasso |
-| IncrementalPCA-50 fit (60k ARCHS4 + 2,108 OSDR) | 1 s | yes |
-| PCA transform, all 942,563 points | 1 s | yes |
-| UMAP-2d landmark fit, 122,108 points | 71 s | yes |
-| UMAP-2d transform, remaining 820,455 | 71 s | yes |
-| UMAP-3d fit + transform | 143 s | yes |
-| hnswlib cosine index, 942,563 points, M=16 ef=120 | 52 s | no, removed with the lasso |
-| **total as it was run** | **347 s** | |
+| stage | 2026-07-21, original | 2026-07-21, retuned | still run? |
+| --- | --- | --- | --- |
+| population moments, exact mean + covariance per corpus | 4 s | - | no, removed with the lasso |
+| IncrementalPCA-50 fit (60k ARCHS4 + 2,108 OSDR) | 1 s | 1 s | yes |
+| PCA transform, all 942,563 points | 1 s | 2 s | yes |
+| UMAP-2d landmark fit, 122,108 points | 71 s | 68 s | yes |
+| UMAP-2d transform, remaining 820,455 | 71 s | 404 s | yes |
+| UMAP-3d fit + transform | 143 s | 467 s | yes |
+| hnswlib cosine index, 942,563 points, M=16 ef=120 | 52 s | - | no, removed with the lasso |
+| **total** | **347 s** | **~950 s (15.8 min)** | |
 
 Peak RSS ~2.5 GB against 17 GB.
-The two removed stages accounted for 56 s of that 347 s, so the current script is a **~291 s** job producing four coordinate parquets, two density rasters, the identity table, the ARCHS4 accession sidecar, and `projection_stats.json`.
+
+The retune (`n_neighbors` 30 to 15, and cosine on the raw 512-d instead of euclidean on PCA-50) roughly **triples the build**, from about 5 minutes to about 16 minutes, and all of the increase is in `.transform()`.
+The landmark *fit* actually got slightly faster, because halving `n_neighbors` more than pays for the 10x wider vectors.
+A cost probe before the rebuild predicted 7.3 minutes and was wrong by a factor of two: it timed a transform batch drawn as one contiguous random sample, whereas the real batches index the scattered `setdiff1d` complement of the landmark set, so the memmap gather dominates.
+Time a transform batch on genuinely scattered indices if this is ever re-estimated.
+
+### UMAP settings, chosen by measurement (2026-07-21)
+
+The reducer runs `n_neighbors=15`, `metric="cosine"`, on the **raw 512-d L2-normalized vectors**, not `n_neighbors=30` with euclidean on PCA-50.
+Scored on a 60,000-point sample against the original 512-d space, three seeds per configuration (seed sd was 0.001 to 0.002 on both metrics, so these gaps are 8 to 37 standard deviations):
+
+| configuration | kNN recall @15 | 25-NN tissue purity |
+| --- | --- | --- |
+| n_neighbors 30, euclidean on PCA-50 (previous) | 0.380 | 0.630 |
+| n_neighbors 15, euclidean on PCA-50 | 0.417 | 0.638 |
+| n_neighbors 30, cosine on raw 512-d | 0.398 | 0.642 |
+| **n_neighbors 15, cosine on raw 512-d (shipped)** | **0.426** | **0.646** |
+
+The two changes compose. Reducing to PCA-50 first was discarding the 4.9% of variance those components do not carry, and `n_neighbors=30` was over-smoothing local structure.
+
+Confirmed on the **real 942,563-point map**, not just the sample: 25-NN tissue purity over all 853,989 points carrying a real tissue bucket, 30,000 queries, went **0.6448 to 0.6756 (+4.8%)** against a permuted-label null of 0.0761, so the lift over null went 8.5x to 8.9x.
+The OSDR spread ratio also improved, 0.827 to 0.850, meaning the spaceflight corpus occupies more of the map rather than less.
 
 UMAP emits `n_jobs value 1 overridden to 1 by setting random_state`: seeding forces a single-threaded layout.
 At 71 s per fit that is not worth trading determinism for, so `random_state=42` stays.
 
 **PCA after L2 normalization: PC1 = 40.9%, cumulative over 50 PCs = 95.1%.**
-Contrast with the 57.8% above, which is the *pre-normalization* depth axis.
+Contrast with the 57.8% above, which is the *pre-normalization* magnitude axis.
 This pair is the objective test for invariant 2 - see `precompute/validate_artifacts.py`, which fails the build if PC1 is not well below 50%.
+
+### What the embedding norm actually is (measured 2026-07-21, corrects an earlier claim)
+
+Every earlier version of these documents called the pre-normalization L2 norm a **sequencing-depth axis**. That is wrong, and it was never measured - it was inferred from the fact that PC1 was large.
+
+The theoretical objection comes first: the encoder's input is **log1p-TPM**, and TPM is depth-normalized by construction, so library size has already been divided out before the model sees anything. The norm cannot be library size.
+
+Measured directly on OSDR, where `cache/osdr_expression.float32.npy` holds the exact log1p-TPM matrix that produced each of the 2,108 embeddings:
+
+| the embedding norm vs | pearson | spearman |
+| --- | --- | --- |
+| share of expression held by the top 100 genes | **+0.987** | +0.986 |
+| Gini concentration | +0.944 | +0.937 |
+| Shannon entropy of the log1p-TPM vector | **-0.930** | -0.923 |
+| number of genes detected | -0.654 | -0.698 |
+
+The norm is a measure of how **concentrated** a sample's transcriptome is, and that is biology, not an artifact. The per-tissue ordering is the textbook one: liver 13.57, skeletal muscle 12.92 and heart 12.62 hold the top three, each dominated by a handful of genes (albumin and apolipoproteins; the sarcomeric proteins), while bone/cartilage 7.34, skin 7.84 and brain 8.31 sit at the bottom, brain being the most transcriptionally complex tissue there is. Across the ARCHS4 sample, **26.2%** of the norm's variance is explained by tissue identity alone.
+
+Two consequences.
+
+**L2 normalization does not remove this signal.** A ridge probe predicting the raw norm from the *normalized* 512-d direction reaches a held-out **R^2 = 0.977**, and PC1 of the normalized space has spearman **+0.957** with the norm. Normalizing removes a redundant encoding of something the direction already carries; it does not remove the thing.
+
+**Do not try to project it out.** Removing the single best-fitting direction barely moves the probe (R^2 0.977 to 0.975), because the signal is spread across many directions - and it should not be removed anyway, since it is a real biological property rather than a technical covariate. Invariant 2's conclusion stands; only its stated reason was wrong. Normalize because a 3.9x magnitude spread would otherwise make the map about magnitude rather than direction.
 
 Structural facts from the same artifacts, re-verified 2026-07-21 by re-running `validate_artifacts.py`: all four coordinate parquets carry exactly 942,563 finite rows, `points_meta.parquet` marks the first 940,455 as ARCHS4 and the trailing 2,108 as OSDR, and the OSDR block occupies a real region of the map rather than one blob (OSDR umap2 spread / corpus spread = 0.827).
 
@@ -418,7 +462,7 @@ The evaluation scripts were not kept, so this record is the record; it exists so
 **(a) Cosine similarity to an OSDR reference.**
 Four variants were computed: mean centroid, flight centroid, ground centroid, and the flight-minus-ground "spaceflight-likeness" axis.
 The four are one field wearing four names, with pairwise r between 0.996 and 1.000.
-The spaceflight-likeness axis correlates **r = -0.990 with PC1** and **r = -0.779 with the raw L2 norm**: it is the sequencing-depth axis relabelled as biology, which is precisely the thing invariant 2 exists to keep off the map.
+The spaceflight-likeness axis correlates **r = -0.990 with PC1** and **r = -0.779 with the raw L2 norm**: PC1 is a transcriptome-concentration axis (see above), so the candidate measured concentration and called it resemblance to spaceflight.
 1 in 10 random flight/ground relabelings of the same sample sizes beat the real axis on spatial structure, and under a within-study permutation 46.5% did.
 
 **(b) kNN tissue-label transfer from OSDR to ARCHS4.**
@@ -430,13 +474,13 @@ The winning OSDR sample beats the runner-up by a **median of 0.00089 cosine**, s
 Built, run on the real corpus, measured, and then deleted along with its precompute stage and artifact.
 **81.9% of the cluster label is recoverable from the 2-D UMAP coordinates alone** (15-NN over a 120k sample, against a 12.4% majority-class baseline), so coloring by it mostly redraws the shape already on screen.
 A structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points of modal agreement.
-It is arbitrary (seed-to-seed ARI ~0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm depth variance.
+It is arbitrary (seed-to-seed ARI ~0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm variance.
 Numbering an arbitrary partition "Cluster 1..24" on a scientific instrument invites exactly the over-reading the rest of the design prevents.
 Note that `cache/projection_stats.json` on this machine still carries `cluster_k`, `cluster_sizes_archs4`, `cluster_sizes_osdr` and `cluster_osdr_span` keys from that build; nothing reads them and the current script does not write them.
 
 **(d) Local UMAP density.** Redundant with the density raster already rendered underneath every 2-D view.
 
-**(e) PC1-3 as color-bys.** Free, since they are already in `coords_pca3.parquet`, but redundant with the axes on screen, and PC1 is the depth axis.
+**(e) PC1-3 as color-bys.** Free, since they are already in `coords_pca3.parquet`, but redundant with the axes on screen.
 
 **(f) GEO series (GSE) as a color-by.** 51,284 distinct series, so a Top-11 legend would color about 3% of the map and dump the rest in "Other": a grey map by another route.
 It is also a pure batch label (333x lift).
@@ -448,7 +492,7 @@ A between-bin over total variance ratio (spatial eta-squared) is **not** suffici
 30 arbitrary random directions in 512-d score eta-squared **0.874 +/- 0.025** on this UMAP, because the UMAP was fit on those same vectors.
 Every candidate in the 0.89-0.94 band is therefore indistinguishable from an arbitrary projection.
 Species (0.985) is the only one that clearly clears the band.
-Judge a candidate against a structure-free null **of the same form**, and check whether it is recoverable from the coordinates or from sequencing depth before believing it.
+Judge a candidate against a structure-free null **of the same form**, and check whether it is recoverable from the coordinates or from transcriptome concentration before believing it.
 
 ## 12. Artifact inventory and test suite
 

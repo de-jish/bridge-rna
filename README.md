@@ -22,7 +22,8 @@ See `progress.md` for the live status log.
   All 48 OSDR raw values land in a named bucket rather than in "Other" or "Unknown", and so do 851,881 of 940,455 ARCHS4 samples (90.6%).
   The "Tissue" color-by covers 942,563 of 942,563 points.
 - **Reduces both corpora into one shared 2D and 3D space**, with PCA (fast, linear) and UMAP (structure-preserving, nonlinear).
-  Vectors are L2-normalized first: raw ARCHS4 norms span 6.7 to 25.5, and without normalization PC1 is 57.8% of the variance and is essentially a sequencing-depth axis.
+  Vectors are L2-normalized first: raw ARCHS4 norms span 6.7 to 26.4, and without normalization PC1 is 57.8% of the variance and is a magnitude axis.
+  That magnitude is not sequencing depth, as this file used to claim - it measures transcriptome concentration, at r = +0.987 with the share of expression held by a sample's top 100 genes.
   The built map has PC1 at 40.9%, with 95.1% cumulative over 50 components.
 - **Renders ~100k live glyphs over a density raster of all 942,563 points**, using Plotly WebGL scatter traces, so the global shape is always visible and interaction stays smooth.
   Zooming re-stratifies the sample inside the visible window rather than just enlarging sparse dots.
@@ -56,7 +57,7 @@ Each of these was built or measured before it was cut, and the evidence is recor
 
 - **Cosine similarity to an OSDR reference**, including a "spaceflight-likeness" axis of flight-centroid minus ground-centroid.
   The four variants turned out to be one field wearing four names (pairwise r 0.996 to 1.000), and the spaceflight axis correlates r = -0.990 with PC1 and r = -0.779 with the raw L2 norm.
-  It is the sequencing-depth axis with a biology label on it.
+  PC1 is a transcriptome-concentration axis, so the candidate measured how concentrated a sample's transcriptome is and labelled it resemblance to spaceflight.
   One in ten random flight/ground relabelings of the same sample sizes beat it on spatial structure; under a within-study permutation, 46.5% did.
 - **kNN tissue-label transfer from OSDR to ARCHS4.**
   The median best-match cosine is 0.964 and 100% of points sit above 0.7, so no confidence threshold discriminates anything.
@@ -66,7 +67,7 @@ Each of these was built or measured before it was cut, and the evidence is recor
   Built, run on the real corpus, measured, then deleted.
   81.9% of the cluster label is recoverable from the 2D UMAP coordinates alone, so coloring by it mostly redraws the shape already on screen.
   A structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points.
-  It is arbitrary (seed-to-seed ARI ~0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm depth variance.
+  It is arbitrary (seed-to-seed ARI ~0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm variance.
 - **GEO series (GSE).**
   51,284 distinct series, so a Top-11 legend would color ~3% of the map and dump the rest in "Other": a grey map by another route.
   It is also a pure batch label, 333x enriched over chance.
@@ -76,7 +77,7 @@ The methodological note is worth more than any individual verdict.
 A between-bin variance ratio (spatial eta-squared) is **not** sufficient evidence that a color-by shows real structure.
 30 arbitrary random directions in 512-d score eta-squared 0.874 +/- 0.025 on this UMAP, because the UMAP was fit on those same vectors.
 Every candidate in the 0.89 to 0.94 band is therefore indistinguishable from an arbitrary projection, and species (0.985) is the only one that clearly clears it.
-Judge a candidate against a structure-free null of the *same form*, and check whether it is recoverable from the coordinates or from sequencing depth before believing it.
+Judge a candidate against a structure-free null of the *same form*, and check whether it is recoverable from the coordinates or from transcriptome concentration before believing it.
 
 Tissue survives that bar.
 Its 25-NN label purity is 0.8142 against a permuted null of 0.0501, and it holds at 0.7058 under both a batch control and a depth control.
