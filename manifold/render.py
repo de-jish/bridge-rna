@@ -333,6 +333,11 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     query_symbol = "diamond" if is_3d else "star"
     # `cliponaxis` is a 2-D-only property and is likewise a hard error in 3-D.
     text_extras = {} if is_3d else {"cliponaxis": False}
+    # Scatter3d draws a marker of a given `size` considerably larger than
+    # Scattergl does, which is why the corpus layers already halve theirs. The
+    # overlay needs the same treatment: at full size the query halo rendered as
+    # a teal disc that dominated the scene instead of marking a point in it.
+    scale = 0.5 if is_3d else 1.0
 
     def _xyz(points):
         arr = np.asarray(points)
@@ -346,7 +351,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         # a glyph big enough to misrepresent where the sample actually is.
         traces.append(Scatter(
             **_xyz([int(query)]), mode="markers", name="query halo",
-            marker=dict(size=theme.RETRIEVAL_QUERY_HALO_SIZE, symbol="circle-open",
+            marker=dict(size=theme.RETRIEVAL_QUERY_HALO_SIZE * scale, symbol="circle-open",
                         color=theme.RETRIEVAL_QUERY_HALO,
                         line=dict(width=1.5, color=theme.RETRIEVAL_QUERY_HALO)),
             hoverinfo="skip", showlegend=False))
@@ -369,7 +374,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
             text=numerals, textposition="top center",
             textfont=dict(size=9, color=theme.RETRIEVAL_HIT_RING,
                           family="JetBrains Mono, SF Mono, monospace"),
-            marker=dict(size=theme.RETRIEVAL_HIT_SIZE, symbol="circle-open",
+            marker=dict(size=theme.RETRIEVAL_HIT_SIZE * scale, symbol="circle-open",
                         color=theme.RETRIEVAL_HIT_RING,
                         line=dict(width=theme.RETRIEVAL_HIT_LINE,
                                   color=theme.RETRIEVAL_HIT_RING)),
@@ -382,7 +387,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         label = str(retrieval.get("query_label") or "OSDR query")
         traces.append(Scatter(
             **_xyz([int(query)]), mode="markers", name="query",
-            marker=dict(size=theme.RETRIEVAL_QUERY_SIZE, symbol=query_symbol,
+            marker=dict(size=theme.RETRIEVAL_QUERY_SIZE * scale, symbol=query_symbol,
                         color=theme.RETRIEVAL_QUERY,
                         line=dict(width=2, color="#ffffff")),
             customdata=[[label]],

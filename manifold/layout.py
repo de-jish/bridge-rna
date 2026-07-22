@@ -142,9 +142,10 @@ def control_rail() -> html.Div:
                 # temptation to read rank off the picture is immediate.
                 html.Div(
                     "Hits are ranked by cosine distance in 512 dimensions. "
-                    "This map is a 2-D projection that does not preserve those "
-                    "distances, so how far a hit sits from the query here is "
-                    "not its rank, and no line is drawn between them.",
+                    "This map is a projection into two or three of them and "
+                    "does not preserve those distances, so how far a hit sits "
+                    "from the query here is not its rank, and no line is drawn "
+                    "between them. Hover a hit for both orderings.",
                     className="bm-hint",
                 ),
             ]),
