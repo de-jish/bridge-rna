@@ -60,7 +60,7 @@ Species split: `species_id` 0 (human) = 510,709; 1 (mouse) = 429,746; total 940,
 Manifest (`embedding_manifest.json`): `total_samples=940455`, `embedding_dim=512`, `embedding_dtype=float16`, `normalization=log1p_tpm`, `feature_type=flash`, not L2-normalized.
 
 This memmap is read by `precompute/build_projections.py` and by `precompute/validate_artifacts.py --mixing` only.
-The serving app never opens it, so `BRIDGE_RNA_ROOT` is required to *build* the cache and not to *run* the app.
+The map view never opens it, so `BRIDGE_RNA_ROOT` is required to *build* the cache and not to *draw* the map. The retrieval view does open it, on every cached search.
 
 ## 4. Measured vector statistics and timings (on Josh's Mac)
 
@@ -306,7 +306,7 @@ From `generate_archs4_embeddings.py`:
 From `app_osdr_dash.py`:
 
 - `_load_archs4_index() -> (np.memmap, pd.DataFrame, int)` at ~696-723, cached; reads the manifest, opens the float16 memmap `[n, d]`, loads `sample_locations.parquet`.
-  **No longer reused.** The serving app opens no embeddings, and the two precompute scripts that do open the memmap directly with `np.memmap` from the manifest.
+  **No longer reused by the map**, which opens no embeddings; the two precompute scripts open the memmap directly with `np.memmap` from the manifest, and so does `bridge_rna/retrieval.py` on the cached path.
 - `_topk_cosine_from_memmap(...)` at ~775-797, normalizes and does cosine top-k over the memmap.
   **No longer reused.** `validate_artifacts._osdr_neighbours` does its own exact blocked top-k, which is the only place in the repo that needs one.
 - `_find_precomputed_query_embedding_file()` at 692, and `PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES` (no such file currently exists on disk).

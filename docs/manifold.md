@@ -123,7 +123,7 @@ validate_artifacts.py -> exit code; gates a build
 ```
 
 The app never runs the model or UMAP; it reads precomputed coordinates and draws them.
-It also never opens the 963 MB ARCHS4 memmap, because it draws a precomputed map and so never needs a 512-d vector at request time.
+The map also never opens the 963 MB ARCHS4 memmap, because it draws precomputed coordinates and so never needs a 512-d vector at request time. (Since the merge, the retrieval half does open it on every search.)
 The serving dependency surface is therefore `dash`, `plotly`, `numpy`, `pandas`, and `pyarrow` - nothing scientific.
 `BRIDGE_RNA_ROOT` is required to *build* the cache, not to run the app.
 

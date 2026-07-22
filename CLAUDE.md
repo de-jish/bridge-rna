@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 176 tests pass in about two seconds, plus 27 browser checks in `tests/e2e_check.py`.
+**Current state: built, run on the real corpus, and tested.** 191 tests pass in about two seconds, plus 27 browser checks in `tests/e2e_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -28,19 +28,23 @@ So a query needs no subprocess and no network: **0.8 s against 22.1 s**, with `g
 `search_hits` returns `(hits, mode)` where mode is `cached`, `precomputed`, or `demo`, and **the interface must always say which ran**.
 It did not, once: the status banner special-cased only `precomputed`, so every cached result was announced as "real demo script output".
 
-### Three retrieval tiers, not two
+### Two retrieval tiers, not three
 
-`bridge_rna.retrieval.sample_tier` classifies every OSDR sample the picker lists, and the third tier is easy to miss - an earlier version of this file asserted there were only two.
+`bridge_rna.retrieval.sample_tier` classifies every OSDR sample the picker lists. Measured on the shipped metadata with the cache built:
 
 | tier | count | behaviour |
 | --- | --- | --- |
-| `cached` | 2,108 | precomputed vector, ~0.5 s, and has a position on the map |
-| `subprocess` | 717 | name matches a column in its study's counts matrix, ~22 s, no map position |
-| `unavailable` | **71** | name matches **no** column - `demo_osdr_top5.py` raises, and no path can serve it |
+| `cached` | **2,108** | precomputed vector, ~0.5 s, and has a position on the map |
+| `subprocess` | **0** | nothing reaches it while the cache exists |
+| `unavailable` | **788** | no path can serve it |
 
-The unavailable set is OSD-462 (54), OSD-374 (16), OSD-612 (1); two of those studies have nothing selectable at all.
-Verified end to end - `OSD-462|RR10_KDN_WT_BSL_B11` fails after 2.3 s with "found but has no readable counts/columns after processing".
-They are shown **disabled with the reason** rather than hidden, and the picker never defaults to a disabled option.
+**The zero is the point, and it took two attempts to get right.** An earlier version of `sample_tier` checked only whether a sample's name appears as a column in its counts matrix, and reported 717 samples as retrievable-but-slow. They are not. `demo_osdr_top5.py` filters its metadata to rows *with a recorded spaceflight value* before it looks the name up (`demo_osdr_top5.py:337-357`), so 733 of the 788 raise "not found after filtering", and the remaining 55 pass that filter but match no column.
+
+Both failures were reproduced end to end: `OSD-141|Mmus_C57-6J_SPL_cells_Rep1_SP1` fails in 4 s, `OSD-462|RR10_KDN_WT_BSL_B11` in 2.3 s.
+
+So with the cache present, every sample that can be retrieved at all is retrieved in half a second. `TIER_SUBPROCESS` is not dead code: without the cache those same 2,108 fall to it at about 22 s each.
+
+Unavailable samples are shown **disabled with the reason** rather than hidden, and the picker never defaults to a disabled option.
 
 Three features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), the hnswlib ANN index and population-moment artifacts that existed only to serve it, and the precomputed density raster underlay (with its PNGs, its `--density-only` flag, and the Pillow dependency).
 Where that history is instructive it is recorded as history, clearly marked.
@@ -74,7 +78,8 @@ fetch_archs4_meta.py -> archs4_metadata parquet
 validate_artifacts.py -> exit code, gates a build
 ```
 
-The serving app opens no embeddings, computes no statistics, and never touches a Git LFS object.
+The **map view** opens no embeddings, computes no statistics, and never touches a Git LFS object.
+The retrieval view does: its cached path scans the 963 MB ARCHS4 memmap, an LFS object, on every search. That is the one place in the serving process that touches one.
 `BRIDGE_RNA_ROOT` is needed to *build* the cache, not to run the app.
 The whole live cache measures 217.8 MB, of which the app opens 80.8 MB; the rest is the embedding intermediates that make a re-embed cheap plus the accession sidecar the metadata fetch joins onto (`REFERENCE.md` section 12).
 
@@ -112,7 +117,7 @@ Violating them produces output that looks fine but is scientifically wrong.
 1. **Gene-digest gate.** `embed_osdr.py` must compute `canonical_gene_order_digest(genes)` and assert it equals `CANONICAL_GENES_SHA256` (`3f887ac8d329dce3c54d26448964904c07a345940cd3d9ebab18dd1f603194c5`). Abort the build on mismatch. An embedding built with the wrong gene order is silently invalid.
 2. **L2-normalize before any reduction.** Raw ARCHS4 vectors are NOT normalized (norms 6.7-26.4, a 3.9x spread); unnormalized, PC1 captures 57.8% of variance and is a magnitude axis. The real normalized build lands at PC1 = 41.3% (exact, over the whole corpus; the 60,000-point subsample the earlier build used reported 40.9%), and `validate_artifacts.py` fails if it drifts back above 50%. **Do not describe that magnitude as sequencing depth** - the docs said so for a long time and it is wrong. The encoder's input is log1p-TPM, which is depth-normalized by construction, and the norm was measured on OSDR against the exact matrix that produced each embedding: it correlates **r = +0.987** with the share of expression held by the top 100 genes and **r = -0.930** with Shannon entropy. It is a transcriptome-*concentration* axis, and it is biology: liver 13.6, skeletal muscle 12.9 and heart 12.6 sit at the top, brain 8.3 and skin 7.8 at the bottom, which is the textbook ordering. Normalizing is still right, because a 3.9x magnitude spread would otherwise dominate the map, but it removes a redundant encoding rather than an artifact - the norm stays recoverable from the normalized direction at held-out R^2 = 0.977. See `REFERENCE.md` section 4.
 3. **Read model hyperparameters from `ckpt['config']`, not the demo's fallback constants.** The demo defaults differ from the true trained config.
-4. **Verify Git LFS pointers resolve before any run that touches Bridge RNA.** The checkpoint and memmap live in Bridge RNA as LFS objects and can arrive as stub pointers. This now applies to `precompute/` only: the serving app reads its own cache and never opens an LFS object, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` in `manifold/preflight.py` have no overlap. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
+4. **Verify Git LFS pointers resolve before any run that opens one.** The checkpoint and memmap are LFS objects and can arrive as stub pointers. `manifold/preflight.py` guards `precompute/`; the **map view** opens no LFS object at all, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` there have no overlap. The **retrieval view** does open the memmap on every cached search, and is guarded separately by `bridge_rna.preflight.preflight_retrieval_requirements`, whose LFS-pointer check runs at layout time and raises the setup banner. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
 5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must draw those 940,455 points as a deliberately faint context cloud in a single color that is not in the categorical palette (`theme.ARCHS4_CONTEXT`), at 0.35 opacity, with no legend row. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4". This used to have a second branch, in which the ARCHS4 layer drew nothing at all and a precomputed density raster carried the shape; the raster is gone, so the context cloud is now the only answer and it applies in 2-D and 3-D alike.
 6. **Both corpora share one tissue vocabulary.** `manifold/tissue.canonical_tissue` is the only entry point, used by `precompute/fetch_archs4_meta.py` for ARCHS4 and by `manifold/data.osdr_tissue` for OSDR. Two tissue color-bys wearing one name would each leave the other corpus grey, which is invariant 5 by another route.
 

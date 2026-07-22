@@ -89,12 +89,13 @@ def register(app) -> None:
         suffix = {
             TIER_CACHED: "",
             TIER_SUBPROCESS: "  ·  slow, not on the map",
-            TIER_UNAVAILABLE: "  ·  unavailable, no counts column",
+            TIER_UNAVAILABLE: "  ·  unavailable",
         }
         opts = []
         for _, r in filtered.iterrows():
             tier = sample_tier(_safe_str(r["sample_id"]), _safe_str(r["sample_name"]),
-                               _safe_str(r.get("counts_path")))
+                               _safe_str(r.get("counts_path")),
+                               _safe_str(r.get("condition")))
             label = (f"{_safe_str(r['sample_name'])} | {_safe_str(r['condition'])}"
                      f" | {_safe_str(r['tissue'])}{suffix[tier]}")
             opts.append({"label": label, "value": _safe_str(r["sample_id"]),
@@ -128,10 +129,14 @@ def register(app) -> None:
         if not match_any.empty:
             r0 = match_any.iloc[0]
             if sample_tier(_safe_str(r0["sample_id"]), _safe_str(r0["sample_name"]),
-                           _safe_str(r0.get("counts_path"))) == TIER_UNAVAILABLE:
+                           _safe_str(r0.get("counts_path")),
+                           _safe_str(r0.get("condition"))) == TIER_UNAVAILABLE:
+                reason = ("no spaceflight condition is recorded for it"
+                          if not _safe_str(r0.get("condition"))
+                          else "its name matches no column in its study's counts matrix")
                 return html.P(
-                    "This sample cannot be retrieved: its name matches no column "
-                    "in its study's counts matrix, so there is nothing to embed.",
+                    f"This sample cannot be retrieved: {reason}, so there is "
+                    "nothing to embed.",
                     className="sample-preview-empty")
         match = samples_df.loc[samples_df["sample_id"].astype(str) == str(sample_id)]
         if match.empty:

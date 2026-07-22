@@ -70,7 +70,7 @@ OSDR embeddings did not exist on disk; Bridge Manifold generates them.
 There is a hook in the Bridge RNA app for a precomputed OSDR query embedding file (`PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES`), but no such file is present.
 
 The memmap is read **only by the precompute scripts**.
-The serving app draws a precomputed map and never needs a 512-d vector, so it never opens it.
+The map view draws precomputed coordinates and never needs a 512-d vector, so it never opens it. (The retrieval view does, on every cached search.)
 
 ## 3. Architecture overview
 
@@ -96,7 +96,7 @@ fetch_archs4_meta.py
    and the canonical tissue bucket)
 ```
 
-The app never runs the model, never runs UMAP, and never opens the 963 MB memmap.
+The map never runs the model, never runs UMAP, and never opens the 963 MB memmap. (The retrieval half opens the memmap; it still never runs the model on the cached path.)
 It reads small precomputed tables and draws them.
 It *can* hold all 942,563 glyphs live, and by default it does; what it must never do is compute the coordinates they sit at.
 The whole serving dependency surface is `dash`, `plotly`, `numpy`, `pandas`, and `pyarrow`: no scientific stack at all.

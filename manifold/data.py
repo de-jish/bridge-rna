@@ -2,9 +2,10 @@
 
 The serving app loads only small precomputed artifacts: coordinate parquets, the
 identity table, the OSDR label table, and the ARCHS4 GEO metadata join.
-Nothing here imports torch or umap, and nothing here
-opens the 963 MB ARCHS4 embedding memmap - the app draws a precomputed map, so
-it never needs a 512-d vector at request time.
+Nothing here imports torch or umap, and nothing here opens the 963 MB ARCHS4
+embedding memmap - the map draws precomputed coordinates, so it never needs a
+512-d vector at request time. The retrieval half does open that memmap, on
+every cached search; this module is not on that path.
 
 `projection_stats.json` is deliberately not loaded here. The app read it only to
 place the density raster at its recorded extent, and with the raster gone the

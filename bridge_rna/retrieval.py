@@ -129,22 +129,56 @@ def _counts_columns(path: str) -> frozenset:
     return frozenset()
 
 
-def sample_tier(sample_id: str, sample_name: str, counts_path: str) -> str:
+def _passes_demo_filter(condition: str) -> bool:
+    """Whether `demo_osdr_top5.py` will even consider this sample.
+
+    It filters its metadata to mouse rows with a counts path *and a recorded
+    spaceflight value*, then looks the requested name up in what survives
+    (`demo_osdr_top5.py:337-357`). A sample with no spaceflight value is not
+    "slow to retrieve", it raises "Requested OSDR sample name not found after
+    filtering" - a different failure from the counts-column one, and the reason
+    the first version of this function was wrong.
+
+    Every row in the shipped metadata is Mus musculus and every row has a
+    counts path, so the spaceflight value is the only one of the three that
+    discriminates; it is still checked here rather than assumed.
+    """
+    s = _safe_str(condition).lower()
+    return bool(s) and s not in ("nan", "none", "na", "n/a")
+
+
+def sample_tier(sample_id: str, sample_name: str, counts_path: str,
+                condition: str = "") -> str:
     """Which retrieval path, if any, can answer for this OSDR sample.
 
-    The third tier is not hypothetical and was not obvious. 71 of the 2,896
-    samples the picker lists name no column in their own study's counts matrix,
-    so `demo_osdr_top5.py` raises "found but has no readable counts/columns
-    after processing" and no path can serve them - measured, and reproduced end
-    to end on OSD-462|RR10_KDN_WT_BSL_B11. They are `OSD-462` (54), `OSD-374`
-    (16) and `OSD-612` (1).
+    Measured on the shipped metadata, with the cache built:
 
-    Offering them and failing after the click is the thing this exists to
-    prevent. The picker disables them and says why, which is the same treatment
-    the map's color-by menu gives a field whose artifact has not been built.
+        cached       2,108   precomputed vector, ~0.5 s, and on the map
+        subprocess       0
+        unavailable    788   no path can serve them
+
+    The zero is the point, and it took two attempts to find. An earlier version
+    of this function checked only whether the sample's name appears as a column
+    in its counts matrix, and reported 717 samples as retrievable-but-slow.
+    They are not: 733 of the 788 carry no spaceflight value, so the demo
+    script's own filter drops them before it ever looks for the name, and the
+    remaining 55 pass that filter but match no column. Reproduced end to end -
+    `OSD-141|Mmus_C57-6J_SPL_cells_Rep1_SP1` fails in 4 s with "not found after
+    filtering", and `OSD-462|RR10_KDN_WT_BSL_B11` in 2.3 s with "found but has
+    no readable counts/columns after processing".
+
+    So with the cache present, every sample that can be retrieved at all is
+    retrieved in half a second. `TIER_SUBPROCESS` is not dead: without the
+    cache those same 2,108 samples fall to it and take about 22 seconds each.
+
+    Offering a sample and failing after the click is what this prevents. The
+    picker disables the unavailable ones and says why, which is the treatment
+    the map's color-by menu already gives a field whose artifact is not built.
     """
     if cached_query_vector(sample_id) is not None:
         return TIER_CACHED
+    if not _passes_demo_filter(condition):
+        return TIER_UNAVAILABLE
     path = _safe_str(counts_path)
     if not path:
         return TIER_UNAVAILABLE

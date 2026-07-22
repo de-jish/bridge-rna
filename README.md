@@ -48,8 +48,8 @@ A trained `ExpressionPerformer` model turns a gene-expression vector into a 512-
 Every ARCHS4 sample was pre-embedded into a memory-mapped index, so a query is one cosine pass over that index.
 The mouse query is mapped into human gene space through one-to-one orthologs and normalized (`log1p` of TPM) to match how the model was trained.
 
-**Most queries are answered in about half a second**, because all 2,108 eligible OSDR samples are already embedded and their GEO metadata is already joined locally.
-The alternative path - embedding a sample from its counts matrix in a subprocess - takes about 22 seconds and returns less metadata, and is used only for samples the precompute never covered.
+**Every query is answered in about half a second**, because all 2,108 retrievable OSDR samples are already embedded and their GEO metadata is already joined locally.
+The alternative path - embedding a sample from its counts matrix in a subprocess - takes about 22 seconds and returns less metadata; it is what runs on a clone that has not built the map cache.
 The interface always states which path produced an answer.
 
 ### What can be retrieved
@@ -58,12 +58,14 @@ The OSDR sample list is not uniformly searchable, and the app says so before you
 
 | | samples | behaviour |
 | --- | ---: | --- |
-| cached | 2,108 | precomputed embedding, about 0.5 s, and has a position on the map |
-| subprocess | 717 | embedded from its counts matrix on demand, about 22 s, no map position |
-| unavailable | 71 | its name matches no column in its study's counts matrix, so no path can serve it |
+| retrievable | 2,108 | precomputed embedding, about half a second, and has a position on the map |
+| unavailable | 788 | no path can serve it |
 
-The 71 unavailable samples are shown **disabled with the reason** rather than hidden, and the picker never defaults to one.
-They are OSD-462 (54 samples), OSD-374 (16) and OSD-612 (1).
+Of the 788, **733 have no spaceflight condition recorded**, which is the filter the embedding pipeline applies before it will consider a sample at all; the other 55 pass that filter but their name matches no column in their study's counts matrix.
+They are shown **disabled with the reason** rather than hidden, and the picker never defaults to one.
+
+So every sample that can be retrieved is retrieved in about half a second.
+The 22-second path still exists and still works - it is what runs on a clone that has not built the map cache, where all 2,108 fall to it.
 
 ## Requirements
 
@@ -209,7 +211,7 @@ It exists to test the instrument, not to be read.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q        # 179 tests, about two seconds
+.venv/bin/python -m pytest tests/ -q        # 191 tests, about two seconds
 .venv/bin/python tests/e2e_check.py         # 27 browser checks, about a minute
 ```
 
@@ -273,7 +275,7 @@ Set `BEDROCK_API_URL` (and `BEDROCK_API_KEY` if your gateway requires one) to ro
 | `bridge_rna/` | The retrieval half: config, preflight, OSDR loading, retrieval, GEO enrichment, AI, figures, panels, layout, callbacks. |
 | `manifold/` | The map half: paths, artifact loaders, the tissue vocabulary, the coverage-aware color-by registry, the layered renderer. |
 | `precompute/` | Offline jobs that build the map cache, plus the validator that gates a build. |
-| `tests/` | 179 pytest tests over a synthetic corpus, plus the browser check. |
+| `tests/` | 191 pytest tests over a synthetic corpus, plus the browser and join checks. |
 | `assets/` | Stylesheets, layered by load order: tokens, shell, retrieve, map. |
 | `demo_osdr_top5.py` | The subprocess retrieval path, also usable as a CLI. |
 | `generate_archs4_embeddings.py` | `ExpressionPerformer` and the batch job that builds the embedding index. |
@@ -375,7 +377,7 @@ Those points are now drawn as faint context with no legend row, and the menu lab
 
 ## Known limitations
 
-- 71 of the 2,896 listed OSDR samples cannot be retrieved at all, because their names match no column in their study's counts matrix. They are disabled in the picker rather than hidden.
+- 788 of the 2,896 listed OSDR samples cannot be retrieved at all: 733 have no spaceflight condition recorded, and 55 match no column in their study's counts matrix. They are disabled in the picker with the reason rather than hidden.
 - 839 ARCHS4 samples (0.089%) carry tissue "Unknown" because the metadata release the API serves dropped them. They are not guessed at.
 - `demo_osdr_top5.py` loads the entire embedding index into memory (~1.9 GB, ~3.9 GB peak). The app streams the index in chunks and does not have this problem.
 - The interface loads webfonts from `fonts.googleapis.com`, so first paint needs network access.

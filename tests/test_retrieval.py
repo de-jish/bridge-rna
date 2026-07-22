@@ -225,23 +225,41 @@ def test_a_sample_with_no_counts_column_is_unavailable_not_slow(tmp_path, corpus
     """
     counts = tmp_path / "counts.csv"
     counts.write_text("gene,SAMPLE_PRESENT,SAMPLE_OTHER\nActb,5,7\n")
+    flew = "Space Flight"
 
     assert retrieval.sample_tier(
-        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", str(counts)
+        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", str(counts), flew
     ) == retrieval.TIER_SUBPROCESS
     assert retrieval.sample_tier(
-        "OSD-999|SAMPLE_ABSENT", "SAMPLE_ABSENT", str(counts)
+        "OSD-999|SAMPLE_ABSENT", "SAMPLE_ABSENT", str(counts), flew
     ) == retrieval.TIER_UNAVAILABLE
     # No counts file recorded at all is equally unanswerable.
     assert retrieval.sample_tier(
-        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", ""
+        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", "", flew
     ) == retrieval.TIER_UNAVAILABLE
 
 
-def test_a_cached_sample_is_cached_whatever_its_counts_matrix_says(corpus):
-    """The cached vector wins: it exists, so nothing needs re-reading."""
+@pytest.mark.parametrize("condition", ["", "   ", "nan", "None", "NA", "n/a"])
+def test_no_spaceflight_value_means_unavailable_not_slow(tmp_path, condition):
+    """The filter that the first version of `sample_tier` missed.
+
+    `demo_osdr_top5.py` drops rows with no recorded spaceflight value *before*
+    it looks for the requested sample name, so such a sample raises "not found
+    after filtering" rather than being slow. Classifying it as `subprocess`
+    told the user to wait 22 seconds for a guaranteed failure - and 733 of the
+    788 unavailable samples fail for exactly this reason.
+    """
+    counts = tmp_path / "counts.csv"
+    counts.write_text("gene,SAMPLE_PRESENT\nActb,5\n")
+    assert retrieval.sample_tier(
+        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", str(counts), condition
+    ) == retrieval.TIER_UNAVAILABLE
+
+
+def test_a_cached_sample_is_cached_whatever_else_is_missing(corpus):
+    """The cached vector wins: it exists, so no filter needs re-deriving."""
     key = str(corpus["osdr_metadata"]["sample_key"].iloc[0])
-    assert retrieval.sample_tier(key, "irrelevant", "") == retrieval.TIER_CACHED
+    assert retrieval.sample_tier(key, "irrelevant", "", "") == retrieval.TIER_CACHED
 
 
 def test_the_cached_path_never_opens_a_checkpoint_or_shells_out(monkeypatch, corpus):

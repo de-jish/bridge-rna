@@ -31,13 +31,17 @@ Checked against each study's own counts matrix, the picker's 2,896 samples fall 
 
 | tier | count | behaviour |
 | --- | --- | --- |
-| cached | 2,108 | precomputed vector, ~0.5 s, and on the map |
-| subprocess | 717 | name matches a counts column, ~22 s, not on the map |
-| **unavailable** | **71** | name matches **no** column - every path raises |
+| cached | **2,108** | precomputed vector, ~0.5 s, and on the map |
+| subprocess | **0** | nothing reaches it while the cache exists |
+| **unavailable** | **788** | no path can serve it |
 
-Reproduced end to end: `OSD-462|RR10_KDN_WT_BSL_B11` fails after 2.3 s with "found but has no readable counts/columns after processing".
-They are OSD-462 (54), OSD-374 (16) and OSD-612 (1), and two of those studies have nothing selectable at all.
-The picker now disables them with the reason and labels the slow tier, so the difference is visible before the click rather than after a wait.
+**Corrected twice.** The first attempt said 788 fall back to the subprocess. The second said 717 do, having checked only whether a sample's name is a column in its counts matrix. Both were wrong, and an adversarial review caught the second.
+
+`demo_osdr_top5.py` filters its metadata to rows *with a recorded spaceflight value* before it looks the requested name up, so 733 of the 788 raise "not found after filtering" - a different error from the counts-column one, which is why checking only for the column looked convincing. The other 55 pass the filter and match no column.
+
+Both reproduced end to end: `OSD-141|Mmus_C57-6J_SPL_cells_Rep1_SP1` in 4 s, `OSD-462|RR10_KDN_WT_BSL_B11` in 2.3 s.
+
+The lesson is the one this file keeps relearning: a plausible mechanism that explains the failures you looked at is not the mechanism. The second version was checked against one failing sample and it happened to be one of the 55.
 
 - `app.py` is the single entry point: `/` retrieves, `/map` draws the manifold, one header and one port.
 - `app_osdr_dash.py` (2,470 lines) is now the `bridge_rna/` package; 49 definitions were moved by exact line range and a checker asserts each appears once with a byte-identical body.
