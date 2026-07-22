@@ -52,7 +52,7 @@ def build_graph_legend() -> Any:
             html.Span(className="legend-divider"),
             html.Div(className="legend-note", children=[
                 html.Span(className="legend-edge"),
-                html.Span("edge width = similarity score"),
+                html.Span("edge width = cosine similarity"),
             ]),
         ],
     )

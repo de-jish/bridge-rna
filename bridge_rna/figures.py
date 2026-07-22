@@ -53,14 +53,27 @@ def _empty_network_figure(message: str = "Run a search to build the retrieval ne
     return fig
 
 
+# Cosine similarities among retrieved hits live in a narrow high band - the
+# top five for the exemplar query span 0.9970 to 0.9954, a spread of 0.0016 -
+# and every edge maps onto this fixed domain rather than onto the min and max
+# of the current result set. A min-max rescale made the thinnest hit 1.5 px and
+# the thickest 8 px *regardless of the actual scores*, so a 0.0016 spread and a
+# 0.4 spread drew identically and the width encoded rank, not similarity. On a
+# fixed domain, near-equal scores draw near-equal widths - which is the honest
+# picture, and the same reason the map draws every hit ring identically.
+EDGE_WIDTH_DOMAIN = (0.90, 1.0)
+EDGE_WIDTH_RANGE = (1.5, 8.0)
+
+
 def _edge_width(scores: pd.Series) -> list[float]:
-    if len(scores) == 0:
-        return []
-    smin = float(scores.min())
-    smax = float(scores.max())
-    if abs(smax - smin) < 1e-12:
-        return [3.0] * len(scores)
-    return [1.5 + 6.5 * ((float(s) - smin) / (smax - smin)) for s in scores]
+    lo, hi = EDGE_WIDTH_DOMAIN
+    wlo, whi = EDGE_WIDTH_RANGE
+    span = hi - lo
+    out = []
+    for s in scores:
+        frac = min(1.0, max(0.0, (float(s) - lo) / span))
+        out.append(wlo + (whi - wlo) * frac)
+    return out
 
 
 def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:

@@ -238,7 +238,11 @@ def register(app) -> None:
             "precomputed": "from a supplied query-embedding table",
             "demo": "by embedding the counts matrix from scratch",
         }.get(mode, mode)
-        enriched = enable_biopython and _safe_str(entrez_email)
+        # The precomputed path (a supplied query-embedding table) does not
+        # enrich even when the box is ticked, so it must not claim to. Only the
+        # cached and demo paths run the NCBI fetch.
+        enriched = (enable_biopython and _safe_str(entrez_email)
+                    and mode in ("cached", "demo"))
         status_message = (
             f"Retrieved {len(hits_df)} hits {how}"
             + (", plus GEO and PubMed enrichment." if enriched else ".")

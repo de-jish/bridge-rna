@@ -262,6 +262,27 @@ def test_a_cached_sample_is_cached_whatever_else_is_missing(corpus):
     assert retrieval.sample_tier(key, "irrelevant", "", "") == retrieval.TIER_CACHED
 
 
+def test_edge_width_encodes_absolute_similarity_not_rank():
+    """The retrieval network's edge width must mean the cosine, not the rank.
+
+    A min-max rescale drew the thinnest hit at 1.5 px and the thickest at 8 px
+    whatever the actual scores were, so a 0.0016 spread among near-identical
+    hits looked as dramatic as a 0.4 one. The legend said 'similarity score',
+    which was then a claim the width did not keep. On a fixed domain, two
+    result sets with the same *shape* but different *magnitude* draw
+    differently, which is what 'width = similarity' has to mean.
+    """
+    import pandas as pd
+
+    from bridge_rna.figures import _edge_width
+
+    high = _edge_width(pd.Series([0.997, 0.995, 0.993]))
+    low = _edge_width(pd.Series([0.90, 0.70, 0.50]))
+    assert min(high) > max(low), "near-1.0 hits must draw thicker than 0.5-0.9 hits"
+    # Near-equal scores draw near-equal widths - the honest picture.
+    assert max(high) - min(high) < 0.5
+
+
 def test_on_demand_enrichment_keeps_columns_the_cached_schema_lacks():
     """The inspector's fetch must not drop the fields it went to fetch.
 
