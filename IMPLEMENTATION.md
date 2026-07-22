@@ -1,5 +1,13 @@
 # Bridge Manifold - Implementation Plan
 
+> **This document predates the 2026-07-22 merge.**
+> Bridge Manifold and Bridge RNA are now one repository and one application, served by `app.py`: the retrieval view at `/` and this map at `/map`.
+> There is no `app_manifold.py` and no separate repository at `/Users/josh/Bridge Manifold`.
+> The design decisions recorded below are still the ones the map is built on; the commands and the file layout have been updated where they would otherwise fail if followed.
+> See `README.md` for the current product and `progress.md` for what changed.
+
+
+
 Bridge Manifold is the exploratory companion to Bridge RNA.
 Where Bridge RNA answers "what are the closest Earth analogs for one spaceflight sample," Bridge Manifold answers "what is the global shape of the whole embedding space, and where does spaceflight sit inside it."
 It dimensionally reduces the 512-dimensional ExpressionPerformer embeddings of both corpora, ARCHS4 (940,455 human and mouse GEO samples) and OSDR (2,108 NASA GeneLab spaceflight samples), draws them together in one interactive WebGL scatter, and colors them by biology that is defined for both corpora rather than for one.
@@ -70,9 +78,9 @@ Bridge Manifold splits cleanly into an offline precompute stage and an online se
 This split is the single most important architectural decision, and it is forced by measured cost.
 
 ```
-OFFLINE (precompute/, run once -> cache/)      ONLINE (app_manifold.py, loads artifacts only)
+OFFLINE (precompute/, run once -> cache/)      ONLINE (app.py /map, loads artifacts only)
 ---------------------------------------        ----------------------------------------------
-embed_osdr.py                                  app_manifold.py
+embed_osdr.py                                  app.py
   OSDR counts -> 2,108 x 512 embeddings          coords_{pca,umap}{2,3}.parquet
   cache/osdr_sample_embeddings.float32.npy       points_meta.parquet   (identity table)
   cache/osdr_metadata.parquet                    osdr_metadata.parquet (OSDR labels)
@@ -560,7 +568,7 @@ This is the layout as built.
 
 ```
 Bridge Manifold/
-  app_manifold.py            # Dash entry: argparse host/port/debug, loopback guard
+  app.py                     # Dash entry (shared with retrieval): host/port/debug, loopback guard
   manifold/
     paths.py                 # every artifact path; BRIDGE_RNA_ROOT / MANIFOLD_CACHE_DIR overrides
     preflight.py             # missing-artifact and Git-LFS-pointer guards
@@ -691,7 +699,7 @@ The order matters: the metadata fetch joins onto artifacts that `build_projectio
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~50 min.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
-/Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                  # http://127.0.0.1:8051
+/Users/josh/Bridge-RNA/.venv/bin/python app.py                           # http://127.0.0.1:8050/map
 
 # Score a candidate projection against the shipped one, on the same sample:
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --quality --compare /path/to/other/coords
@@ -703,10 +711,10 @@ The order matters: the metadata fetch joins onto artifacts that `build_projectio
 Tests:
 
 ```bash
-cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
 ```
 
-160 tests in about a second, against a hermetic synthetic corpus (4,000 ARCHS4 + 300 OSDR points) that never touches the real memmap, the checkpoint, or the multi-hour artifacts.
+185 tests in about two seconds, against a hermetic synthetic corpus (4,000 ARCHS4 + 300 OSDR points) that never touches the real memmap, the checkpoint, or the multi-hour artifacts.
 The suite was 103 tests at 4.54 s before the redesign; removing the selection feature took the ANN index out of the fixture, which was 43% of the old runtime, and the color-by, tissue, and projection tests added back more coverage than was removed.
 `test_projections.py` is the one file that imports from `precompute/`, because the exact-PCA claim is the kind that has to be checked against a reference implementation rather than asserted in a docstring.
 The per-file split is in `REFERENCE.md` section 12.

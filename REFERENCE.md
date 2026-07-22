@@ -1,5 +1,13 @@
 # Bridge Manifold - Verified Reference
 
+> **This document predates the 2026-07-22 merge.**
+> Bridge Manifold and Bridge RNA are now one repository and one application, served by `app.py`: the retrieval view at `/` and this map at `/map`.
+> There is no `app_manifold.py` and no separate repository at `/Users/josh/Bridge Manifold`.
+> The design decisions recorded below are still the ones the map is built on; the commands and the file layout have been updated where they would otherwise fail if followed.
+> See `README.md` for the current product and `progress.md` for what changed.
+
+
+
 This is the ground-truth appendix for `IMPLEMENTATION.md`.
 Every fact here was verified directly against the checkpoint, the memmap, the parquet, and the data files, not taken from documentation or from an agent's summary.
 Sections 1 to 7 and 9 were verified on 2026-07-20 and re-checked against the shipped code on 2026-07-21; sections 8 and 10 to 12 were measured on 2026-07-21 against the real 942,563-point corpus.
@@ -236,7 +244,7 @@ The versions recorded during design had drifted by the time the build ran; these
 | h5py | 3.16.0 | installed for the ARCHS4 HDF5 experiment in section 8; not imported by any shipped code |
 
 `requirements.txt` splits the surface deliberately.
-The serving app (`manifold/` + `app_manifold.py`) needs only `dash`, `plotly`, `numpy`, `pandas`, `pyarrow`: it draws a precomputed map, opens no embeddings, and computes no statistics, so it carries no scientific stack at all.
+The map view (`manifold/`, served by `app.py`) needs only `dash`, `plotly`, `numpy`, `pandas`, `pyarrow`: it draws a precomputed map, opens no embeddings, and computes no statistics, so it carries no scientific stack at all.
 `torch`, `scikit-learn`, `umap-learn`, `pynndescent`, and `requests` are precompute-only.
 `scikit-learn` survives in that list only for `validate_artifacts.py --quality`; the build itself stopped importing it when `IncrementalPCA` was replaced by an exact streaming eigendecomposition.
 
@@ -598,7 +606,7 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**160 tests, all passing, in about 1.0 s** (`cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-22 by running the suite.
+**160 tests, all passing, in about 1.0 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-22 by running the suite.
 
 | file | tests |
 | --- | --- |
@@ -640,7 +648,7 @@ One trap it encodes: under plotly 6 the coordinates arrive as base64 typed-array
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py   # full-corpus PCA + UMAP coords.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py   # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
-/Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                   # http://127.0.0.1:8051
+/Users/josh/Bridge-RNA/.venv/bin/python app.py                            # http://127.0.0.1:8050/map
 
 # Score a candidate projection against the shipped one, on the same sample:
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --quality --compare DIR

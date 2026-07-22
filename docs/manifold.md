@@ -1,5 +1,13 @@
 # Bridge Manifold
 
+> **This document predates the 2026-07-22 merge.**
+> Bridge Manifold and Bridge RNA are now one repository and one application, served by `app.py`: the retrieval view at `/` and this map at `/map`.
+> There is no `app_manifold.py` and no separate repository at `/Users/josh/Bridge Manifold`.
+> The design decisions recorded below are still the ones the map is built on; the commands and the file layout have been updated where they would otherwise fail if followed.
+> See `README.md` for the current product and `progress.md` for what changed.
+
+
+
 Bridge Manifold is the exploratory map for Bridge RNA.
 
 Bridge RNA takes one NASA spaceflight RNA-seq sample and retrieves its closest Earth analogs from a 940,455-sample ARCHS4/GEO index.
@@ -10,7 +18,7 @@ It dimensionally reduces the 512-dimensional ExpressionPerformer embeddings of b
 
 Application complete and running on the real data.
 The full pipeline has been run end to end on the 942,563-point corpus (940,455 ARCHS4 + 2,108 OSDR): OSDR embeddings, joint PCA and UMAP in 2D and 3D fit on every point, and the ARCHS4 GEO metadata join.
-160 tests pass in about a second.
+185 tests pass in about two seconds.
 See `progress.md` for the live status log.
 
 ## What it does
@@ -105,7 +113,7 @@ All imports from the sibling repo are funnelled through `manifold/bridge_rna.py`
 
 ```
 OFFLINE (run once, cached)                      ONLINE (Dash app, loads artifacts only)
-embed_osdr.py         -> osdr embeddings         app_manifold.py
+embed_osdr.py         -> osdr embeddings         app.py
 build_projections.py  -> pca/umap coords          loads coord parquets + label tables
                       -> point identity table     color-by registry declares coverage
                       -> ARCHS4 accession sidecar renders every point as Scattergl
@@ -141,7 +149,7 @@ $PY precompute/embed_osdr.py                       # OSDR embeddings, gene-diges
 $PY precompute/build_projections.py                # full-corpus PCA + UMAP coords. ~50 min.
 $PY precompute/fetch_archs4_meta.py                # ARCHS4 GEO metadata. ~35 s, needs network.
 $PY precompute/validate_artifacts.py --mixing --quality   # gates the build; exits nonzero on failure.
-$PY app_manifold.py                                # http://127.0.0.1:8051
+$PY app.py                                         # http://127.0.0.1:8050/map
 ```
 
 `embed_osdr.py` writes progress as it goes and resumes where it stopped, so an interrupted run does not restart from zero.
@@ -168,7 +176,7 @@ To exercise the interface immediately, build a synthetic corpus of the same shap
 ```bash
 PY=/Users/josh/Bridge-RNA/.venv/bin/python
 $PY tests/build_dev_corpus.py --out /tmp/bm-dev --archs4 60000 --osdr 2000 --clean
-BRIDGE_RNA_ROOT=/tmp/bm-dev/bridge_rna MANIFOLD_CACHE_DIR=/tmp/bm-dev/cache $PY app_manifold.py
+BRIDGE_RNA_ROOT=/tmp/bm-dev/bridge_rna MANIFOLD_CACHE_DIR=/tmp/bm-dev/cache $PY app.py
 ```
 
 The numbers are synthetic - shaped like the real corpus, with real cluster structure, but meaningless biologically.
@@ -183,7 +191,7 @@ That is the degraded state a fresh clone starts in, and it is the fastest way to
 /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
 ```
 
-160 tests, about a second.
+185 tests, about two seconds.
 The suite builds its own synthetic corpus in a temp directory (4,000 ARCHS4 + 300 OSDR points) and never touches the 963 MB memmap or the checkpoint, so it runs on a machine that has neither.
 
 The corpus is generated from known latent clusters with metadata derived from those clusters, which gives the render tests real category structure to assert against rather than noise.
