@@ -303,18 +303,18 @@ From `generate_archs4_embeddings.py`:
 - `CANONICAL_GENES_SHA256` at 40 and `canonical_gene_order_digest(genes)` at 43-51. **Both imported**, and together they are the gene-digest build gate.
 - `_strip_module_prefix(state_dict)` at 258, removes a leading `module.` from keys. **Imported.**
 
-From `app_osdr_dash.py`:
+From `bridge_rna/` (the retrieval package, split from the now-deleted `app_osdr_dash.py` monolith):
 
-- `_load_archs4_index() -> (np.memmap, pd.DataFrame, int)` at ~696-723, cached; reads the manifest, opens the float16 memmap `[n, d]`, loads `sample_locations.parquet`.
-  **No longer reused by the map**, which opens no embeddings; the two precompute scripts open the memmap directly with `np.memmap` from the manifest, and so does `bridge_rna/retrieval.py` on the cached path.
-- `_topk_cosine_from_memmap(...)` at ~775-797, normalizes and does cosine top-k over the memmap.
-  **No longer reused.** `validate_artifacts._osdr_neighbours` does its own exact blocked top-k, which is the only place in the repo that needs one.
-- `_find_precomputed_query_embedding_file()` at 692, and `PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES` (no such file currently exists on disk).
-- `preflight_retrieval_requirements(...)` and `_is_lfs_pointer(...)` LFS guards near 480-510.
-  Reimplemented rather than imported, in `manifold/preflight.py`, so the serving app can preflight without importing a 2,470-line Dash app.
+- `_load_archs4_index() -> (np.memmap, pd.DataFrame, int)` at `bridge_rna/retrieval.py:293`, cached; reads the manifest, opens the float16 memmap `[n, d]`, loads `sample_locations.parquet`.
+  **Reused by the retrieval view's cached path**, which calls it to open the 963 MB memmap on every cached search; the map view does not reuse it, since it opens no embeddings, and the two precompute scripts open the memmap directly with `np.memmap` from the manifest.
+- `_topk_cosine_from_memmap(...)` at `bridge_rna/retrieval.py:372`, normalizes the query and does cosine top-k over the memmap, streaming it in 25,000-row chunks.
+  **Reused by the retrieval view's cached path**, which pairs it with `_load_archs4_index` to score a query against the whole memmap. The map view does not use it; `validate_artifacts._osdr_neighbours` does its own exact blocked top-k for the mixing check.
+- `_find_precomputed_query_embedding_file()` at `bridge_rna/retrieval.py:289`, and `PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES` at `bridge_rna/config.py:41` (no such file currently exists on disk).
+- `preflight_retrieval_requirements(...)` at `bridge_rna/preflight.py:151` and `_is_lfs_pointer(...)` at `bridge_rna/preflight.py:135`, the retrieval LFS guards.
+  Reimplemented rather than imported, in `manifold/preflight.py`, so the map view can preflight without importing the retrieval package.
   The signature checked is the leading `version https://git-lfs.github.com/spec/v1` in a file under 4096 bytes.
-- Ollama AI-summary integration near the top constants (`OLLAMA_BASE_URL=http://127.0.0.1:11434`, `OLLAMA_MODEL=gemma3:4b`).
-  Not used by Bridge Manifold.
+- Ollama AI-summary integration, its constants `OLLAMA_BASE_URL=http://127.0.0.1:11434` and `OLLAMA_MODEL=gemma3:4b` at `bridge_rna/config.py:38-39` and the calls in `bridge_rna/ai.py`.
+  Not used by the map view.
 
 ## 7. OSDR color-by columns
 
@@ -450,7 +450,7 @@ Switch to the versioned files if this ever needs to be a build **gate** rather t
 `fetch_archs4_meta.py` joins onto `cache/archs4_geo.parquet` and `cache/points_meta.parquet`, so it must run **after** `build_projections.py`, and it aborts with that instruction if either file is missing.
 It is still optional: without it the tissue color-by is shown disabled with the command that enables it attached, and ARCHS4 colors by species.
 
-## 9. Visual theme tokens (from Bridge RNA's `assets/style.css` and this repo's `manifold/theme.py`)
+## 9. Visual theme tokens (from `assets/00-tokens.css` and `manifold/theme.py`)
 
 Light scientific-instrument chrome, reused verbatim from Bridge RNA:
 `--bg-canvas #eef2f7`, `--bg-panel #ffffff`, `--bg-panel-raised #f4f7fb`, `--bg-inset #f5f8fc`.
@@ -658,4 +658,4 @@ The metadata fetch runs third because it joins onto artifacts `build_projections
 `BRIDGE_RNA_ROOT` is needed for the first two steps and for `--mixing` and `--quality`, and not for running the app.
 
 Flags that appear in older prose and no longer exist: `--skip-hnsw`, `--density-only`, `--pca-fit-sample`, `--umap-fit-sample`, `--pca-components`.
-The current `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`.
+The current `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--densmap`, and `--dens-lambda`.

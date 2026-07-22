@@ -37,7 +37,7 @@ It must make batch structure visible and disclose the measured cross-corpus tech
 
 Bridge Manifold does not retrain or fine-tune the ExpressionPerformer model.
 It does not re-embed ARCHS4; those 940,455 embeddings already exist and are consumed as-is.
-It does not replace the Bridge RNA retrieval app; it is a separate app that reuses Bridge RNA's code and visual language.
+It does not replace the Bridge RNA retrieval app; the map is a distinct view served alongside retrieval by the one merged app, reusing Bridge RNA's code and visual language.
 It does not perform batch-effect correction by default; instead it makes batch structure visible as a color-by and discloses the measured effect on the control rail.
 
 It does not compute statistics on demand.
@@ -505,10 +505,10 @@ A field that passes the eta-squared eye test and fails both of those checks is a
 
 ## 8. Key design decisions and tradeoffs
 
-**Standalone app, not bolted into Bridge RNA.**
-Bridge Manifold is a separate Dash app in its own directory, importing reusable functions from Bridge RNA rather than editing the 2,470-line retrieval app.
-This keeps the heavy exploratory tool from destabilizing the retrieval product, while a shared header and shared CSS make them feel like one instrument.
-The tradeoff is a small amount of duplicated app scaffolding, which is worth it for isolation.
+**Standalone app, not bolted into Bridge RNA (original design; merged 2026-07-22).**
+Bridge Manifold was built as a separate Dash app in its own directory, importing reusable functions from Bridge RNA rather than editing the then-2,470-line retrieval app, so the heavy exploratory tool could not destabilize the retrieval product while a shared header and shared CSS made the two feel like one instrument.
+The two were merged on 2026-07-22 into a single Dash app: `app.py` serves a shared header and a URL router, with retrieval at `/` and the manifold at `/map`.
+The isolation that motivated the original split now lives inside one repository as the package boundary between `bridge_rna/` (retrieval) and `manifold/` (map), and the merge removed the duplicated app scaffolding the split had cost.
 
 **Offline precompute over interactive computation.**
 Every expensive step (model inference, PCA, UMAP) is precomputed and cached, and the app only ever loads artifacts.
@@ -564,15 +564,27 @@ Those two dead artifacts have since been deleted, along with the density rasters
 
 ## 9. Directory layout
 
-This is the layout as built.
+This is the current repository layout, after the 2026-07-22 merge that folded the map into the Bridge RNA repository as a second view.
 
 ```
-Bridge Manifold/
-  app.py                     # Dash entry (shared with retrieval): host/port/debug, loopback guard
-  manifold/
+Bridge-RNA/
+  app.py                     # single Dash entry point: shared header + URL router (/ retrieval, /map manifold)
+  bridge_rna/                # the retrieval view, split from the deleted app_osdr_dash.py monolith
+    config.py                # constants, paths, Ollama + precomputed-query-embedding candidates
+    util.py                  # small shared helpers
+    preflight.py             # retrieval artifact + Git-LFS-pointer guards
+    osdr.py                  # OSDR sample listing / lookup
+    ai.py                    # Ollama AI-summary integration
+    geo.py                   # GEO / ARCHS4 metadata lookups
+    figures.py               # retrieval-graph figure construction
+    retrieval.py             # the cached path: opens the ARCHS4 memmap, cosine top-k
+    panels.py                # result / detail panels
+    layout.py                # retrieval page layout
+    callbacks.py             # retrieval callbacks
+  manifold/                  # the map view served at /map
     paths.py                 # every artifact path; BRIDGE_RNA_ROOT / MANIFOLD_CACHE_DIR overrides
     preflight.py             # missing-artifact and Git-LFS-pointer guards
-    bridge_rna.py            # the single seam that imports from the sibling repo
+    bridge_rna.py            # the single seam that imports Bridge RNA's model and preprocessing code
     data.py                  # parquet loaders, the fixed global point order, module-level caches
     tissue.py                # the shared tissue vocabulary, used by both corpora
     colorby.py               # the coverage-aware color-by registry
@@ -596,9 +608,17 @@ Bridge Manifold/
     test_render.py           # shared palette, context-not-grey, budgets, viewport, legend
     test_projections.py      # the exact PCA against sklearn, sign stability, global point order
     test_app.py              # callback wiring, coverage readout, CSS class coverage
+    test_retrieval.py        # the retrieval view's cached path and memmap cosine top-k
     e2e_check.py             # outside pytest: boots the real app + browser against the real cache
   assets/
-    manifold.css             # Bridge RNA tokens, Dash 4 token remap, dark-canvas + legend rules
+    00-tokens.css            # Bridge RNA design tokens + Dash 4 token remap
+    01-shell.css             # shared app shell / header chrome
+    retrieve.css             # retrieval-view styles
+    map.css                  # map-view dark-canvas + legend rules
+  demo_osdr_top5.py          # Bridge RNA reference: OSDR preprocessing + single-sample retrieval driver
+  generate_archs4_embeddings.py  # Bridge RNA reference: ExpressionPerformer + ARCHS4 embedding generation
+  osdr_metadata.py           # OSDR dataset metadata via the NASA OSDR biodata API
+  fetch_artifacts.py         # downloads and verifies the large runtime artifacts (checkpoint, ARCHS4 index)
   cache/                     # generated (gitignored): embeddings, coords, metadata
   requirements.txt
   REFERENCE.md

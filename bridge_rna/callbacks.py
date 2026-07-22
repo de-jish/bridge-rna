@@ -116,11 +116,29 @@ def register(app) -> None:
     @app.callback(
         Output("sample-preview", "children"),
         Input("sample-dropdown", "value"),
+        State("study-dropdown", "value"),
     )
-    def update_sample_preview(sample_id: str):
+    def update_sample_preview(sample_id: str, study_id: str | None = None):
         """Instant local summary of the selected OSDR sample, shown before any search."""
         empty = html.P("Select a sample to preview its metadata.", className="sample-preview-empty")
         if not sample_id:
+            # No sample is selected. Usually that just means the page just
+            # loaded - but for the 24 studies where every sample is
+            # unavailable, the picker deliberately selects nothing, and a
+            # generic "select a sample" hides why nothing is selectable. Say so.
+            if study_id is not None:
+                in_study = samples_df[samples_df["study_id"] == study_id]
+                if len(in_study) and all(
+                    sample_tier(_safe_str(r["sample_id"]), _safe_str(r["sample_name"]),
+                                _safe_str(r.get("counts_path")), _safe_str(r.get("condition")))
+                    == TIER_UNAVAILABLE
+                    for _, r in in_study.iterrows()
+                ):
+                    return html.P(
+                        f"No sample in {study_id} can be retrieved: none has a "
+                        "spaceflight condition recorded, or the counts matrix "
+                        "does not contain it. Choose another study.",
+                        className="sample-preview-empty")
             return empty
         # Belt and braces: the picker never selects a disabled option, but if a
         # sample reaches here that cannot be answered, say so before the click

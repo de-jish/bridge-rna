@@ -233,7 +233,7 @@ Nothing but arithmetic enforces that, and if it ever drifts the map would keep d
 
 The app runs with no credentials.
 All configuration is read from environment variables in the process that starts the app; nothing is loaded from a file automatically.
-See `.env.example` for the full list, and never commit real keys.
+See `.env.example` for the common ones, and never commit real keys.
 
 ### AI readings (Ollama, default)
 

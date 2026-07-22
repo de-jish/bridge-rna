@@ -21,9 +21,10 @@ Measured on OSD-100 `Mmus_C57-6J_EYE_FLT_Rep1_M23`, top-5:
 | path | wall clock | gse / title / tissue |
 | --- | --- | --- |
 | subprocess (`demo_osdr_top5.py`) | 22.1 s | all empty |
-| cached (manifold artifacts) | 0.8 s | populated, offline |
+| cached (manifold artifacts) | ~0.5 s (warm) | populated, offline |
 
 Identical accessions and identical scores to six decimal places.
+The cached figure is the warm end-to-end `search_hits` time, measured at 0.44-0.57 s across runs; the first call after startup is nearer 0.8 s while the memmap pages in. 22.1 / 0.5 is the 44x in the heading.
 `search_hits` returns which path ran so the interface can say so.
 
 **Correction, made the same day.** This entry first said "the subprocess path stays for the 788 samples the manifold never embedded", and that is wrong for 71 of them.
@@ -444,9 +445,8 @@ Perplexity 200 is not an option at 3.5 hours for 60,000 points.
 
 - **densMAP** raises density fidelity from 0.441 to 0.739, fixing a known UMAP lie, and is free - a flag on a dependency already present.
   It was rejected because `umap-learn` raises `NotImplementedError: Transforming data into an existing embedding not supported for densMAP`, so it could not use the landmark pattern and would have needed a direct 942,563-point fit.
-  **That rejection expired on 2026-07-22.**
-  There is no landmark pattern any more, a direct 942,563-point fit is exactly what the build now does, and it costs 251 s.
-  The only reason densMAP is not shipped is that nobody has run it; see next steps.
+  **That rejection expired on 2026-07-22, and densMAP was then run and rejected again on fresh evidence** - see the "densMAP: measured at full corpus scale, and rejected" section near the top of this file.
+  Rebuilt at full scale it loses to the shipped UMAP on both local fidelity (-41% in 2-D) and tissue purity, so it is still not shipped, now for a measured reason rather than an untested one.
 - **PaCMAP** and **LocalMAP** buy real global fidelity (0.284 and 0.316 against UMAP's 0.113) but PaCMAP is worse than UMAP on both local structure and tissue purity, and LocalMAP destroys density fidelity (0.081). Neither earns a menu slot.
 - **TriMap** collapses. Local fidelity 0.001, tissue purity 0.095 against a 0.073 null, and every point sharing a bin with OSDR - the rendered plot is empty.
 - **PHATE** has *negative* density fidelity and produces the crescent it produces when there is no trajectory. It is a tool for developmental data being pointed at a heterogeneous grab-bag of GEO.
