@@ -25,7 +25,13 @@ from .figures import _empty_network_figure, build_network_figure
 from .geo import _enrich_hits_from_ncbi_eutils
 from .layout import ARCHS4_SAMPLE_COUNT, samples_df
 from .panels import _details_head, build_details_panel, build_status_banner
-from .retrieval import search_hits
+from .retrieval import (
+    TIER_CACHED,
+    TIER_SUBPROCESS,
+    TIER_UNAVAILABLE,
+    sample_tier,
+    search_hits,
+)
 from .util import _format_count, _last_nonempty_line, _safe_str
 
 
@@ -38,13 +44,35 @@ def register(app) -> None:
         Input("study-dropdown", "value"),
     )
     def update_sample_options(study_id: str):
+        """List a study's samples, and say up front which ones can be answered.
+
+        71 of the 2,896 samples name no column in their own study's counts
+        matrix, so every retrieval path raises for them. They stay in the list
+        and are disabled, rather than being hidden: a sample that silently
+        vanishes looks like a bug in the catalogue, while a disabled one with a
+        reason is a fact about the data. This is the treatment the map's
+        color-by menu already gives a field whose artifact is not built.
+        """
         filtered = samples_df[samples_df["study_id"] == study_id].copy()
+        suffix = {
+            TIER_CACHED: "",
+            TIER_SUBPROCESS: "  ·  slow, not on the map",
+            TIER_UNAVAILABLE: "  ·  unavailable, no counts column",
+        }
         opts = []
         for _, r in filtered.iterrows():
-            label = f"{_safe_str(r['sample_name'])} | {_safe_str(r['condition'])} | {_safe_str(r['tissue'])}"
-            opts.append({"label": label, "value": _safe_str(r["sample_id"])})
-        value = opts[0]["value"] if opts else None
-        return opts, value
+            tier = sample_tier(_safe_str(r["sample_id"]), _safe_str(r["sample_name"]),
+                               _safe_str(r.get("counts_path")))
+            label = (f"{_safe_str(r['sample_name'])} | {_safe_str(r['condition'])}"
+                     f" | {_safe_str(r['tissue'])}{suffix[tier]}")
+            opts.append({"label": label, "value": _safe_str(r["sample_id"]),
+                         "disabled": tier == TIER_UNAVAILABLE})
+        # Never select a disabled option. Two studies - OSD-462 (54 samples)
+        # and OSD-374 (16) - have nothing selectable at all, and choosing
+        # opts[0] there would arm Search with a query that cannot succeed.
+        # Selecting nothing is the honest state, and the preview explains it.
+        enabled = [o for o in opts if not o["disabled"]]
+        return opts, (enabled[0]["value"] if enabled else None)
 
 
     @app.callback(
@@ -56,6 +84,18 @@ def register(app) -> None:
         empty = html.P("Select a sample to preview its metadata.", className="sample-preview-empty")
         if not sample_id:
             return empty
+        # Belt and braces: the picker never selects a disabled option, but if a
+        # sample reaches here that cannot be answered, say so before the click
+        # rather than after a wait.
+        match_any = samples_df.loc[samples_df["sample_id"].astype(str) == str(sample_id)]
+        if not match_any.empty:
+            r0 = match_any.iloc[0]
+            if sample_tier(_safe_str(r0["sample_id"]), _safe_str(r0["sample_name"]),
+                           _safe_str(r0.get("counts_path"))) == TIER_UNAVAILABLE:
+                return html.P(
+                    "This sample cannot be retrieved: its name matches no column "
+                    "in its study's counts matrix, so there is nothing to embed.",
+                    className="sample-preview-empty")
         match = samples_df.loc[samples_df["sample_id"].astype(str) == str(sample_id)]
         if match.empty:
             return empty

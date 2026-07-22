@@ -108,6 +108,53 @@ def cached_query_coverage() -> tuple[int, bool]:
     return (0, False) if cached is None else (len(cached[1]), True)
 
 
+# --- What can actually be retrieved, and how ---------------------------------
+
+TIER_CACHED = "cached"        # precomputed vector: ~0.5 s, and on the map
+TIER_SUBPROCESS = "subprocess"  # embeddable from counts: ~22 s, not on the map
+TIER_UNAVAILABLE = "unavailable"  # no usable counts column: retrieval raises
+
+
+@lru_cache(maxsize=1)
+def _counts_columns(path: str) -> frozenset:
+    """The column names of a counts matrix, read from its header row only."""
+    for candidate in (Path(path), ROOT / path):
+        if candidate.exists():
+            try:
+                return frozenset(pd.read_csv(candidate, nrows=0).columns)
+            except Exception:
+                return frozenset()
+    return frozenset()
+
+
+def sample_tier(sample_id: str, sample_name: str, counts_path: str) -> str:
+    """Which retrieval path, if any, can answer for this OSDR sample.
+
+    The third tier is not hypothetical and was not obvious. 71 of the 2,896
+    samples the picker lists name no column in their own study's counts matrix,
+    so `demo_osdr_top5.py` raises "found but has no readable counts/columns
+    after processing" and no path can serve them - measured, and reproduced end
+    to end on OSD-462|RR10_KDN_WT_BSL_B11. They are `OSD-462` (54), `OSD-374`
+    (16) and `OSD-612` (1).
+
+    Offering them and failing after the click is the thing this exists to
+    prevent. The picker disables them and says why, which is the same treatment
+    the map's color-by menu gives a field whose artifact has not been built.
+    """
+    if cached_query_vector(sample_id) is not None:
+        return TIER_CACHED
+    path = _safe_str(counts_path)
+    if not path:
+        return TIER_UNAVAILABLE
+    return (TIER_SUBPROCESS if _safe_str(sample_name) in _counts_columns(path)
+            else TIER_UNAVAILABLE)
+
+
+# Caching by study rather than by sample: 2,896 lookups would otherwise re-read
+# 94 header rows thousands of times.
+_counts_columns = lru_cache(maxsize=256)(_counts_columns.__wrapped__)
+
+
 @lru_cache(maxsize=1)
 def _archs4_annotations() -> pd.DataFrame | None:
     """GEO metadata for every ARCHS4 sample, positioned by memmap row index.

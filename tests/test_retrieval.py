@@ -215,6 +215,35 @@ def test_missing_geo_metadata_yields_blanks_rather_than_the_string_nan(monkeypat
     assert (hits["gse"] == "").any(), "the blanked rows must actually be reached"
 
 
+def test_a_sample_with_no_counts_column_is_unavailable_not_slow(tmp_path, corpus):
+    """The third tier is the one that was missed, and it is the one that matters.
+
+    A sample whose name appears in no column of its own study's counts matrix
+    cannot be answered by any path: the cached vector does not exist and
+    `demo_osdr_top5.py` raises. Calling that "slow" would send someone to wait
+    22 seconds for a guaranteed failure.
+    """
+    counts = tmp_path / "counts.csv"
+    counts.write_text("gene,SAMPLE_PRESENT,SAMPLE_OTHER\nActb,5,7\n")
+
+    assert retrieval.sample_tier(
+        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", str(counts)
+    ) == retrieval.TIER_SUBPROCESS
+    assert retrieval.sample_tier(
+        "OSD-999|SAMPLE_ABSENT", "SAMPLE_ABSENT", str(counts)
+    ) == retrieval.TIER_UNAVAILABLE
+    # No counts file recorded at all is equally unanswerable.
+    assert retrieval.sample_tier(
+        "OSD-999|SAMPLE_PRESENT", "SAMPLE_PRESENT", ""
+    ) == retrieval.TIER_UNAVAILABLE
+
+
+def test_a_cached_sample_is_cached_whatever_its_counts_matrix_says(corpus):
+    """The cached vector wins: it exists, so nothing needs re-reading."""
+    key = str(corpus["osdr_metadata"]["sample_key"].iloc[0])
+    assert retrieval.sample_tier(key, "irrelevant", "") == retrieval.TIER_CACHED
+
+
 def test_the_cached_path_never_opens_a_checkpoint_or_shells_out(monkeypatch, corpus):
     """The fast path must not reach the subprocess. A regression there would be
     invisible except as a 44x slowdown, which no assertion elsewhere would catch."""
