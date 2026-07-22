@@ -237,7 +237,12 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
             "range": [0.0 - _label_overhang("query") - 0.04, 2.1 + _label_overhang("gse") + 0.04],
         },
         yaxis={"visible": False},
-        clickmode="event+select",
+        # "event", not "event+select". Clicking a node opens it in the
+        # inspector; it does not select anything. With "+select" Plotly applied
+        # its selection styling on every click, fading all the *other* nodes to
+        # near-invisible - so inspecting one hit made the rest of the retrieval
+        # look like it had been dismissed. clickData fires either way.
+        clickmode="event",
         # The font colour must be set explicitly. Plotly only auto-contrasts the
         # hover text when it also picks the background; forcing bgcolor to white
         # while leaving the colour unset makes it inherit the trace colour, so
