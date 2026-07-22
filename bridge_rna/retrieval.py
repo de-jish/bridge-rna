@@ -115,7 +115,9 @@ TIER_SUBPROCESS = "subprocess"  # embeddable from counts: ~22 s, not on the map
 TIER_UNAVAILABLE = "unavailable"  # no usable counts column: retrieval raises
 
 
-@lru_cache(maxsize=1)
+# One entry per study, not per sample: classifying all 2,896 samples would
+# otherwise re-read the same 94 header rows thousands of times.
+@lru_cache(maxsize=256)
 def _counts_columns(path: str) -> frozenset:
     """The column names of a counts matrix, read from its header row only."""
     for candidate in (Path(path), ROOT / path):
@@ -149,10 +151,6 @@ def sample_tier(sample_id: str, sample_name: str, counts_path: str) -> str:
     return (TIER_SUBPROCESS if _safe_str(sample_name) in _counts_columns(path)
             else TIER_UNAVAILABLE)
 
-
-# Caching by study rather than by sample: 2,896 lookups would otherwise re-read
-# 94 header rows thousands of times.
-_counts_columns = lru_cache(maxsize=256)(_counts_columns.__wrapped__)
 
 
 @lru_cache(maxsize=1)
