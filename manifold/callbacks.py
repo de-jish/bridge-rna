@@ -231,24 +231,32 @@ def register(app):
     @app.callback(
         Output("retrieval-group", "style"),
         Output("retrieval-summary", "children"),
+        Output("frame-retrieval", "style"),
         Input("hits-store", "data"),
+        Input("dims", "value"),
     )
-    def show_retrieval_group(hits_payload):
+    def show_retrieval_group(hits_payload, dims):
         """Reveal the retrieval control only when there is a retrieval.
 
         An always-visible control that does nothing until you have searched
         somewhere else is worse than no control: it reads as broken.
+
+        The same argument hides the frame button in 3-D. Framing works by
+        pinning the 2-D axis ranges, which the 3-D camera ignores, so the
+        button would have been a click with no visible effect - the thing this
+        map removed the lasso for.
         """
         overlay = _retrieval_overlay(hits_payload)
         if overlay is None:
-            return {"display": "none"}, ""
+            return {"display": "none"}, "", {"display": "none"}
         n = len(overlay["hit_points"])
         query = overlay["query_label"] or "an OSDR sample"
+        frame_style = {} if dims == "2d" else {"display": "none"}
         return {}, [
             html.B(query.split("|")[-1]),
             f" and its {n} nearest ARCHS4 neighbour{'s' if n != 1 else ''}, "
             "drawn where they sit in the space.",
-        ]
+        ], frame_style
 
     @app.callback(
         Output("viewport-store", "data"),
