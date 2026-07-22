@@ -195,8 +195,20 @@ def register(app) -> None:
 
         query_row = q_match.iloc[0]
         hits_df = pd.DataFrame(hits_payload.get("hits", []))
-        if not _safe_str(hits_payload.get("entrez_email")):
-            hits_payload["entrez_email"] = GENERIC_ENTREZ_EMAIL
+        email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
+
+        # The study abstracts and overall-design text are the substance of what
+        # the model reasons over, and the local cache does not carry them. With
+        # search-time enrichment now off by default, this is where they get
+        # fetched: once, for the hits about to be summarized, rather than on
+        # every search whether or not anyone asks for a hypothesis.
+        if not hits_df.empty and "geo_summary" in hits_df.columns:
+            if not hits_df["geo_summary"].astype(str).str.strip().any():
+                try:
+                    hits_df = _enrich_hits_from_ncbi_eutils(hits_df, email)
+                except Exception as exc:  # never let enrichment block the summary
+                    print(f"[ai] GEO enrichment failed, summarizing without it: {exc}",
+                          flush=True)
 
         prompt_template = _load_ai_prompt_template()
         prompt = prompt_template.format(
@@ -240,21 +252,30 @@ def register(app) -> None:
 
         sample_id = _safe_str(hits_payload.get("sample_id"))
         entrez_email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
-        biopython_enabled = bool(hits_payload.get("biopython_enabled", False))
         q_row = samples_df.loc[samples_df["sample_id"] == sample_id].iloc[0]
         hits_df = pd.DataFrame(hits_payload.get("hits", []))
 
-        # If a GSM is clicked and fields are blank, enrich that one on demand.
-        if selected_node and _safe_str(selected_node.get("kind")) == "gsm" and not hits_df.empty and biopython_enabled and entrez_email:
+        # Open a GSM whose study context was never fetched, and fetch it now -
+        # one accession, for the hit actually being read. This is what makes
+        # search-time enrichment safe to leave off.
+        #
+        # The condition tests the *study context* fields specifically. It used
+        # to ask whether any of gse/title/geo_summary/pubmed_ids had content,
+        # which was a reasonable proxy while a hit arrived either fully
+        # enriched or completely bare. The cached path always fills gse and
+        # title from the local join, so that test now passes for every hit and
+        # the abstract would never be fetched at all.
+        if (selected_node and _safe_str(selected_node.get("kind")) == "gsm"
+                and not hits_df.empty and entrez_email):
             gsm = _safe_str(selected_node.get("node_id"))
             one = hits_df[hits_df["gsm"] == gsm]
             if not one.empty:
                 r = one.iloc[0]
-                has_core = any(
+                has_context = any(
                     _safe_str(r.get(c))
-                    for c in ["gse", "title", "geo_summary", "pubmed_ids"]
+                    for c in ["geo_summary", "geo_design", "pubmed_ids"]
                 )
-                if not has_core:
+                if not has_context:
                     enriched_one = _enrich_hits_from_ncbi_eutils(one.copy(), entrez_email)
                     for col in enriched_one.columns:
                         if col in hits_df.columns:

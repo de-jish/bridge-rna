@@ -153,11 +153,34 @@ def build_view() -> html.Div:
                                                     ),
                                                 ],
                                             ),
+                                            # Off by default now. Every hit
+                                            # already arrives with its GEO
+                                            # series, title, source name and
+                                            # tissue from the local cache; this
+                                            # adds study abstracts, overall
+                                            # design, and PubMed records, at a
+                                            # network round trip per accession.
+                                            # Leaving it on made a 0.8 s search
+                                            # take 11 s, for text most searches
+                                            # never open. The inspector fetches
+                                            # it for the one hit you click, and
+                                            # the AI panel fetches it for all of
+                                            # them before it writes.
                                             dcc.Checklist(
                                                 id="biopython-toggle",
-                                                options=[{"label": " Enrich with Biopython (GEO + PubMed)", "value": "on"}],
-                                                value=["on"],
+                                                options=[{
+                                                    "label": " Fetch study abstracts and publications during search",
+                                                    "value": "on",
+                                                }],
+                                                value=[],
                                                 className="dash-checklist",
+                                            ),
+                                            html.Div(
+                                                "Adds roughly two seconds per hit. "
+                                                "Off, a search is local and instant, and "
+                                                "abstracts are fetched for a hit when you "
+                                                "open it or when the AI hypothesis needs them.",
+                                                className="control-hint",
                                             ),
                                         ],
                                     ),
