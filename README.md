@@ -10,7 +10,7 @@ It dimensionally reduces the 512-dimensional ExpressionPerformer embeddings of b
 
 Application complete and running on the real data.
 The full pipeline has been run end to end on the 942,563-point corpus (940,455 ARCHS4 + 2,108 OSDR): OSDR embeddings, joint PCA and UMAP in 2D and 3D fit on every point, and the ARCHS4 GEO metadata join.
-153 tests pass in a few seconds.
+160 tests pass in about a second.
 See `progress.md` for the live status log.
 
 ## What it does
@@ -183,7 +183,7 @@ That is the degraded state a fresh clone starts in, and it is the fastest way to
 /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
 ```
 
-153 tests, a few seconds.
+160 tests, about a second.
 The suite builds its own synthetic corpus in a temp directory (4,000 ARCHS4 + 300 OSDR points) and never touches the 963 MB memmap or the checkpoint, so it runs on a machine that has neither.
 
 The corpus is generated from known latent clusters with metadata derived from those clusters, which gives the render tests real category structure to assert against rather than noise.

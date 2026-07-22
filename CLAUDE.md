@@ -9,7 +9,7 @@ Bridge RNA retrieves the closest Earth analogs for one NASA spaceflight RNA-seq 
 Bridge Manifold zooms out: it dimensionally reduces the 512-d ExpressionPerformer embeddings of both corpora - OSDR (2,108 NASA GeneLab spaceflight samples) and ARCHS4 (940,455 GEO samples) - into one shared 2D/3D space, renders every one of the 942,563 points as a live WebGL glyph, and colors them by biology.
 
 **Current state: built, run on the real corpus, and tested.**
-`manifold/` and `precompute/` are complete, the full offline pipeline has been executed against the real 942,563-point corpus, and 152 tests pass in a few seconds.
+`manifold/` and `precompute/` are complete, the full offline pipeline has been executed against the real 942,563-point corpus, and 160 tests pass in about a second.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 Three features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), the hnswlib ANN index and population-moment artifacts that existed only to serve it, and the precomputed density raster underlay (with its PNGs, its `--density-only` flag, and the Pillow dependency).
@@ -36,7 +36,7 @@ Do not move model inference or UMAP into the serving app.
 ```
 OFFLINE (precompute/, run once -> cache/)        ONLINE (app_manifold.py, loads artifacts only)
 embed_osdr.py        -> osdr embeddings npy       coord parquets + points_meta + osdr_metadata
-build_projections.py -> pca/umap coord parquets   + archs4_metadata                (81.5 MB opened)
+build_projections.py -> pca/umap coord parquets   + archs4_metadata                (80.8 MB opened)
                      -> points_meta identity      renders every point as go.Scattergl
                      -> archs4_geo sidecar         colorby.py decides coverage; render.py draws it
 fetch_archs4_meta.py -> archs4_metadata parquet
@@ -46,7 +46,7 @@ validate_artifacts.py -> exit code, gates a build
 
 The serving app opens no embeddings, computes no statistics, and never touches a Git LFS object.
 `BRIDGE_RNA_ROOT` is needed to *build* the cache, not to run the app.
-The whole live cache measures 219.2 MB, of which the app opens 82.3 MB; the rest is the embedding intermediates that make a re-embed cheap plus the accession sidecar the metadata fetch joins onto (`REFERENCE.md` section 12).
+The whole live cache measures 217.8 MB, of which the app opens 80.8 MB; the rest is the embedding intermediates that make a re-embed cheap plus the accession sidecar the metadata fetch joins onto (`REFERENCE.md` section 12).
 
 ### Package layout
 
@@ -75,7 +75,7 @@ These are correctness gates, not style preferences.
 Violating them produces output that looks fine but is scientifically wrong.
 
 1. **Gene-digest gate.** `embed_osdr.py` must compute `canonical_gene_order_digest(genes)` and assert it equals `CANONICAL_GENES_SHA256` (`3f887ac8d329dce3c54d26448964904c07a345940cd3d9ebab18dd1f603194c5`). Abort the build on mismatch. An embedding built with the wrong gene order is silently invalid.
-2. **L2-normalize before any reduction.** Raw ARCHS4 vectors are NOT normalized (norms 6.7-26.4, a 3.9x spread); unnormalized, PC1 captures 57.8% of variance and is a magnitude axis. The real normalized build lands at PC1 = 40.9%, and `validate_artifacts.py` fails if it drifts back above 50%. **Do not describe that magnitude as sequencing depth** - the docs said so for a long time and it is wrong. The encoder's input is log1p-TPM, which is depth-normalized by construction, and the norm was measured on OSDR against the exact matrix that produced each embedding: it correlates **r = +0.987** with the share of expression held by the top 100 genes and **r = -0.930** with Shannon entropy. It is a transcriptome-*concentration* axis, and it is biology: liver 13.6, skeletal muscle 12.9 and heart 12.6 sit at the top, brain 8.3 and skin 7.8 at the bottom, which is the textbook ordering. Normalizing is still right, because a 3.9x magnitude spread would otherwise dominate the map, but it removes a redundant encoding rather than an artifact - the norm stays recoverable from the normalized direction at held-out R^2 = 0.977. See `REFERENCE.md` section 4.
+2. **L2-normalize before any reduction.** Raw ARCHS4 vectors are NOT normalized (norms 6.7-26.4, a 3.9x spread); unnormalized, PC1 captures 57.8% of variance and is a magnitude axis. The real normalized build lands at PC1 = 41.3% (exact, over the whole corpus; the 60,000-point subsample the earlier build used reported 40.9%), and `validate_artifacts.py` fails if it drifts back above 50%. **Do not describe that magnitude as sequencing depth** - the docs said so for a long time and it is wrong. The encoder's input is log1p-TPM, which is depth-normalized by construction, and the norm was measured on OSDR against the exact matrix that produced each embedding: it correlates **r = +0.987** with the share of expression held by the top 100 genes and **r = -0.930** with Shannon entropy. It is a transcriptome-*concentration* axis, and it is biology: liver 13.6, skeletal muscle 12.9 and heart 12.6 sit at the top, brain 8.3 and skin 7.8 at the bottom, which is the textbook ordering. Normalizing is still right, because a 3.9x magnitude spread would otherwise dominate the map, but it removes a redundant encoding rather than an artifact - the norm stays recoverable from the normalized direction at held-out R^2 = 0.977. See `REFERENCE.md` section 4.
 3. **Read model hyperparameters from `ckpt['config']`, not the demo's fallback constants.** The demo defaults differ from the true trained config.
 4. **Verify Git LFS pointers resolve before any run that touches Bridge RNA.** The checkpoint and memmap live in Bridge RNA as LFS objects and can arrive as stub pointers. This now applies to `precompute/` only: the serving app reads its own cache and never opens an LFS object, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` in `manifold/preflight.py` have no overlap. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
 5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must draw those 940,455 points as a deliberately faint context cloud in a single color that is not in the categorical palette (`theme.ARCHS4_CONTEXT`), at 0.35 opacity, with no legend row. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4". This used to have a second branch, in which the ARCHS4 layer drew nothing at all and a precomputed density raster carried the shape; the raster is gone, so the context cloud is now the only answer and it applies in 2-D and 3-D alike.
@@ -186,7 +186,7 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                  # http://127.0.0.1:8051
 
-cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q   # 152 tests, a few seconds
+cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q   # 160 tests, about a second
 ```
 
 The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.

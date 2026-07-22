@@ -534,7 +534,7 @@ The artifact existed, the precompute stage ran on the real corpus, and it was de
 Recording this as a decision rather than quietly dropping it matters: the work was not wasted, it produced the measurement that says the feature would have misled people, and that measurement is cheaper to read than to repeat.
 
 **L2-normalize before reducing.**
-Because retrieval is cosine and the raw vectors carry a 3.9x magnitude spread that dominates PC1 (57.8% before normalization, 40.9% after), we normalize first so the manifold reflects transcriptomic direction rather than magnitude.
+Because retrieval is cosine and the raw vectors carry a 3.9x magnitude spread that dominates PC1 (57.8% before normalization, 41.3% after), we normalize first so the manifold reflects transcriptomic direction rather than magnitude.
 The magnitude is redundant rather than technical: it is recoverable from the normalized direction at held-out R^2 = 0.977, and it measures transcriptome concentration.
 
 **Make batch visible, do not correct it (final).**
@@ -551,7 +551,7 @@ This is the same lesson as the entry above, arriving from the rendering side rat
 **No on-demand statistics.**
 The selection readout was removed rather than repaired.
 It was the app's largest source of complexity (a 450-line statistics module, a 2.07 GB ANN index, an exact covariance artifact, a third UI column) in service of a question the map itself answers qualitatively, and every number it produced had to be defended against a null that most readers would never see.
-Removing it dropped the cache from about 2.3 GB to a measured 219.2 MB (of which the app opens 82.3 MB), took the serving app's dependency surface down to `dash`/`plotly`/`numpy`/`pandas`/`pyarrow`, and cut the test suite from 4.54 s to about 0.55 s.
+Removing it dropped the cache from about 2.3 GB to a measured 219.2 MB (since 217.8 MB, of which the app opens 80.8 MB, after the density rasters went too), took the serving app's dependency surface down to `dash`/`plotly`/`numpy`/`pandas`/`pyarrow`, and cut the test suite from 4.54 s to about 0.55 s.
 Those two dead artifacts have since been deleted, along with the density rasters, so `cache/` now measures what `REFERENCE.md` section 12 records.
 
 ## 9. Directory layout
@@ -706,7 +706,7 @@ Tests:
 cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
 ```
 
-152 tests in a few seconds, against a hermetic synthetic corpus (4,000 ARCHS4 + 300 OSDR points) that never touches the real memmap, the checkpoint, or the multi-hour artifacts.
+160 tests in about a second, against a hermetic synthetic corpus (4,000 ARCHS4 + 300 OSDR points) that never touches the real memmap, the checkpoint, or the multi-hour artifacts.
 The suite was 103 tests at 4.54 s before the redesign; removing the selection feature took the ANN index out of the fixture, which was 43% of the old runtime, and the color-by, tissue, and projection tests added back more coverage than was removed.
 `test_projections.py` is the one file that imports from `precompute/`, because the exact-PCA claim is the kind that has to be checked against a reference implementation rather than asserted in a docstring.
 The per-file split is in `REFERENCE.md` section 12.

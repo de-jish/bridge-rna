@@ -255,7 +255,7 @@ Four library behaviours the code actively depends on, each of which caused a rea
   Components are styled through Dash's own structural classes and its `--Dash-*` tokens.
   Dash's dropdown also has no option-group support, which is why `colorby.menu_options()` carries grouping through ordering plus a scope suffix rather than faked header rows.
 - **pandas 3.0, again, and this one is a memory trap rather than a correctness one**: `.to_numpy()` on a string-dtype Series materializes a *fresh* Python `str` object per element.
-  `render._colour_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry, against an app that otherwise opens 81.5 MB.
+  `render._colour_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry, against an app that otherwise opens 80.8 MB.
   It is stored as `int16` legend slots instead, which is 1.9 MB, and category selection becomes a vectorized integer compare rather than 942,563 Python string comparisons.
   Measured effect on the render path: a warm figure over the whole corpus went from 1.33 s to 0.06 s.
 
@@ -598,7 +598,7 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**156 tests, all passing, in about 1.2 s** (`cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-22 by running the suite.
+**160 tests, all passing, in about 1.0 s** (`cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-22 by running the suite.
 
 | file | tests |
 | --- | --- |
@@ -607,10 +607,10 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 | `tests/test_app.py` | 27 |
 | `tests/test_data.py` | 22 |
 | `tests/test_colorby.py` | 18 |
-| `tests/test_projections.py` | 9 |
+| `tests/test_projections.py` | 13 |
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
-The runtime fell by 88% mostly because the fixture no longer builds an approximate-nearest-neighbour index, which was 43% of the old wall clock; it rose again to ~1.2 s because `test_projections.py` runs several 512-dimensional eigendecompositions.
+The runtime fell by 88% mostly because the fixture no longer builds an approximate-nearest-neighbour index, which was 43% of the old wall clock; it rose again to ~1.0 s because `test_projections.py` runs several 512-dimensional eigendecompositions.
 
 `tests/test_projections.py` is new and is the only file that imports from `precompute/`.
 It exists because the build's central claim, that a streaming second-moment pass reproduces a full-corpus PCA exactly, is not the kind of thing a docstring can establish: it is scored against `sklearn.decomposition.PCA` on planted low-rank data, to a max explained-variance-ratio difference below 1e-9 and component agreement below 1e-6.
