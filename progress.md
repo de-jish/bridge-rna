@@ -240,6 +240,47 @@ Total live cache **219.2 MB**, of which the serving app opens **82.3 MB**.
 
 `joint_cosine.hnsw` (2,070.4 MB) and `population_moments.npz` (4.2 MB) were deleted on 2026-07-21 once nothing produced or read them, which is what took `cache/` from 2.1 GB to 214 MB.
 
+## Dimensionality-reduction evaluation (2026-07-21)
+
+Question asked: is any method beyond PCA and UMAP worth adding?
+Ten methods were fitted on an identical deterministic 60,000-point subsample (57,892 ARCHS4 + all 2,108 OSDR), each fed the PCA-50 the pipeline already builds, and scored against the **original 512-d normalized space** rather than against their own input.
+The scoring code and every embedding are in the session scratchpad; the metrics are kNN recall at k=15 (local), Spearman rho of pairwise distances (global), Spearman rho of local density (density honesty), 25-NN purity of the shared `tissue` label (biological fidelity, permuted null 0.073), and the percentage of ARCHS4 points sharing a 100x100 grid bin with any OSDR point.
+
+| method | local | global | density | **tissue** | mix % | fit 60k | out-of-sample |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| PCA-2 | 0.037 | **0.849** | 0.419 | 0.179 | 42.9 | 0.2 s | trivial |
+| UMAP, shipped settings | 0.377 | 0.113 | 0.441 | 0.636 | 8.9 | 46 s | works |
+| UMAP, n_neighbors 15 + cosine on raw 512-d | 0.426 | - | - | 0.646 | - | 26 s | works |
+| densMAP, dens_lambda 0.5 | 0.344 | 0.136 | **0.739** | 0.609 | 8.6 | 117 s | **none** |
+| PaCMAP | 0.348 | 0.284 | 0.457 | 0.611 | 7.8 | - | works |
+| LocalMAP | 0.419 | 0.316 | 0.081 | 0.644 | 5.7 | - | works |
+| openTSNE, perplexity 30 | **0.581** | 0.290 | 0.444 | **0.668** | 2.2 | 108 s | works |
+| openTSNE, perplexity 200 | 0.484 | 0.281 | 0.596 | 0.650 | 6.8 | 12,756 s | works |
+| TriMap | 0.001 | 0.609 | 0.144 | 0.095 | 100.0 | - | - |
+| PHATE | 0.237 | 0.225 | -0.050 | 0.435 | 14.7 | - | - |
+
+**The cheapest win is not a new method.** Retuning the existing UMAP to `n_neighbors=15` with `metric="cosine"` on the raw 512-d vectors, instead of `n_neighbors=30` with euclidean on PCA-50, raises local fidelity from 0.380 to 0.426 and tissue purity from 0.630 to 0.646, and runs slightly faster.
+The two changes compose and both are far larger than seed noise: three seeds per configuration gave a standard deviation of 0.001 to 0.002 on both metrics, so these are 8 to 37 standard deviations, not luck.
+This was the control run deliberately, because shipping a "new method" that is really a parameter change would be embarrassing.
+
+**If a third method is added, it is openTSNE at perplexity 30 with PCA initialization.**
+It is the only candidate that beats UMAP on local fidelity (0.581 against 0.426 for the best UMAP) and on biological fidelity (0.668 against 0.646) at the same time, and its global fidelity is 2.6x UMAP's.
+Its out-of-sample transform works and preserves *more* structure than UMAP's on the same test (recall 0.534 against 0.472), so the landmark fit-and-transform pattern the pipeline already uses would carry it to all 942,563 points.
+Two honest caveats: t-SNE fills the plane as a disc, so whitespace carries no meaning where UMAP's islands at least suggest separation; and it separates the corpora *more* (2.2% shared bins against 8.9%), which cuts against this tool's premise of showing where spaceflight sits relative to Earth biology.
+Perplexity 200 is not an option at 3.5 hours for 60,000 points.
+
+**Rejected, with the number that kills each:**
+
+- **densMAP** is the one method that substantially fixes a known UMAP lie, raising density fidelity from 0.441 to 0.739. It is also free, being a flag on a dependency already present. It is nevertheless unshippable here: `umap-learn` raises `NotImplementedError: Transforming data into an existing embedding not supported for densMAP`, so it cannot use the landmark pattern and would need a direct 942,563-point fit, which section 5.3 of `IMPLEMENTATION.md` exists to avoid.
+- **PaCMAP** and **LocalMAP** buy real global fidelity (0.284 and 0.316 against UMAP's 0.113) but PaCMAP is worse than UMAP on both local structure and tissue purity, and LocalMAP destroys density fidelity (0.081). Neither earns a menu slot.
+- **TriMap** collapses. Local fidelity 0.001, tissue purity 0.095 against a 0.073 null, and every point sharing a bin with OSDR - the rendered plot is empty.
+- **PHATE** has *negative* density fidelity and produces the crescent it produces when there is no trajectory. It is a tool for developmental data being pointed at a heterogeneous grab-bag of GEO.
+- **Keeping PCA is validated.** Its global fidelity of 0.849 is 3x the best neighbour embedding, and no nonlinear method comes close. The two shipped methods really do occupy the two ends.
+
+**The open question, unresolved.** Sequencing depth is recoverable from the *normalized* 512-d direction at R^2 = 0.9917, so L2 normalization does not remove it and every projection here is partly a depth map.
+Whether projecting that direction out before reducing makes the map more biological (higher tissue purity) or merely destroys structure was set up but not measured; the inputs are built.
+This is a larger question than the choice of reducer and is the most valuable follow-up.
+
 ## Notes and risks
 
 - **The cross-corpus batch effect is real and measured exactly (2026-07-21).**
