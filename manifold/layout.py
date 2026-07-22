@@ -162,9 +162,15 @@ def header() -> html.Div:
     ])
 
 
-def build_layout() -> html.Div:
+def build_view() -> html.Div:
+    """The map view, everything below the shared header.
+
+    The map used to be its own app with its own header. It is mounted by the
+    router in `app.py` now, so the chrome above it belongs to the shell and this
+    returns only the body. `header()` above is kept because the corpus counts it
+    computes are the map's own and the shell has no business deriving them.
+    """
     return html.Div(className="bm-app", children=[
-        header(),
         html.Div(className="bm-body", children=[
             control_rail(),
             html.Div(className="bm-plot-wrap", children=[

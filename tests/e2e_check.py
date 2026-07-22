@@ -111,7 +111,7 @@ def main() -> int:
     c = Checks()
 
     server = subprocess.Popen(
-        [PY, "app_manifold.py", "--port", str(args.port)], cwd=REPO,
+        [PY, "app.py", "--port", str(args.port)], cwd=REPO,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         # Wait for the server to announce itself rather than sleeping blind.
@@ -137,7 +137,7 @@ def main() -> int:
 
             print("\n=== 1. first paint, default controls ===")
             t0 = time.time()
-            page.goto(f"http://127.0.0.1:{args.port}/", wait_until="load")
+            page.goto(f"http://127.0.0.1:{args.port}/map", wait_until="load")
             info = wait_for_points(page)
             first_paint = time.time() - t0
             c.note(f"first interactive frame in {first_paint:.1f}s")
