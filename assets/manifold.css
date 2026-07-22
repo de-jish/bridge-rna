@@ -1,0 +1,341 @@
+/* Bridge Manifold - light scientific-instrument chrome (matches Bridge RNA)
+   with a dark-navy plot canvas inside it. Token values mirror Bridge RNA's
+   assets/style.css so the two apps feel like one instrument. */
+
+:root {
+  --bg-canvas: #eef2f7;
+  --bg-panel: #ffffff;
+  --bg-panel-raised: #f4f7fb;
+  --bg-inset: #f5f8fc;
+  --text-primary: #1a2432;
+  --text-secondary: #5a6b7e;
+  --text-muted: #8a99ac;
+  --accent: #2b7fff;
+  --accent-hover: #1f6ff0;
+  --accent-teal: #0bab9f;
+  --accent-warm: #d9791b;
+  --header-bg: #14294a;
+  --header-fg: #f3f7fc;
+  --header-line: #22c7bd;
+  --status-good: #1f9d57;
+  --status-error: #d64545;
+  --status-warn: #b7791f;
+  --plot-bg: #0e1d34;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(20, 41, 74, 0.08), 0 1px 2px rgba(20, 41, 74, 0.06);
+  --border: 1px solid #dce4ee;
+}
+
+/* Dash 4 ships its own design tokens and its own default palette (an interactive
+   purple). Remapping those tokens onto the Bridge RNA palette themes every Dash
+   component at once - dropdown, radio, checklist, focus rings - instead of
+   fighting each component's default rules with higher-specificity overrides.
+   Any Dash component added later inherits the instrument theme for free. */
+:root {
+  --Dash-Fill-Interactive-Strong: var(--accent);
+  --Dash-Fill-Interactive-Weak: var(--bg-inset);
+  --Dash-Fill-Inverse-Strong: var(--bg-panel);
+  --Dash-Fill-Primary-Hover: var(--bg-inset);
+  --Dash-Fill-Primary-Active: var(--bg-panel-raised);
+  --Dash-Fill-Disabled: var(--bg-panel-raised);
+  --Dash-Stroke-Strong: #dce4ee;
+  --Dash-Stroke-Weak: #e8eef6;
+  --Dash-Text-Primary: var(--text-primary);
+  --Dash-Text-Strong: var(--text-primary);
+  --Dash-Text-Weak: var(--text-secondary);
+  --Dash-Text-Disabled: var(--text-muted);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+#react-entry-point, ._dash-loading { height: 100%; }
+
+/* ---- App shell -------------------------------------------------------- */
+.bm-app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+.bm-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px;
+  height: 56px;
+  background: var(--header-bg);
+  color: var(--header-fg);
+  border-bottom: 2px solid var(--header-line);
+  flex-shrink: 0;
+}
+.bm-header .bm-logo {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.bm-header .bm-logo .bm-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--header-line);
+  box-shadow: 0 0 8px var(--header-line);
+}
+.bm-header .bm-sub {
+  color: #9fb4d4;
+  font-size: 12.5px;
+  border-left: 1px solid #2c4a78;
+  padding-left: 14px;
+}
+.bm-header .bm-spacer { flex: 1; }
+.bm-header .bm-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: #b9c9e2;
+}
+.bm-header .bm-count b { color: #fff; font-weight: 600; }
+
+.bm-body { display: flex; flex: 1; min-height: 0; }
+
+/* ---- Left control rail ------------------------------------------------ */
+.bm-rail {
+  width: 268px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-right: var(--border);
+  padding: 16px 16px 20px;
+  overflow-y: auto;
+}
+.bm-rail::-webkit-scrollbar { width: 8px; }
+.bm-rail::-webkit-scrollbar-thumb { background: #cfd9e6; border-radius: 4px; }
+
+.bm-group { margin-bottom: 20px; }
+.bm-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 9px;
+}
+
+/* Segmented toggles, built from dcc.RadioItems.
+   Dash renders each option as
+     <label class="dash-options-list-option [selected]">
+       <span class="dash-options-list-option-wrapper"><input type="radio"></span>
+       <span class="dash-options-list-option-text">…</span>
+     </label>
+   The pill is therefore the *label*, and the selected state comes from Dash's
+   own `.selected` class. Note that `labelClassName` lands on the inner text
+   span rather than the label, so it cannot be used as the pill hook - these
+   rules deliberately target Dash's structural classes, scoped under .bm-seg. */
+.bm-seg {
+  display: flex; background: var(--bg-inset);
+  border-radius: 8px; padding: 3px; gap: 3px;
+}
+.bm-seg .dash-options-list-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: transparent;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+/* The radio itself carries the state but adds nothing visually. */
+.bm-seg .dash-options-list-option-wrapper { display: none; }
+.bm-seg .dash-options-list-option-text { display: block; text-align: center; }
+.bm-seg .dash-options-list-option:hover { color: var(--text-primary); }
+.bm-seg .dash-options-list-option.selected {
+  background: var(--bg-panel);
+  color: var(--accent);
+  box-shadow: var(--shadow);
+  font-weight: 600;
+}
+.bm-seg .dash-options-list-option:focus-within {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.bm-seg .dash-options-list-option:has(input[disabled]) {
+  color: var(--text-muted); cursor: not-allowed; opacity: 0.5;
+  background: transparent; box-shadow: none;
+}
+
+.bm-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 7px; line-height: 1.45; }
+
+/* Dropdown (Dash 4 dcc.Dropdown: a radix popover, not react-select).
+   The menu is portaled to the end of <body>, so its rules cannot be scoped
+   under .bm-rail and are written globally. */
+.bm-dropdown {
+  font-size: 13px;
+  min-height: 38px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.bm-dropdown .dash-dropdown-trigger { min-height: 38px; }
+.bm-dropdown:hover { border-color: #c3cfdf; }
+.dash-dropdown-content {
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(20, 41, 74, 0.14), 0 2px 6px rgba(20, 41, 74, 0.08);
+  font-size: 13px;
+}
+.dash-dropdown-content .dash-options-list-option { padding: 7px 11px; border-radius: 6px; }
+.dash-dropdown-content .dash-options-list-option.selected { color: var(--accent); font-weight: 600; }
+
+/* Layer checklist. The checkbox is restyled rather than replaced, so keyboard
+   focus and the native checked state keep working. */
+.bm-checklist { display: flex; flex-direction: column; gap: 3px; }
+.bm-checklist .dash-options-list-option {
+  display: flex; align-items: center;
+  padding: 4px 0;
+  font-size: 13px; color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.bm-checklist .dash-options-list-option:hover,
+.bm-checklist .dash-options-list-option.selected { color: var(--text-primary); }
+.bm-checklist input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; margin: 0 9px 0 0; flex-shrink: 0;
+  border: 1.5px solid #c3cfdf; border-radius: 4px;
+  background: var(--bg-panel); cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.bm-checklist input[type="checkbox"]:checked {
+  background: var(--accent); border-color: var(--accent);
+}
+.bm-checklist input[type="checkbox"]:checked::after {
+  content: ""; display: block;
+  width: 4px; height: 8px; margin: 1px 0 0 5px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.bm-checklist input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* ---- Center plot ------------------------------------------------------ */
+.bm-plot-wrap { flex: 1; position: relative; min-width: 0; background: var(--plot-bg); }
+.bm-plot-loading { height: 100%; }
+.bm-legend-empty { font-size: 12px; color: #7089a8; padding: 4px 2px; }
+.bm-plot-wrap .dash-graph, .bm-plot-wrap .js-plotly-plot { height: 100% !important; }
+
+/* Plotly's modebar is drawn for a light paper; on the navy canvas its default
+   dark glyphs are all but invisible. Recolored for the dark surface, and kept
+   dim until hover so it never competes with the data. */
+.bm-plot-wrap .modebar { padding-right: 6px; }
+.bm-plot-wrap .modebar-group { background: transparent !important; }
+.bm-plot-wrap .modebar-btn .icon path { fill: #6f88ab !important; transition: fill 0.12s; }
+.bm-plot-wrap .modebar-btn:hover .icon path { fill: #dceafd !important; }
+.bm-plot-wrap .modebar-btn.active .icon path { fill: var(--header-line) !important; }
+
+/* dcc.Loading overlays a white sheet by default, which flashes over the navy
+   canvas on every control change. */
+.bm-plot-wrap .dash-loading-callback, .bm-plot-wrap ._dash-loading-callback { background: transparent !important; }
+
+.bm-plot-badges {
+  position: absolute; top: 12px; left: 14px; z-index: 6;
+  display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none;
+}
+.bm-badge {
+  background: rgba(14, 29, 52, 0.82);
+  color: #cfe0f7;
+  border: 1px solid rgba(90, 130, 185, 0.45);
+  border-radius: 20px;
+  padding: 4px 11px;
+  font-size: 11.5px;
+  font-weight: 500;
+  backdrop-filter: blur(3px);
+}
+.bm-badge b { color: #fff; }
+.bm-badge.warn { border-color: rgba(215, 150, 40, 0.6); color: #ffd79a; }
+
+/* Floating searchable legend. Sits below the modebar's row rather than beside
+   it: Plotly renders the modebar at the top-right of the plot, and at narrow
+   widths the two overlapped. */
+.bm-legend {
+  position: absolute; top: 46px; right: 14px; z-index: 7;
+  width: 194px; max-height: calc(100% - 58px);
+  background: rgba(14, 29, 52, 0.9);
+  border: 1px solid rgba(90, 130, 185, 0.4);
+  border-radius: 10px;
+  padding: 10px 11px;
+  backdrop-filter: blur(4px);
+  display: flex; flex-direction: column;
+}
+.bm-legend-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: #8ea6c9; font-weight: 700; margin-bottom: 8px;
+}
+.bm-legend-search {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(120,150,195,0.35);
+  border-radius: 6px; color: #e6eefb; font-size: 12px;
+  padding: 5px 8px; margin-bottom: 8px; width: 100%; outline: none;
+}
+.bm-legend-search::placeholder { color: #7089a8; }
+.bm-legend-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.bm-legend-list::-webkit-scrollbar { width: 6px; }
+.bm-legend-list::-webkit-scrollbar-thumb { background: rgba(120,150,195,0.4); border-radius: 3px; }
+.bm-legend-item {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: #cbd9ec; padding: 2px 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bm-legend-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.bm-legend-count { margin-left: auto; color: #7f97ba; font-variant-numeric: tabular-nums; font-size: 11px; }
+
+/* ---- Colour-by coverage readout ---------------------------------------
+   Sits directly under the colour-by control and states how much of the map
+   the selected field actually paints. This is the answer to "why is most of
+   my map not coloured?", given before the question is asked. */
+.bm-coverage { margin-top: 9px; }
+/* The track needs enough contrast to read as a track. An OSDR-only field fills
+   0.2% of it, and against the old near-white #e3eaf3 that sliver looked like a
+   stray dot floating on the panel rather than like a nearly-empty bar - which
+   inverts the message, since the point of the bar is to show how much is NOT
+   covered. */
+.bm-coverage-bar {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: #d7e0ed; margin-bottom: 6px;
+  box-shadow: inset 0 0 0 1px rgba(20, 41, 74, 0.07);
+}
+.bm-coverage-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--accent-teal);
+  transition: width 0.18s ease;
+}
+/* Amber, not red: a field that only describes OSDR is working correctly, not
+   failing. The colour marks a limit worth knowing, not an error. */
+.bm-coverage-fill.partial { background: var(--accent-warm); }
+.bm-coverage-text {
+  font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;
+}
+.bm-coverage-fix {
+  font-size: 11px; color: var(--status-warn); line-height: 1.45;
+  margin-top: 5px; background: #fdf6ea; border-radius: 6px; padding: 6px 8px;
+}
+
+/* Standing caution about cross-corpus distance. Pinned to the bottom of the
+   rail because it qualifies the whole map, not any one control. */
+.bm-caution {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.5;
+  background: var(--bg-inset); border-radius: 8px;
+  border-left: 3px solid var(--accent-warm);
+  padding: 10px 11px; margin-top: 24px;
+}
+.bm-caution b { color: var(--text-primary); font-weight: 600; }
+
+a, a:visited { color: var(--accent); }

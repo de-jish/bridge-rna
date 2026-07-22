@@ -29,3 +29,9 @@ Desktop.ini
 # Generated local output
 reports/
 *.log
+
+# Manifold precompute artifacts. Everything under cache/ is reproducible from
+# the precompute scripts and is too large to track: the OSDR expression matrix
+# is ~130 MB, the ARCHS4 GEO metadata join ~33 MB, and the four coordinate
+# parquets ~9-13 MB each.
+cache/

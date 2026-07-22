@@ -1,8 +1,33 @@
+# Bridge RNA dependencies.
+#
+#     python -m pip install -r requirements.txt
+#
+# Versions are pinned to what the app was verified against. The pins are not
+# decorative for the libraries the interface depends on directly: pandas 3.0
+# stopped stringifying missing values in `astype(str)`, dash 4.0 replaced the
+# Dropdown/RadioItems internals and their CSS class names, and plotly 6.0
+# serializes numpy arrays as base64 typed arrays - which is the only reason
+# shipping all 942,563 manifold points to a browser is affordable at all.
+
+# --- Serving app (retrieval + manifold) -------------------------------------
 dash==4.4.0
+plotly==6.8.0
 numpy==2.4.6
 pandas==3.0.3
-plotly==6.8.0
-pyarrow==20.0.0
-requests==2.34.2
-torch==2.12.1
-biopython>=1.85,<2
+pyarrow==20.0.0        # parquet engine for the coordinate and metadata tables
+requests==2.34.2       # OSDR study summaries, Ollama / Bedrock calls
+
+# --- Retrieval ---------------------------------------------------------------
+torch==2.12.1          # ExpressionPerformer inference for an OSDR query
+biopython>=1.85,<2     # optional GEO / PubMed enrichment of retrieved hits
+
+# --- Manifold precompute (precompute/, not needed to serve the map) ----------
+# The map is drawn from precomputed coordinate parquets, so none of these are
+# imported by the running app.
+scikit-learn>=1.9.0    # validation only (kNN scoring in validate_artifacts.py)
+umap-learn>=0.5.12     # full-corpus UMAP fit; needs precomputed_knn (0.5.2+)
+pynndescent>=0.6.0     # the shared k-NN graph both UMAP fits are laid out from
+
+# --- Development -------------------------------------------------------------
+# pytest>=9.0.0
+# playwright>=1.61.0   # browser-driven checks of the running app
