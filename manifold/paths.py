@@ -1,8 +1,14 @@
-"""Central path configuration for Bridge Manifold.
+"""Central path configuration for the manifold half of Bridge RNA.
 
-Every load-bearing artifact lives in the Bridge RNA repository; Bridge Manifold
-consumes them read-only and writes only into its own ``cache/`` directory. Paths
-are resolved once here so a relocation of either repo is a one-line change.
+The manifold consumes the model checkpoint, the ARCHS4 embedding memmap, and
+the OSDR data read-only, and writes only into ``cache/``. Paths are resolved
+once here so a relocation is a one-line change.
+
+``BRIDGE_RNA_ROOT`` is still an independent knob rather than a synonym for the
+repository root. The map used to live in a sibling repository and the two were
+merged; the environment variable is what lets a build point at a *different*
+checkout of the source artifacts - which is exactly what ``tests/`` and
+``tests/build_dev_corpus.py`` do when they stand up a synthetic corpus.
 """
 
 from __future__ import annotations
@@ -10,21 +16,20 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# This file is manifold/paths.py; the project root is its parent's parent.
-MANIFOLD_ROOT = Path(__file__).resolve().parent.parent
+# This file is manifold/paths.py; the repository root is its parent's parent.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The Bridge RNA repository. Overridable via env for portability.
-BRIDGE_RNA_ROOT = Path(
-    os.environ.get("BRIDGE_RNA_ROOT", "/Users/josh/Bridge-RNA")
-).resolve()
+# Where the model checkpoint, the ARCHS4 embeddings, and the OSDR data live.
+# Defaults to this repository; overridable so a build can read them elsewhere.
+BRIDGE_RNA_ROOT = Path(os.environ.get("BRIDGE_RNA_ROOT", str(REPO_ROOT))).resolve()
 
-# --- Bridge Manifold's own generated artifacts -----------------------------
+# --- The manifold's own generated artifacts --------------------------------
 # The cache location is overridable so a dev or test run can build a small
 # throwaway corpus without touching the real multi-hour artifacts.
 CACHE_DIR = Path(
-    os.environ.get("MANIFOLD_CACHE_DIR", str(MANIFOLD_ROOT / "cache"))
+    os.environ.get("MANIFOLD_CACHE_DIR", str(REPO_ROOT / "cache"))
 ).resolve()
-ASSETS_DIR = MANIFOLD_ROOT / "assets"
+ASSETS_DIR = REPO_ROOT / "assets"
 
 OSDR_EMBEDDINGS_NPY = CACHE_DIR / "osdr_sample_embeddings.float32.npy"
 OSDR_METADATA_PARQUET = CACHE_DIR / "osdr_metadata.parquet"

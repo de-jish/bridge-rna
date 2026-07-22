@@ -173,7 +173,7 @@ def test_every_classname_used_in_python_exists_in_the_stylesheet():
     # them is just as broken if the stylesheet never defines it.
     prop = r'(?:className|inputClassName|labelClassName)="([^"]+)"'
     used: set[str] = set()
-    for py in sorted(Path(paths.MANIFOLD_ROOT / "manifold").glob("*.py")):
+    for py in sorted(Path(paths.REPO_ROOT / "manifold").glob("*.py")):
         for match in re.findall(prop, py.read_text()):
             used.update(match.split())
 
