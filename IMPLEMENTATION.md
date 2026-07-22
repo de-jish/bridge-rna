@@ -642,11 +642,11 @@ All of that is funnelled through `manifold/bridge_rna.py`, imported lazily insid
 
 Two former reuses are gone.
 `fetch_archs4_metadata` (the `archs4py` HDF5 reader at `demo_osdr_top5.py:463`) is no longer used, because the metadata now comes from the sigpy API (section 4.5).
-`_load_archs4_index` and `_topk_cosine_from_memmap` are no longer used by the app; `validate_artifacts.py --mixing` streams the memmap itself in 50k blocks.
+`_load_archs4_index` and `_topk_cosine_from_memmap` are no longer used by the map view; they now live in `bridge_rna/retrieval.py`, where they are the retrieval view's cached path and open the memmap on every cached search, and `validate_artifacts.py --mixing` streams the memmap itself in 50k blocks.
 
-The result is worth stating plainly: **the serving app now shares no runtime code path with Bridge RNA's heavy stack.**
-It imports no Bridge RNA module, opens no file in the Bridge RNA repository, and needs neither torch nor the checkpoint nor the memmap to run.
-The coupling is entirely at build time.
+The result is worth stating plainly: **the map view shares no runtime code path with Bridge RNA's heavy stack.**
+Its serving code imports no model or embedding module, opens neither the checkpoint nor the memmap, and needs no torch to run; the retrieval view is the half that opens the memmap, on every cached search.
+The map's coupling to that stack is entirely at build time.
 
 Dependencies: Bridge Manifold shares the Bridge RNA venv and adds `dash` on top of the existing stack, plus `requests` for the metadata fetch.
 `hnswlib` and `scipy` were dropped from `requirements.txt` with the selection feature (both are still installed in the shared venv and neither is imported), `archs4py` was never installed at all, and `h5py` is present only from the range-request experiment in section 4.5 and is imported by no shipped code.
@@ -671,7 +671,7 @@ Each phase ends with an objective validation, not a visual glance.
 Build status is tracked in `progress.md`; the plan below is the phasing with its validation criteria.
 
 **Phase 0. Scaffold.**
-Create the package skeleton, `manifold.css` importing the Bridge RNA tokens, and a preflight that fails clearly on missing or LFS-stub artifacts.
+Create the package skeleton, the map stylesheet importing the Bridge RNA tokens, and a preflight that fails clearly on missing or LFS-stub artifacts.
 Validate: app boots and renders an empty themed shell; preflight names every missing artifact in one aggregated error.
 
 **Phase 1. OSDR embeddings.**

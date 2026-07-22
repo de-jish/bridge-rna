@@ -110,6 +110,24 @@ def test_no_view_contains_a_duplicate_component_id(name):
     assert not duplicated, f"{name} view has duplicate ids: {duplicated}"
 
 
+def test_the_deep_link_callback_fires_on_a_cold_load(app):
+    """A pasted `/?q=` link must work on the initial page load, not only when
+    followed from a live map.
+
+    `study_from_query_string` is the callback that switches the study to match
+    a `?q=` sample. If it carries `prevent_initial_call`, a cold load of
+    `/?q=OSD-101|...` stays on the default study and the sample is never
+    selected - which defeats the entire point of using a real, shareable link
+    rather than an in-memory store.
+    """
+    # The registry key encodes the output component and property.
+    key = next((k for k in app.callback_map if "study-dropdown.value" in k), None)
+    assert key is not None, "no callback writes study-dropdown.value"
+    assert not app.callback_map[key].get("prevent_initial_call"), (
+        "study_from_query_string must fire on the initial call so a cold ?q= "
+        "link selects the right study")
+
+
 def test_both_halves_register_their_callbacks(app):
     """A router that mounts a view but forgets its callbacks looks fine until
     a control is touched. Assert one signature callback from each half."""

@@ -54,14 +54,21 @@ def register(app) -> None:
     @app.callback(
         Output("study-dropdown", "value"),
         Input("url", "search"),
-        prevent_initial_call=True,
     )
     def study_from_query_string(search: str | None):
-        """Follow a `/?q=<sample_id>` link from the map to the right study.
+        """Follow a `/?q=<sample_id>` link to the right study.
 
         The map offers a real link rather than mutating a store, so arriving
         here means the study dropdown has to catch up before the sample list
         can contain the requested sample.
+
+        This deliberately does NOT set `prevent_initial_call`. The whole point
+        of a real link is that it survives a cold load - pasted into a fresh
+        tab, or bookmarked - and the initial call is exactly that case. With
+        the flag on, a cold `/?q=OSD-101|...` stayed on the default study and
+        the requested sample was never selected; the link only worked when
+        followed from a live map. The callback returns `no_update` when there
+        is no `?q`, so firing on an ordinary load costs nothing.
         """
         sample_id = _requested_sample(search)
         if not sample_id:
@@ -78,12 +85,14 @@ def register(app) -> None:
     def update_sample_options(study_id: str, search: str | None = None):
         """List a study's samples, and say up front which ones can be answered.
 
-        71 of the 2,896 samples name no column in their own study's counts
-        matrix, so every retrieval path raises for them. They stay in the list
-        and are disabled, rather than being hidden: a sample that silently
-        vanishes looks like a bug in the catalogue, while a disabled one with a
-        reason is a fact about the data. This is the treatment the map's
-        color-by menu already gives a field whose artifact is not built.
+        788 of the 2,896 samples cannot be retrieved by any path: 733 have no
+        recorded spaceflight value, which the embedding filter drops before it
+        looks for the sample, and 55 pass that filter but match no column in
+        their counts matrix. They stay in the list and are disabled rather than
+        hidden: a sample that silently vanishes looks like a bug in the
+        catalogue, while a disabled one with a reason is a fact about the data.
+        This is the treatment the map's color-by menu gives a field whose
+        artifact is not built.
         """
         filtered = samples_df[samples_df["study_id"] == study_id].copy()
         suffix = {
