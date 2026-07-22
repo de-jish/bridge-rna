@@ -64,7 +64,8 @@ def test_the_overlay_never_emits_a_line_trace(is_3d):
 
 def test_every_hit_ring_is_identical():
     """No size, opacity, or colour ramp across rank: the top hits differ by
-    about 0.004 cosine, and any ramp asserts a difference that is not there."""
+    about 0.0016 cosine (the top-5 span for the OSD-100 query; 0.004 is the
+    top-20 span), and any ramp asserts a difference that is not there."""
     from manifold import render
 
     coords = np.random.default_rng(2).normal(size=(50, 2)).astype(np.float32)
@@ -86,8 +87,6 @@ def test_the_overlay_ignores_out_of_range_points():
     assert hits is not None and len(hits.x) == 1
     assert not any(t.name == "query" for t in traces), "an out-of-range query was drawn"
 
-import numpy as np
-import pytest
 
 from manifold import colorby, data, render, sampling, theme
 

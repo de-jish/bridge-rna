@@ -228,7 +228,7 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 176 tests, about two seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 194 tests, about two seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 29 browser checks, about a minute
 ```
 

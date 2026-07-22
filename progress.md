@@ -47,7 +47,7 @@ The lesson is the one this file keeps relearning: a plausible mechanism that exp
 - `app.py` is the single entry point: `/` retrieves, `/map` draws the manifold, one header and one port.
 - `app_osdr_dash.py` (2,470 lines) is now the `bridge_rna/` package; 49 definitions were moved by exact line range and a checker asserts each appears once with a byte-identical body.
 - Stylesheets are layered by load order: `00-tokens.css`, `01-shell.css`, `retrieve.css`, `map.css`.
-- **179 tests pass**, up from 160, the 27 browser checks pass against the merged app, and `validate_artifacts.py` is clean.
+- **194 tests pass**, up from 160, the 29 browser checks pass against the merged app, and `validate_artifacts.py` is clean.
 
 ### The two views are linked in both directions
 
