@@ -42,7 +42,27 @@ The picker now disables them with the reason and labels the slow tier, so the di
 - `app.py` is the single entry point: `/` retrieves, `/map` draws the manifold, one header and one port.
 - `app_osdr_dash.py` (2,470 lines) is now the `bridge_rna/` package; 49 definitions were moved by exact line range and a checker asserts each appears once with a byte-identical body.
 - Stylesheets are layered by load order: `00-tokens.css`, `01-shell.css`, `retrieve.css`, `map.css`.
-- **176 tests pass**, up from 160, and the 27 browser checks pass against the merged app.
+- **179 tests pass**, up from 160, the 27 browser checks pass against the merged app, and `validate_artifacts.py` is clean.
+
+### The two views are linked in both directions
+
+**Retrieval → map.** A search offers "See N hits on the map", and the map draws the query as its teal star and each hit as a numbered white ring with the corpus receded to 0.35. "Frame the retrieval" zooms to a window containing all of them, which is necessary because at full-corpus scale the hits are a few pixels apart.
+
+The translation is three lines, because there is nothing to translate: a hit's `archs4_index` is its row in the memmap, ARCHS4 occupies rows 0..940,454 of the map's point order, so the row *is* the point.
+
+Three decisions there are about honesty rather than looks, and should survive future edits:
+
+- **No line is ever drawn between the query and a hit.** It is the obvious and most striking choice and it would assert something false: the ranking is cosine distance in 512 dimensions and the map is a 2-D projection that does not preserve it. The hover states both orderings instead. For the OSD-100 eye query, 512-d rank 1 is only map rank 33, while 512-d rank 2 is map rank 2.
+- **Every hit ring is identical** - no size, opacity or colour ramp across rank. The top five span 0.0041 cosine; any ramp would assert a difference the index does not contain.
+- **Hits are white open rings, not the network graph's blue.** Measured: `#2b7fff` is 1.03:1 against `CATEGORICAL[0]`, which is Blood / immune, the largest bucket at 155,761 points, so a hit landing in 16.6% of the corpus would have been invisible. White is 3.64:1 there. Open, so the point underneath keeps its tissue colour and one glyph shows both that the model retrieved it and what GEO's free text calls it.
+
+**Map → retrieval.** Clicking an OSDR point offers "Retrieve its Earth analogs", linking to `/?q=<sample_id>`. A URL parameter rather than a store mutation, so it is a real link that can be opened in a new tab, bookmarked, or pasted to a colleague.
+
+### Search is 18x faster in the interface
+
+GEO/PubMed enrichment was on by default and cost a network round trip per hit. The cached path already delivers series, title, source name, characteristics and tissue locally, so what enrichment still adds is study abstracts and publications - text most searches never open.
+
+It is off by default now, and the two places that need the text fetch it themselves: the inspector for the one hit you open, and the AI panel for all of them before it writes. Measured in a browser, same query: **10.9 s → 0.6 s**.
 
 ### Defects found and fixed this session
 
@@ -57,6 +77,9 @@ The picker now disables them with the reason and labels the slow tier, so the di
    Dash only validates ids in the *initial* layout, so this stayed invisible until the shell began serving views there.
    A test now checks each view for duplicate ids directly.
 5. **`.app-root` declared `height: 100vh` under a header**, and `#page-content` was not a flex container, so the view collapsed to content height and left a band of bare canvas.
+6. **The picker offered 71 samples that cannot be retrieved at all** - see the correction above. Now disabled with the reason, and the picker never defaults to a disabled option.
+7. **Clicking a hit faded every other node in the retrieval network.** `build_network_figure` set `clickmode="event+select"`, so Plotly applied selection styling on each click and inspecting one result made the rest look dismissed. There is no selection feature in that graph; `clickmode="event"` fires `clickData` just as well. Found by looking hard at a screenshot taken for the README.
+8. **The inspector's on-demand enrichment could never fire on a cached hit.** It asked whether any of `gse`/`title`/`geo_summary`/`pubmed_ids` had content, a fair proxy when a hit arrived either fully enriched or entirely bare. The cached path always fills `gse` and `title`, so the test passed for every hit and the abstract was never fetched. It now tests the study-context fields specifically.
 
 ## densMAP: measured at full corpus scale, and rejected (2026-07-22)
 
@@ -299,6 +322,15 @@ Found by adversarial audit, browser-driven testing, and by running against the r
 16. The verdict could print "Coherent" next to a z and p saying the selection was looser than a matched random draw. The general lesson survives the feature: a summary sentence must be derived from the same statistics it sits beside, not chosen independently of them.
 
 ## Next steps
+
+0. **From the design panel, not yet built.** A judged panel of four independent UI designs was run before this session's interface work; its spec is larger than what was built. The parts deliberately left for later, each with the reason:
+   - **The retrieval view showing the manifold neighbourhood around the query**, instead of (or beside) the abstract network graph. This is the strongest idea in the spec and the largest change; it needs a second `dcc.Graph` and careful thought about what the network graph is still for.
+   - **A full-corpus score histogram.** `_topk_cosine_from_memmap` already materializes all 940,455 scores and discards them one line later, so the data is free. It would show that the top-k sit in a long thin tail: for the OSD-100 query, the corpus median is 0.788 and the top 20 span 0.997 to 0.993.
+   - **The agreement readout**, stating per query how much the map's own ordering agrees with the retrieval's. Measured over 40 random queries: overlap between the map's 20 nearest points and the true cosine top-20 is **mean 2.7 of 20, median 0**. The hover already states both ranks per hit; this would state the summary.
+   - **An ARCHS4 point probe** on the map, so any point can be inspected rather than only OSDR points and retrieved hits.
+   - **Demoting "AI hypothesis" to "AI reading"** and giving the panel dashed, inset chrome so it does not read as an instrument surface.
+
+
 
 1. ~~Wait for `embed_osdr.py`~~ **DONE** 2026-07-21 08:45:51, all 2,108 samples.
 2. ~~Run `precompute/build_projections.py`~~ **DONE** 2026-07-21 08:51:44, rc=0 in 5 min 47 s.
