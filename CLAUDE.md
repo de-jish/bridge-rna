@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 191 tests pass in about two seconds, plus 27 browser checks in `tests/e2e_check.py`.
+**Current state: built, run on the real corpus, and tested.** 194 tests pass in about two seconds, plus 29 browser checks in `tests/e2e_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -223,13 +223,13 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 
 ```bash
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/embed_osdr.py         # OSDR embeddings, gene-digest gated. Hours; resumable.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~50 min.
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~10.5 min.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
 /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 176 tests, about two seconds
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 27 browser checks, about a minute
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 29 browser checks, about a minute
 ```
 
 The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--densmap`, `--dens-lambda`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.

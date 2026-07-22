@@ -146,7 +146,7 @@ The order matters: the metadata fetch joins positionally onto the identity table
 PY=/Users/josh/Bridge-RNA/.venv/bin/python
 
 $PY precompute/embed_osdr.py                       # OSDR embeddings, gene-digest gated. Hours; resumable.
-$PY precompute/build_projections.py                # full-corpus PCA + UMAP coords. ~50 min.
+$PY precompute/build_projections.py                # full-corpus PCA + UMAP coords. ~10.5 min.
 $PY precompute/fetch_archs4_meta.py                # ARCHS4 GEO metadata. ~35 s, needs network.
 $PY precompute/validate_artifacts.py --mixing --quality   # gates the build; exits nonzero on failure.
 $PY app.py                                         # http://127.0.0.1:8050/map

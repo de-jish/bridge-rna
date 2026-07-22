@@ -57,7 +57,7 @@ The translation is three lines, because there is nothing to translate: a hit's `
 Three decisions there are about honesty rather than looks, and should survive future edits:
 
 - **No line is ever drawn between the query and a hit.** It is the obvious and most striking choice and it would assert something false: the ranking is cosine distance in 512 dimensions and the map is a 2-D projection that does not preserve it. The hover states both orderings instead. For the OSD-100 eye query, 512-d rank 1 is only map rank 33, while 512-d rank 2 is map rank 2.
-- **Every hit ring is identical** - no size, opacity or colour ramp across rank. The top five span 0.0041 cosine; any ramp would assert a difference the index does not contain.
+- **Every hit ring is identical** - no size, opacity or colour ramp across rank. The top five span 0.0016 cosine (the top twenty span 0.0041); any ramp would assert a difference the index does not contain.
 - **Hits are white open rings, not the network graph's blue.** Measured: `#2b7fff` is 1.03:1 against `CATEGORICAL[0]`, which is Blood / immune, the largest bucket at 155,761 points, so a hit landing in 16.6% of the corpus would have been invisible. White is 3.64:1 there. Open, so the point underneath keeps its tissue colour and one glyph shows both that the model retrieved it and what GEO's free text calls it.
 
 **Map → retrieval.** Clicking an OSDR point offers "Retrieve its Earth analogs", linking to `/?q=<sample_id>`. A URL parameter rather than a store mutation, so it is a real link that can be opened in a new tab, bookmarked, or pasted to a colleague.

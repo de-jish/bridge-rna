@@ -13,7 +13,7 @@ positionally. Row i < N_ARCHS4 is ARCHS4 memmap[i]; row i >= N_ARCHS4 is OSDR
 npy[i - N_ARCHS4].
 
 Design notes:
-  * L2-normalize before any reduction. Raw ARCHS4 norms span 6.7-25.5 and PC1
+  * L2-normalize before any reduction. Raw ARCHS4 norms span 6.7-26.4 and PC1
     would otherwise be a magnitude axis (REFERENCE.md section 4).
   * Both reductions are fit on **every** point, not on a subsample. PCA gets
     there by accumulating an exact 512x512 second-moment matrix in one pass;

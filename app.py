@@ -104,11 +104,11 @@ def header(active: str) -> html.Header:
                     html.Div(className="header-stat-divider"),
                     html.Div(
                         className="header-stat",
-                        title="OSDR samples eligible for retrieval (mouse counts + spaceflight condition)",
+                        title="NASA OSDR samples the app can retrieve; they are also the OSDR points drawn on the map",
                         children=[
                             html.Span(_format_count(rna_layout.ELIGIBLE_OSDR_COUNT),
                                       className="header-stat-value header-stat-value--accent"),
-                            html.Span("Eligible OSDR samples", className="header-stat-label"),
+                            html.Span("Retrievable OSDR samples", className="header-stat-label"),
                         ],
                     ),
                 ],

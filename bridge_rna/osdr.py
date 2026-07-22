@@ -70,11 +70,26 @@ def load_osdr_samples(path: Path) -> pd.DataFrame:
     out = out[keep].drop_duplicates(subset=["sample_id"]).reset_index(drop=True)
     return out
 def _eligible_osdr_count(df: pd.DataFrame) -> int | None:
-    """OSDR samples eligible for retrieval: mouse counts present + a spaceflight
-    condition present (mirrors the demo script's eligibility filter)."""
+    """OSDR samples the app can actually retrieve.
+
+    This used to count "mouse counts present + a spaceflight condition
+    present", which is only the demo script's *first* filter and overstated the
+    number by 55: those 55 pass that filter but their name matches no column in
+    their counts matrix, so retrieval still fails. The header would then have
+    said 2,163 were retrievable while the picker disabled 55 of them.
+
+    The honest figure is the one `sample_tier` calls anything but unavailable,
+    and it is the same 2,108 with the cache or without it - the cached and
+    subprocess tiers cover exactly the same samples, differing only in speed -
+    which is also the count of OSDR points on the map.
+    """
     try:
-        counts_ok = df["counts_path"].astype(str).str.len() > 0
-        condition_ok = df["condition"].astype(str).str.len() > 0
-        return int((counts_ok & condition_ok).sum())
+        from .retrieval import TIER_UNAVAILABLE, sample_tier
+
+        return int(sum(
+            sample_tier(_safe_str(r["sample_id"]), _safe_str(r["sample_name"]),
+                        _safe_str(r.get("counts_path")), _safe_str(r.get("condition")))
+            != TIER_UNAVAILABLE
+            for _, r in df.iterrows()))
     except Exception:
         return None
