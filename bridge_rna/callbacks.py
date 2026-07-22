@@ -54,21 +54,18 @@ def register(app) -> None:
     @app.callback(
         Output("study-dropdown", "value"),
         Input("url", "search"),
+        prevent_initial_call=True,
     )
     def study_from_query_string(search: str | None):
-        """Follow a `/?q=<sample_id>` link to the right study.
+        """Follow a `/?q=<sample_id>` link to the right study when the URL changes.
 
-        The map offers a real link rather than mutating a store, so arriving
-        here means the study dropdown has to catch up before the sample list
-        can contain the requested sample.
-
-        This deliberately does NOT set `prevent_initial_call`. The whole point
-        of a real link is that it survives a cold load - pasted into a fresh
-        tab, or bookmarked - and the initial call is exactly that case. With
-        the flag on, a cold `/?q=OSD-101|...` stayed on the default study and
-        the requested sample was never selected; the link only worked when
-        followed from a live map. The callback returns `no_update` when there
-        is no `?q`, so firing on an ordinary load costs nothing.
+        This handles *live* navigation - clicking the map's "Retrieve its Earth
+        analogs" link changes `url.search` without a page load, and this switches
+        the study to match. It carries `prevent_initial_call` because firing on
+        the initial load fought the study dropdown's own initialization and left
+        both dropdowns empty. The *cold-load* case - a pasted or bookmarked
+        `/?q=` - is handled instead by `layout._initial_study`, which reads the
+        request and picks the right study before any callback runs.
         """
         sample_id = _requested_sample(search)
         if not sample_id:

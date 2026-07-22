@@ -110,22 +110,36 @@ def test_no_view_contains_a_duplicate_component_id(name):
     assert not duplicated, f"{name} view has duplicate ids: {duplicated}"
 
 
-def test_the_deep_link_callback_fires_on_a_cold_load(app):
-    """A pasted `/?q=` link must work on the initial page load, not only when
-    followed from a live map.
+def test_a_cold_loaded_deep_link_opens_on_the_right_study():
+    """A pasted `/?q=` link must land on the sample's study on the initial load.
 
-    `study_from_query_string` is the callback that switches the study to match
-    a `?q=` sample. If it carries `prevent_initial_call`, a cold load of
-    `/?q=OSD-101|...` stays on the default study and the sample is never
-    selected - which defeats the entire point of using a real, shareable link
-    rather than an in-memory store.
+    Not via the live callback - that carries `prevent_initial_call` because
+    firing it on load left both dropdowns empty - but via `_initial_study`,
+    which reads the request at layout-build time. This test drives that helper
+    inside a real request context, since that is the only place it does its job.
     """
-    # The registry key encodes the output component and property.
-    key = next((k for k in app.callback_map if "study-dropdown.value" in k), None)
-    assert key is not None, "no callback writes study-dropdown.value"
-    assert not app.callback_map[key].get("prevent_initial_call"), (
-        "study_from_query_string must fire on the initial call so a cold ?q= "
-        "link selects the right study")
+    from urllib.parse import quote
+
+    from bridge_rna import layout
+    from bridge_rna.layout import default_study
+
+    server = shell.build_app().server
+
+    # Any sample in a study other than the default: a plain default would be
+    # the wrong study, so only the ?q handling can return the right one.
+    # `_initial_study` maps sample -> study and does not consult retrievability,
+    # so this does not depend on the cache the test fixture stands in for.
+    target = next(r for r in layout.samples_df.itertuples()
+                  if r.study_id != default_study)
+
+    with server.test_request_context(f"/?q={quote(target.sample_id)}"):
+        assert layout._initial_study() == target.study_id
+    with server.test_request_context("/"):
+        assert layout._initial_study() == default_study
+    # A `?q` naming an unknown sample falls back to the default rather than
+    # opening on nothing.
+    with server.test_request_context("/?q=OSD-000%7Cnot-a-sample"):
+        assert layout._initial_study() == default_study
 
 
 def test_both_halves_register_their_callbacks(app):

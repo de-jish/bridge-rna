@@ -32,6 +32,29 @@ ARCHS4_SAMPLE_COUNT = _archs4_sample_count()
 ELIGIBLE_OSDR_COUNT = _eligible_osdr_count(samples_df)
 
 
+def _initial_study() -> str:
+    """The study to open on, honouring a `/?q=<sample_id>` link on cold load.
+
+    Reads the request directly so a pasted or bookmarked deep link lands on the
+    right study without waiting for a callback. `flask.request` is absent when
+    Dash builds the layout outside a request (once, at startup, to validate the
+    callback graph), so the default study is the fallback.
+    """
+    try:
+        from urllib.parse import parse_qs
+
+        from flask import request
+
+        sample_id = _safe_str(parse_qs(request.query_string.decode()).get("q", [""])[0])
+        if sample_id:
+            match = samples_df.loc[samples_df["sample_id"].astype(str) == sample_id]
+            if not match.empty:
+                return _safe_str(match.iloc[0]["study_id"])
+    except Exception:
+        pass
+    return default_study
+
+
 def build_graph_legend() -> Any:
     """Horizontal legend strip explaining node shapes/colors + edge encoding."""
     return html.Div(
@@ -59,7 +82,17 @@ def build_graph_legend() -> Any:
 
 
 def build_view() -> html.Div:
-    """The retrieval view, everything below the shared header."""
+    """The retrieval view, everything below the shared header.
+
+    The view is built per request (the shell's `serve_layout` is a function),
+    so a cold-loaded `/?q=<sample_id>` link can pick the right study *here*,
+    before any callback runs. That is what makes a pasted or bookmarked link
+    work on the initial load: the study dropdown's live callback keeps
+    `prevent_initial_call`, because firing it on load fought the dropdown's own
+    initialization and left both dropdowns empty, so the cold-load case is
+    handled by choosing the initial value rather than by a callback.
+    """
+    initial_study = _initial_study()
     return html.Div(
         className="app-root",
         children=[
@@ -84,7 +117,7 @@ def build_view() -> html.Div:
                                             dcc.Dropdown(
                                                 id="study-dropdown",
                                                 options=[{"label": s, "value": s} for s in study_options],
-                                                value=default_study,
+                                                value=initial_study,
                                                 clearable=False,
                                             ),
                                         ],
