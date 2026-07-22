@@ -220,6 +220,13 @@ One check deliberately sits outside pytest, because a green suite says nothing a
 `tests/e2e_check.py` boots the real app against the real cache, drives Chromium, and asserts on what the page reports about itself: that the default view really draws all 942,563 points, that each budget tier draws exactly the count it advertises, and that the console is clean.
 It needs the built cache, so it is a local check rather than something a fresh clone can run.
 
+```bash
+.venv/bin/python tests/check_join.py         # the cross-view join, on real data
+```
+
+`check_join.py` asserts on the real 942,563-point corpus what the pytest suite asserts on its fixture: that every point the map rings is the sample the retrieval actually returned.
+Nothing but arithmetic enforces that, and if it ever drifts the map would keep drawing rings, just around the wrong samples.
+
 ## Configuration
 
 The app runs with no credentials.
