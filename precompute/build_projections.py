@@ -243,8 +243,19 @@ def umap_init_from_pca(pca_coords: np.ndarray, n_components: int,
 
 
 def run_umap(x: np.ndarray, knn, n_components: int, seed: int,
-             n_neighbors: int, init: np.ndarray) -> np.ndarray:
+             n_neighbors: int, init: np.ndarray, densmap: bool = False,
+             dens_lambda: float = 0.5) -> np.ndarray:
     """UMAP over every point in the corpus, from the shared neighbour graph.
+
+    ``densmap=True`` swaps in densMAP, which adds a term penalizing the
+    difference between each point's local radius in the input space and in the
+    output. Plain UMAP does not preserve density at all - a tight cluster and a
+    diffuse one can be drawn the same size - and on the 60,000-point evaluation
+    densMAP raised density fidelity from 0.441 to 0.739 while giving up a little
+    local fidelity. It was rejected for a year for a reason that no longer
+    exists: ``umap-learn`` cannot ``.transform()`` new points into a densMAP
+    embedding, which was fatal when the build was a landmark fit, and is
+    irrelevant now that every point is fit directly.
 
     Two settings here were chosen by measurement rather than by default, and both
     matter more than they look. Scored against the original 512-d space on a
@@ -274,8 +285,10 @@ def run_umap(x: np.ndarray, knn, n_components: int, seed: int,
     import umap
 
     t0 = time.time()
-    log(f"UMAP-{n_components}d fit on all {len(x):,} points, "
-        f"n_neighbors={n_neighbors}, cosine on 512-d")
+    kind = "densMAP" if densmap else "UMAP"
+    log(f"{kind}-{n_components}d fit on all {len(x):,} points, "
+        f"n_neighbors={n_neighbors}, cosine on 512-d"
+        + (f", dens_lambda={dens_lambda}" if densmap else ""))
     # Hand each fit its own copy of the graph. UMAP assigns the arrays through
     # without copying and then writes into them in place to disconnect far
     # neighbours (umap_.py:2647-2654), so a graph shared between the 2-d and the
@@ -291,10 +304,12 @@ def run_umap(x: np.ndarray, knn, n_components: int, seed: int,
         random_state=seed,
         precomputed_knn=(knn[0].copy(), knn[1].copy()),
         init=init,
+        densmap=densmap,
+        dens_lambda=dens_lambda if densmap else 2.0,
         verbose=True,
     )
     out = reducer.fit_transform(x).astype(np.float32)
-    log(f"UMAP-{n_components}d done in {time.time()-t0:.0f}s")
+    log(f"{kind}-{n_components}d done in {time.time()-t0:.0f}s")
     del reducer
     return out
 
@@ -326,6 +341,13 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--archs4-limit", type=int, default=0, help="Debug: cap ARCHS4 rows.")
     ap.add_argument("--skip-umap", action="store_true")
+    ap.add_argument("--densmap", action="store_true",
+                    help="Fit densMAP instead of UMAP, writing to the same "
+                         "coords_umap*.parquet names so a candidate cache can be "
+                         "scored with validate_artifacts.py --quality --compare.")
+    ap.add_argument("--dens-lambda", type=float, default=0.5,
+                    help="densMAP density-preservation weight; 0.5 is what the "
+                         "60,000-point evaluation scored.")
     args = ap.parse_args()
 
     paths.ensure_cache_dirs()
@@ -405,10 +427,13 @@ def main() -> None:
     if not args.skip_umap:
         t_umap = time.time()
         stats["umap_fit"] = "full corpus, no landmark subsample"
+        stats["umap_method"] = "densmap" if args.densmap else "umap"
         stats["umap_neighbors"] = int(args.umap_neighbors)
         stats["umap_metric"] = "cosine"
         stats["umap_input"] = "raw 512-d L2-normalized"
         stats["umap_init"] = "exact full-corpus PCA, scaled (not spectral)"
+        if args.densmap:
+            stats["dens_lambda"] = float(args.dens_lambda)
 
         x = load_normalized_corpus(mm, n_archs4, osdr_norm, args.batch)
         t_knn = time.time()
@@ -419,7 +444,8 @@ def main() -> None:
 
         t = time.time()
         umap2 = run_umap(x, knn, 2, args.seed, args.umap_neighbors,
-                         umap_init_from_pca(pca3, 2, args.seed))
+                         umap_init_from_pca(pca3, 2, args.seed),
+                         densmap=args.densmap, dens_lambda=args.dens_lambda)
         stats["umap2_seconds"] = round(time.time() - t, 1)
         write_coords(umap2, paths.COORDS_UMAP2)
         save_stats()
@@ -427,7 +453,8 @@ def main() -> None:
 
         t = time.time()
         umap3 = run_umap(x, knn, 3, args.seed, args.umap_neighbors,
-                         umap_init_from_pca(pca3, 3, args.seed))
+                         umap_init_from_pca(pca3, 3, args.seed),
+                         densmap=args.densmap, dens_lambda=args.dens_lambda)
         stats["umap3_seconds"] = round(time.time() - t, 1)
         write_coords(umap3, paths.COORDS_UMAP3)
         save_stats()
