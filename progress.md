@@ -24,7 +24,20 @@ Measured on OSD-100 `Mmus_C57-6J_EYE_FLT_Rep1_M23`, top-5:
 | cached (manifold artifacts) | 0.8 s | populated, offline |
 
 Identical accessions and identical scores to six decimal places.
-The subprocess path stays for the 788 samples the manifold never embedded, and `search_hits` returns which path ran so the interface can say so.
+`search_hits` returns which path ran so the interface can say so.
+
+**Correction, made the same day.** This entry first said "the subprocess path stays for the 788 samples the manifold never embedded", and that is wrong for 71 of them.
+Checked against each study's own counts matrix, the picker's 2,896 samples fall into three tiers, not two:
+
+| tier | count | behaviour |
+| --- | --- | --- |
+| cached | 2,108 | precomputed vector, ~0.5 s, and on the map |
+| subprocess | 717 | name matches a counts column, ~22 s, not on the map |
+| **unavailable** | **71** | name matches **no** column - every path raises |
+
+Reproduced end to end: `OSD-462|RR10_KDN_WT_BSL_B11` fails after 2.3 s with "found but has no readable counts/columns after processing".
+They are OSD-462 (54), OSD-374 (16) and OSD-612 (1), and two of those studies have nothing selectable at all.
+The picker now disables them with the reason and labels the slow tier, so the difference is visible before the click rather than after a wait.
 
 - `app.py` is the single entry point: `/` retrieves, `/map` draws the manifold, one header and one port.
 - `app_osdr_dash.py` (2,470 lines) is now the `bridge_rna/` package; 49 definitions were moved by exact line range and a checker asserts each appears once with a byte-identical body.

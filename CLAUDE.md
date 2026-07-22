@@ -28,6 +28,20 @@ So a query needs no subprocess and no network: **0.8 s against 22.1 s**, with `g
 `search_hits` returns `(hits, mode)` where mode is `cached`, `precomputed`, or `demo`, and **the interface must always say which ran**.
 It did not, once: the status banner special-cased only `precomputed`, so every cached result was announced as "real demo script output".
 
+### Three retrieval tiers, not two
+
+`bridge_rna.retrieval.sample_tier` classifies every OSDR sample the picker lists, and the third tier is easy to miss - an earlier version of this file asserted there were only two.
+
+| tier | count | behaviour |
+| --- | --- | --- |
+| `cached` | 2,108 | precomputed vector, ~0.5 s, and has a position on the map |
+| `subprocess` | 717 | name matches a column in its study's counts matrix, ~22 s, no map position |
+| `unavailable` | **71** | name matches **no** column - `demo_osdr_top5.py` raises, and no path can serve it |
+
+The unavailable set is OSD-462 (54), OSD-374 (16), OSD-612 (1); two of those studies have nothing selectable at all.
+Verified end to end - `OSD-462|RR10_KDN_WT_BSL_B11` fails after 2.3 s with "found but has no readable counts/columns after processing".
+They are shown **disabled with the reason** rather than hidden, and the picker never defaults to a disabled option.
+
 Three features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), the hnswlib ANN index and population-moment artifacts that existed only to serve it, and the precomputed density raster underlay (with its PNGs, its `--density-only` flag, and the Pillow dependency).
 Where that history is instructive it is recorded as history, clearly marked.
 
