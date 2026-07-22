@@ -1,0 +1,163 @@
+/* ==========================================================================
+   The shell: the header both views hang below, and the view switcher.
+
+   The header used to belong to the retrieval app, and the map drew its own
+   near-copy. There is one now, and it is the only element on the page that
+   knows there are two views at all.
+   ========================================================================== */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* The map fills the viewport and manages its own scrolling, so the shell must
+   not add a second scroll container around it. The retrieval view is a normal
+   document that scrolls. `min-height` above gives both what they need. */
+.app-shell > #page-content { flex: 1; min-height: 0; }
+
+/* --- Header ------------------------------------------------------------- */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 12px var(--space-4);
+  background: var(--header-bg);
+  border-bottom: 2px solid var(--header-line);
+  color: var(--header-fg);
+  flex: none;
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius-sm);
+  /* The brand is a link home now. Nothing about it should say "link": no
+     underline, no colour shift - only the pointer and a focus ring. */
+  outline-offset: 3px;
+}
+.app-brand:hover .app-title { color: #ffffff; }
+
+.app-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  flex: none;
+}
+
+.app-brand-text { display: flex; flex-direction: column; gap: 1px; }
+
+.app-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  transition: color 120ms ease;
+}
+
+.app-subtitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--header-fg-muted);
+  line-height: 1.3;
+}
+
+/* --- View switcher ------------------------------------------------------ */
+/* A segmented control rather than tabs. Tabs imply the page below is a panel
+   of one thing; these are two ways of looking at the same corpus, and the
+   control should read as a mode switch. */
+
+.app-nav {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.app-nav-item {
+  display: block;
+  padding: 6px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--header-fg-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.app-nav-item:hover { color: var(--header-fg); background: rgba(255, 255, 255, 0.08); }
+
+.app-nav-item.is-active {
+  background: var(--header-fg);
+  color: var(--header-bg);
+}
+.app-nav-item.is-active:hover { background: #ffffff; color: var(--header-bg); }
+
+.app-nav-item:focus-visible,
+.app-brand:focus-visible {
+  outline: 2px solid var(--header-line);
+  outline-offset: 2px;
+}
+
+/* --- Header statistics -------------------------------------------------- */
+
+.app-header-meta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex: none;
+}
+
+.header-stat { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+
+.header-stat-value {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.header-stat-value--accent { color: var(--header-line); }
+
+.header-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--header-fg-muted);
+}
+
+.header-stat-divider {
+  width: 1px;
+  height: 30px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Below this the two header stats and the switcher cannot share a row without
+   the brand losing its subtitle. The stats are context, so they go first. */
+@media (max-width: 1100px) {
+  .app-header-meta { display: none; }
+  .app-nav { margin-left: auto; }
+}
+
+@media (max-width: 640px) {
+  .app-subtitle { display: none; }
+  .app-nav-item { padding: 6px 12px; }
+}

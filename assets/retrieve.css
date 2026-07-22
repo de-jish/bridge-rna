@@ -1,180 +1,22 @@
-/* ==========================================================================
-   Bridge RNA  ·  OSDR → ARCHS4 similarity explorer
-   Light-theme design system. Every color / space / type value lives here as a
-   token; re-skin the whole app by editing :root.
-   ========================================================================== */
-
-:root {
-  /* --- surfaces --- */
-  --bg-canvas: #eef2f7;        /* page background - cool off-white */
-  --bg-panel: #ffffff;         /* card backgrounds */
-  --bg-panel-raised: #f4f7fb;  /* hover / active panel state */
-  --bg-sidebar: #ffffff;       /* persistent tool panel */
-  --bg-inset: #f5f8fc;         /* inset regions (long-text, code, scroll areas) */
-
-  /* --- lines --- */
-  --border-subtle: #e3e9f2;
-  --border-strong: #cdd8e6;
-
-  /* --- text --- */
-  --text-primary: #1a2432;
-  --text-secondary: #5a6b7e;
-  --text-muted: #8a99ac;
-
-  /* --- accents --- */
-  --accent: #2b7fff;           /* primary interactive accent - links, buttons, GSM hit node */
-  --accent-hover: #1f6ff0;
-  --accent-dim: #9cc4ff;
-  --accent-soft: #eaf2ff;      /* accent-tinted fill */
-  --accent-teal: #0bab9f;      /* secondary/data accent - query node, header rule, stat figures */
-  --accent-teal-soft: #e2f6f3;
-  --accent-warm: #d9791b;      /* GSE / study-level accent */
-  --accent-warm-soft: #fdf0e2;
-
-  /* --- header (the one deliberately dark surface) --- */
-  --header-bg: #14294a;        /* deep navy - scientific-instrument gravitas */
-  --header-fg: #f3f7fc;
-  --header-fg-muted: #9db2d1;
-  --header-line: #22c7bd;      /* teal accent rule under the header */
-
-  /* --- status --- */
-  --status-good: #1f9d57;
-  --status-good-soft: #e7f6ee;
-  --status-error: #d64545;
-  --status-error-soft: #fceceb;
-  --status-warn: #b7791f;
-  --status-warn-soft: #fdf6e3;
-  --status-info-soft: #eef2f7;
-
-  /* --- type --- */
-  --font-sans: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
-  --text-xl: 20px;   /* app title */
-  --text-lg: 18px;   /* panel titles */
-  --text-base: 14px; /* body / labels */
-  --text-sm: 12px;   /* metadata / secondary */
-
-  /* --- shape / spacing --- */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 20px;
-  --space-5: 32px;
-  --shadow-card: 0 1px 2px rgba(26, 36, 50, 0.04), 0 6px 20px rgba(26, 36, 50, 0.06);
-  --shadow-raised: 0 2px 6px rgba(26, 36, 50, 0.08), 0 12px 30px rgba(26, 36, 50, 0.10);
-
-  /* --- Re-skin Dash's built-in widgets (dropdown / slider / checklist / input)
-         by overriding its design tokens instead of fighting inline styles. --- */
-  --Dash-Fill-Interactive-Strong: var(--accent);
-  --Dash-Fill-Interactive-Weak: var(--accent-soft);
-  --Dash-Fill-Primary-Hover: rgba(43, 127, 255, 0.06);
-  --Dash-Fill-Primary-Active: rgba(43, 127, 255, 0.12);
-  --Dash-Stroke-Strong: var(--border-strong);
-  --Dash-Stroke-Weak: var(--border-subtle);
-  --Dash-Text-Primary: var(--text-primary);
-  --Dash-Text-Strong: var(--text-primary);
-  --Dash-Text-Weak: var(--text-secondary);
-  --Dash-Text-Disabled: var(--text-muted);
-}
-
-* { box-sizing: border-box; }
-
-html, body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: var(--text-base);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
+/* The retrieval view: the search sidebar, the network canvas, the
+   inspector, the banners. Tokens and the global reset live in
+   00-tokens.css; this file styles only what retrieval draws. */
 
 /* ==========================================================================
-   App shell: header + 3-zone grid
+   Retrieval view: the 3-zone grid
+   The header that used to sit here is the shell's now; see 01-shell.css.
    ========================================================================== */
 
+/* The view is a flex child of .app-shell, under the header, so it claims the
+   remaining height rather than declaring 100vh - which under the shell would
+   have been a viewport of header + a full screen, and a scrollbar with it. */
 .app-root {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
-
-.app-header {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  background: var(--header-bg);
-  border-bottom: 2px solid var(--header-line);
-}
-
-.app-brand { display: flex; align-items: center; gap: var(--space-3); }
-
-.app-brand-mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: 0.5px;
-  background: linear-gradient(135deg, var(--accent) 0%, #1858c8 100%);
-  box-shadow: 0 2px 8px rgba(43, 127, 255, 0.35);
-}
-
-.app-brand-text { display: flex; flex-direction: column; line-height: 1.2; }
-.app-title {
-  margin: 0;
-  font-size: var(--text-xl);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--header-fg);
-}
-.app-subtitle {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--header-fg-muted);
-  letter-spacing: 0.02em;
-}
-
-/* Dataset-ingestion statistics: scale of the loaded index, visible at rest. */
-.app-header-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-}
-.header-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.15;
-}
-.header-stat-value {
-  font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--header-fg);
-  font-variant-numeric: tabular-nums;
-}
-.header-stat-value--accent { color: var(--header-line); }
-.header-stat-label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--header-fg-muted);
-}
-.header-stat-divider { width: 1px; align-self: stretch; background: rgba(255, 255, 255, 0.14); }
 
 .app-grid {
   display: grid;
@@ -427,7 +269,8 @@ input.dash-input:focus,
 }
 .advanced-summary::-webkit-details-marker { display: none; }
 .advanced-summary .control-group-title { margin: 0; }
-.advanced-badge {
+.advanced-badge,
+.app-header-chip {
   margin-left: auto;
   font-size: 10px;
   font-weight: 600;
@@ -438,6 +281,12 @@ input.dash-input:focus,
   border-radius: 999px;
   padding: 1px 7px;
 }
+
+/* The "Beta" chip beside the AI panel title. It had no rule at all and was
+   rendering as plain body text - caught by widening the stylesheet check to
+   cover the retrieval view's classes, not only the map's. It sits next to a
+   heading rather than in a flex summary, so it does not take the auto margin. */
+.app-header-chip { margin-left: var(--space-2); align-self: center; }
 .advanced-summary::after {
   content: "";
   flex: none;
@@ -839,7 +688,7 @@ summary:focus-visible,
    instead of trapping the stacked panels inside a 100vh viewport lock (which
    clips content once three panels no longer fit one screen). */
 @media (max-width: 1180px) {
-  .app-root { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+  .app-root { flex: none; min-height: 0; overflow: visible; }
   .app-grid { grid-template-columns: 1fr; overflow: visible; }
   .sidebar,
   .workspace,
@@ -851,8 +700,6 @@ summary:focus-visible,
 
 /* Phone: relax padding, let the header wrap, keep touch targets comfortable. */
 @media (max-width: 680px) {
-  .app-header { flex-wrap: wrap; gap: var(--space-2) var(--space-3); padding: var(--space-3); }
-  .app-header-meta { flex-wrap: wrap; }
   .sidebar,
   .workspace { padding: var(--space-3); }
   .inspector { padding: 0 var(--space-3) var(--space-3); }

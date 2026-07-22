@@ -145,30 +145,14 @@ def legend_panel() -> html.Div:
     )
 
 
-def header() -> html.Div:
-    n_archs4, n_osdr, total = data.counts()
-    return html.Div(className="bm-header", children=[
-        html.Div(className="bm-logo", children=[
-            html.Span(className="bm-dot"),
-            html.Span("Bridge Manifold"),
-        ]),
-        html.Div("the exploratory map for Bridge RNA", className="bm-sub"),
-        html.Div(className="bm-spacer"),
-        html.Div(className="bm-count", children=[
-            html.Span("corpus "),
-            html.B(f"{total:,}"),
-            html.Span(f"  ·  ARCHS4 {n_archs4:,}  ·  OSDR {n_osdr:,}"),
-        ]),
-    ])
-
-
 def build_view() -> html.Div:
     """The map view, everything below the shared header.
 
-    The map used to be its own app with its own header. It is mounted by the
-    router in `app.py` now, so the chrome above it belongs to the shell and this
-    returns only the body. `header()` above is kept because the corpus counts it
-    computes are the map's own and the shell has no business deriving them.
+    The map used to be its own app and drew its own header, with a corpus count
+    strip reading "corpus 942,563 · ARCHS4 940,455 · OSDR 2,108". The shell
+    draws the header now and that function is deleted rather than kept unused:
+    both of its counts already appear on the control rail, in the Layers group,
+    beside the toggle that decides whether each corpus is drawn at all.
     """
     return html.Div(className="bm-app", children=[
         html.Div(className="bm-body", children=[

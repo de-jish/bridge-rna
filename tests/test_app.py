@@ -206,27 +206,66 @@ def test_bold_markup_survives_text_without_tags():
 
 # --- Styling --------------------------------------------------------------
 
-def test_every_classname_used_in_python_exists_in_the_stylesheet():
-    css = (paths.ASSETS_DIR / "manifold.css").read_text()
-    defined = set(re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", css))
+def _all_css() -> str:
+    """Every stylesheet Dash serves, concatenated in the order it serves them."""
+    return "\n".join(p.read_text()
+                     for p in sorted(paths.ASSETS_DIR.glob("*.css")))
 
+
+def _python_classnames(*dirs: Path) -> set[str]:
     # Dash exposes several className props; a class hook applied through any of
-    # them is just as broken if the stylesheet never defines it.
+    # them is just as broken if no stylesheet defines it.
     prop = r'(?:className|inputClassName|labelClassName)="([^"]+)"'
     used: set[str] = set()
-    for py in sorted(Path(paths.REPO_ROOT / "manifold").glob("*.py")):
-        for match in re.findall(prop, py.read_text()):
-            used.update(match.split())
+    for d in dirs:
+        files = sorted(d.glob("*.py")) if d.is_dir() else [d]
+        for py in files:
+            for match in re.findall(prop, py.read_text()):
+                used.update(match.split())
+    return used
 
+
+def test_every_classname_used_in_python_exists_in_some_stylesheet():
+    """Now that both views share one page, this has to span both.
+
+    A class the map emits could be defined only in the retrieval stylesheet and
+    still work, so checking each half against its own file would be checking
+    something that is no longer true.
+    """
+    defined = set(re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", _all_css()))
+    used = _python_classnames(
+        paths.REPO_ROOT / "manifold",
+        paths.REPO_ROOT / "bridge_rna",
+        paths.REPO_ROOT / "app.py",
+    )
     # Dash supplies its own component classes; only ours are our problem.
-    ours = {c for c in used if c.startswith("bm-")}
+    ours = {c for c in used if c.startswith(("bm-", "app-"))}
     missing = sorted(ours - defined)
     assert not missing, f"classNames with no CSS rule: {missing}"
 
 
+def test_the_stylesheets_define_each_token_exactly_once():
+    """One token layer, so a value cannot depend on which file sorts later.
+
+    The two views arrived with their own :root blocks, and five Dash component
+    tokens disagreed - meaning the alphabetically-later stylesheet silently
+    decided how the other view's controls rendered on hover.
+    """
+    import collections
+
+    counts: collections.Counter = collections.Counter()
+    for path in sorted(paths.ASSETS_DIR.glob("*.css")):
+        for block in re.findall(r":root\s*\{([^}]*)\}", path.read_text(), re.S):
+            for name, _ in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block):
+                counts[name] += 1
+    duplicated = sorted(t for t, n in counts.items() if n > 1)
+    assert not duplicated, f"tokens defined in more than one place: {duplicated}"
+    assert counts, "no design tokens found at all"
+
+
 def test_theme_matches_the_bridge_rna_tokens():
     """The chrome must stay pixel-identical to Bridge RNA; only the plot is dark."""
-    css = (paths.ASSETS_DIR / "manifold.css").read_text()
+    css = _all_css()
     for token, value in [
         ("--bg-canvas", theme.BG_CANVAS), ("--bg-panel", theme.BG_PANEL),
         ("--accent", theme.ACCENT), ("--header-bg", theme.HEADER_BG),

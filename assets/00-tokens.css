@@ -1,0 +1,132 @@
+/* ==========================================================================
+   Bridge RNA - the design tokens, defined once.
+
+   Dash serves every .css file in this directory, in alphabetical order, so the
+   numeric prefix here is load order rather than decoration:
+
+     00-tokens.css   this file: tokens + the global reset
+     01-shell.css    the header, the view switcher, the shell grid
+     retrieve.css    the retrieval view
+     map.css         the map view
+
+   The two views grew up as separate apps and each carried its own :root. Most
+   values agreed, which is why they always looked like one instrument, but five
+   of Dash's component tokens did not - and because the browser applies the last
+   definition it sees, whichever stylesheet happened to sort later was silently
+   deciding how the *other* view's dropdowns and radios rendered on hover. That
+   is settled here instead of by filename.
+   ========================================================================== */
+
+:root {
+  /* --- surfaces --- */
+  --bg-canvas: #eef2f7;        /* page background - cool off-white */
+  --bg-panel: #ffffff;         /* card backgrounds */
+  --bg-panel-raised: #f4f7fb;  /* hover / active panel state */
+  --bg-sidebar: #ffffff;       /* persistent tool panel */
+  --bg-inset: #f5f8fc;         /* inset regions (long-text, code, scroll areas) */
+  --plot-bg: #0e1d34;          /* the map's dark canvas - the one departure */
+
+  /* --- lines --- */
+  --border-subtle: #e3e9f2;
+  --border-strong: #cdd8e6;
+  --border: 1px solid #dce4ee;
+
+  /* --- text --- */
+  --text-primary: #1a2432;
+  --text-secondary: #5a6b7e;
+  --text-muted: #8a99ac;
+
+  /* --- accents --- */
+  --accent: #2b7fff;           /* primary interactive accent - links, buttons, GSM hit node */
+  --accent-hover: #1f6ff0;
+  --accent-dim: #9cc4ff;
+  --accent-soft: #eaf2ff;      /* accent-tinted fill */
+  --accent-teal: #0bab9f;      /* secondary/data accent - query node, header rule, stat figures */
+  --accent-teal-soft: #e2f6f3;
+  --accent-warm: #d9791b;      /* GSE / study-level accent */
+  --accent-warm-soft: #fdf0e2;
+
+  /* --- header (the one deliberately dark surface in the chrome) --- */
+  --header-bg: #14294a;        /* deep navy - scientific-instrument gravitas */
+  --header-fg: #f3f7fc;
+  --header-fg-muted: #9db2d1;
+  --header-line: #22c7bd;      /* teal accent rule under the header */
+
+  /* --- status --- */
+  --status-good: #1f9d57;
+  --status-good-soft: #e7f6ee;
+  --status-error: #d64545;
+  --status-error-soft: #fceceb;
+  --status-warn: #b7791f;
+  --status-warn-soft: #fdf6e3;
+  --status-info-soft: #eef2f7;
+
+  /* --- type --- */
+  --font-sans: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  --text-xl: 20px;   /* app title */
+  --text-lg: 18px;   /* panel titles */
+  --text-base: 14px; /* body / labels */
+  --text-sm: 12px;   /* metadata / secondary */
+
+  /* --- shape / spacing --- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius: 10px;              /* the map's single radius, == --radius-md */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 20px;
+  --space-5: 32px;
+  --shadow-card: 0 1px 2px rgba(26, 36, 50, 0.04), 0 6px 20px rgba(26, 36, 50, 0.06);
+  --shadow-raised: 0 2px 6px rgba(26, 36, 50, 0.08), 0 12px 30px rgba(26, 36, 50, 0.10);
+  --shadow: 0 1px 3px rgba(20, 41, 74, 0.08), 0 1px 2px rgba(20, 41, 74, 0.06);
+}
+
+/* Dash 4 ships its own design tokens and its own default palette (an interactive
+   purple). Remapping those tokens onto the Bridge RNA palette themes every Dash
+   component at once - dropdown, radio, checklist, focus rings - instead of
+   fighting each component's default rules with higher-specificity overrides.
+   Any Dash component added later inherits the instrument theme for free.
+
+   The five that used to disagree between the two stylesheets are resolved
+   toward the accent-tinted values rather than the neutral greys. One
+   application gets one interaction colour, and a faint blue wash reads as
+   "this responds to you" in a way that a half-step change in grey does not.
+   The map's greys were chosen when it was a separate app with no accent-tinted
+   precedent to match. */
+:root {
+  --Dash-Fill-Interactive-Strong: var(--accent);
+  --Dash-Fill-Interactive-Weak: var(--accent-soft);
+  --Dash-Fill-Inverse-Strong: var(--bg-panel);
+  --Dash-Fill-Primary-Hover: rgba(43, 127, 255, 0.06);
+  --Dash-Fill-Primary-Active: rgba(43, 127, 255, 0.12);
+  --Dash-Fill-Disabled: var(--bg-panel-raised);
+  --Dash-Stroke-Strong: var(--border-strong);
+  --Dash-Stroke-Weak: var(--border-subtle);
+  --Dash-Text-Primary: var(--text-primary);
+  --Dash-Text-Strong: var(--text-primary);
+  --Dash-Text-Weak: var(--text-secondary);
+  --Dash-Text-Disabled: var(--text-muted);
+}
+
+/* --- Global reset -------------------------------------------------------- */
+/* Both views used to ship their own copy of this. The map's `height: 100%` is
+   load-bearing rather than stylistic: its plot fills the viewport through an
+   unbroken chain of percentage heights, and the chain starts here. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
