@@ -109,6 +109,34 @@ def control_rail() -> html.Div:
                     className="bm-hint",
                 ),
             ]),
+            # Shown only when there is a retrieval to show. Declared here
+            # rather than created by a callback so Dash can validate the
+            # callback graph against it at startup: a component that exists
+            # only as callback output fails silently at runtime if its id is
+            # mistyped, which is the same reason the legend is built this way.
+            html.Div(id="retrieval-group", className="bm-group",
+                     style={"display": "none"}, children=[
+                html.Div("Your retrieval", className="bm-group-label"),
+                dcc.Checklist(
+                    id="show-retrieval",
+                    options=[{"label": " Show it on the map", "value": "on"}],
+                    value=["on"],
+                    className="bm-checklist",
+                ),
+                html.Div(id="retrieval-summary", className="bm-hint"),
+                html.Button("Frame the retrieval", id="frame-retrieval",
+                            n_clicks=0, className="bm-button"),
+                # This is the caveat that keeps the feature honest, and it is
+                # placed with the control rather than in a tooltip because the
+                # temptation to read rank off the picture is immediate.
+                html.Div(
+                    "Hits are ranked by cosine distance in 512 dimensions. "
+                    "This map is a 2-D projection that does not preserve those "
+                    "distances, so how far a hit sits from the query here is "
+                    "not its rank, and no line is drawn between them.",
+                    className="bm-hint",
+                ),
+            ]),
             # The measured cross-corpus batch effect used to be disclosed only
             # inside the lasso readout. It is a property of the map itself, not
             # of any selection, so it belongs on the map's controls.

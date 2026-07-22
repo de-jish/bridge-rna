@@ -248,3 +248,22 @@
 .bm-caution b { color: var(--text-primary); font-weight: 600; }
 
 a, a:visited { color: var(--accent); }
+
+/* A rail action. Quieter than the retrieval view's primary button: the map is
+   read rather than driven, and this is the only button on the rail. */
+.bm-button {
+  width: 100%;
+  margin-top: 2px;
+  padding: 7px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.bm-button:hover { background: var(--accent-soft); border-color: var(--accent-dim); }
+.bm-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

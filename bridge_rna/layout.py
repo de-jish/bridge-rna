@@ -195,6 +195,18 @@ def build_view() -> html.Div:
                                         id="search-status",
                                         children=build_status_banner("Select a sample and run a search.", kind="info"),
                                     ),
+                                    # The second act, offered only once there is
+                                    # something to see there. Hidden until a
+                                    # search succeeds; a link to "see your
+                                    # results on the map" before any results
+                                    # exist would be an empty promise.
+                                    dcc.Link(
+                                        id="see-on-map",
+                                        href="/map",
+                                        className="btn-ghost",
+                                        style={"display": "none"},
+                                        children="See these hits on the map →",
+                                    ),
                                 ],
                             ),
                             # hits-store lives on the shell (app.py): it

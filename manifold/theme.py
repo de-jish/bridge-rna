@@ -82,6 +82,57 @@ OSDR_OUTLINE = "#ffffff"
 # without competing for a categorical slot.
 OSDR_HIGHLIGHT = "#f2a03d"
 
+# --- A retrieval, drawn on the map -----------------------------------------
+# The corpus recedes rather than these glyphs growing without limit: a mark big
+# enough to find unaided in 942,563 points would be big enough to misrepresent
+# where the sample actually sits.
+#
+# The query keeps the teal it wears as the star in the retrieval network, so
+# the one glyph a returning user already recognises survives the trip. It is
+# not in CATEGORICAL, so it cannot be mistaken for a legend row.
+RETRIEVAL_QUERY = "#0bab9f"      # == ACCENT_TEAL, the network graph's query star
+RETRIEVAL_QUERY_HALO = "rgba(11, 171, 159, 0.50)"
+RETRIEVAL_QUERY_SIZE = 20.0
+RETRIEVAL_QUERY_HALO_SIZE = 46.0
+
+# Hits are an **open white ring**, and both halves of that matter.
+#
+# White because the obvious choice, the retrieval network's own blue #2b7fff,
+# measures **1.03:1** against CATEGORICAL[0] (#3987e5, Blood / immune) - the
+# largest bucket on the map at 155,761 points. A hit landing anywhere in 16.6%
+# of the corpus would have been invisible. White is 3.64:1 against that bucket
+# and 16.9:1 against the plot background.
+#
+# Open because it leaves the ARCHS4 point underneath showing its own tissue
+# colour. One glyph then carries two independent measurements at once: that
+# the sample was retrieved (512-d cosine, from the model) and what GEO's free
+# text calls it (40 keyword rules, which know nothing about any embedding).
+# Whether those two agree is visible in a single mark, for no extra ink.
+RETRIEVAL_HIT_RING = "#ffffff"
+RETRIEVAL_HIT_SIZE = 20.0
+RETRIEVAL_HIT_LINE = 2.2
+
+# Sizes above are pixels, not data units, so a halo never reads as a radius in
+# map space and does not swell on zoom.
+
+# How far the corpus recedes while a retrieval is drawn. The default ARCHS4
+# opacity is 0.55, so this is a clear step back rather than an erasure. 0.22 was
+# tried first and went too far: framed on a retrieval the surrounding region is
+# sparse, and at 0.22 its tissue colours vanished - which defeats the open ring,
+# whose whole purpose is to let the hit's tissue colour show through it.
+RETRIEVAL_DIM_ARCHS4 = 0.35
+# OSDR recedes as far as ARCHS4 while a retrieval is shown. Keeping it brighter
+# was tried and looked wrong: 2,108 white-ringed diamonds at 0.40 are far more
+# prominent than the handful of white rings marking the actual hits, so the
+# thing the user came to see loses to the thing they did not ask about. The
+# query is drawn separately as a star, so the OSDR corpus receding does not
+# take the query with it.
+RETRIEVAL_DIM_OSDR = 0.30
+
+# Rank numerals stop here. Past 25 the rings stay and the numerals would be
+# unreadable overlapping text rather than information.
+RETRIEVAL_MAX_NUMERALS = 25
+
 
 def color_for_index(i: int) -> str:
     """Categorical color for the i-th distinct category (wraps into Other-grey)."""

@@ -251,11 +251,20 @@ def _categorical_traces(coords, idx, codes, legend, is_3d, size, symbol,
         if not sel.any():
             continue
         residual = recede_residual and colorby.is_residual(row["label"])
+        # A residual category recedes to RESIDUAL_OPACITY - but when the whole
+        # corpus is already dimmed behind a retrieval, taking the min keeps it
+        # receded rather than letting 0.26 make "Other" the *brightest* thing
+        # on a 0.16 map.
+        if residual:
+            point_opacity = min(RESIDUAL_OPACITY, opacity) if opacity is not None \
+                else RESIDUAL_OPACITY
+        else:
+            point_opacity = opacity
         traces.append(_scatter(
             coords, idx[sel], row["color"], is_3d,
             size * (RESIDUAL_SIZE_SCALE if residual else 1.0), symbol, outline,
             name=row["label"], hover_lines=hover_lines, customdata=rows_for(sel),
-            opacity=RESIDUAL_OPACITY if residual else opacity))
+            opacity=point_opacity))
     return traces
 
 
@@ -273,7 +282,108 @@ def _osdr_customdata(codes: np.ndarray, legend: list[dict]) -> list[list]:
             for k, c in zip(keys, codes.tolist())]
 
 
-def build_figure(method, dims, color_by, layers, budget, viewport):
+def _retrieval_traces(coords, is_3d, retrieval) -> list:
+    """The query and its hits, drawn where they actually sit in the space.
+
+    `retrieval` is the payload the retrieval view stores: a `query_point` index
+    into the global point order and a list of `hit_points`, which are ARCHS4
+    memmap rows and therefore already point indices - ARCHS4 occupies rows
+    0..n_archs4-1. No lookup, no join.
+
+    **No lines are drawn between the query and its hits, deliberately.**
+    Connecting them would be the obvious and the most striking choice, and it
+    would assert something false. The retrieval ranks by cosine distance in
+    512 dimensions; this map is a 2-D projection that does not preserve those
+    distances, so a drawn edge would invite reading its length as similarity
+    when a rank-1 hit can easily land further away on screen than a rank-5 one.
+    Where the hits fall is worth seeing precisely because it is *not* the
+    ranking - it is what the projection did with it.
+    """
+    hits = [int(i) for i in retrieval.get("hit_points", [])]
+    query = retrieval.get("query_point")
+    n = len(coords)
+    hits = [i for i in hits if 0 <= i < n]
+    labels = retrieval.get("hit_labels") or []
+    scores = retrieval.get("hit_scores") or []
+    has_query = query is not None and 0 <= int(query) < n
+    traces = []
+
+    # Where each hit sits in the map's *own* ordering, by distance from the
+    # query in projection space. This is the number that keeps the picture
+    # honest: the retrieval ranks by cosine in 512 dimensions and the map is a
+    # 2-D shadow of that space, so the two orderings disagree, often wildly.
+    # Showing both ranks side by side in the hover states the disagreement
+    # instead of leaving a reader to infer rank from what is nearest.
+    map_ranks: list[int | None] = [None] * len(hits)
+    if has_query and hits:
+        q = coords[int(query)]
+        d2 = np.einsum("ij,ij->i", coords - q, coords - q)
+        for i, point in enumerate(hits):
+            map_ranks[i] = int((d2 < d2[point]).sum())
+
+    # Non-gl traces: at most k + 2 points, and Scattergl does not centre
+    # `markers+text` reliably.
+    Scatter = go.Scatter3d if is_3d else go.Scatter
+
+    def _xyz(points):
+        arr = np.asarray(points)
+        out = dict(x=coords[arr, 0], y=coords[arr, 1])
+        if is_3d:
+            out["z"] = coords[arr, 2]
+        return out
+
+    if has_query:
+        # A wide, faint ring so the query is findable in 942,563 points without
+        # a glyph big enough to misrepresent where the sample actually is.
+        traces.append(Scatter(
+            **_xyz([int(query)]), mode="markers", name="query halo",
+            marker=dict(size=theme.RETRIEVAL_QUERY_HALO_SIZE, symbol="circle-open",
+                        color=theme.RETRIEVAL_QUERY_HALO,
+                        line=dict(width=1.5, color=theme.RETRIEVAL_QUERY_HALO)),
+            hoverinfo="skip", showlegend=False))
+
+    if hits:
+        rows = []
+        for i, point in enumerate(hits):
+            gsm = str(labels[i]) if i < len(labels) else ""
+            score = f"{float(scores[i]):.4f}" if i < len(scores) else "-"
+            mr = map_ranks[i]
+            rows.append([
+                gsm,
+                f"512-d rank {i + 1} of {len(hits)} retrieved  ·  cosine {score}",
+                f"map rank {mr:,} of {n:,}" if mr is not None else "",
+            ])
+        numerals = [str(i + 1) if i < theme.RETRIEVAL_MAX_NUMERALS else ""
+                    for i in range(len(hits))]
+        traces.append(Scatter(
+            **_xyz(hits), mode="markers+text", name="retrieved hit",
+            text=numerals, textposition="top center",
+            textfont=dict(size=9, color=theme.RETRIEVAL_HIT_RING,
+                          family="JetBrains Mono, SF Mono, monospace"),
+            marker=dict(size=theme.RETRIEVAL_HIT_SIZE, symbol="circle-open",
+                        color=theme.RETRIEVAL_HIT_RING,
+                        line=dict(width=theme.RETRIEVAL_HIT_LINE,
+                                  color=theme.RETRIEVAL_HIT_RING)),
+            customdata=rows,
+            hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[1]}"
+                           "<br>%{customdata[2]}<extra></extra>"),
+            cliponaxis=False, showlegend=False))
+
+    if has_query:
+        label = str(retrieval.get("query_label") or "OSDR query")
+        traces.append(Scatter(
+            **_xyz([int(query)]), mode="markers", name="query",
+            marker=dict(size=theme.RETRIEVAL_QUERY_SIZE, symbol="star",
+                        color=theme.RETRIEVAL_QUERY,
+                        line=dict(width=2, color="#ffffff")),
+            customdata=[[label]],
+            hovertemplate="<b>%{customdata[0]}</b><br>the query sample<extra></extra>",
+            showlegend=False))
+    return traces
+
+
+def build_figure(method, dims, color_by, layers, budget, viewport,
+                 retrieval=None):
     is_3d = dims == "3d"
     coords = data.coords(method, dims)
     n_archs4, n_osdr, total = data.counts()
@@ -281,6 +391,18 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
     spec = colorby.get(color_by)
     legend_data = {"title": spec.label, "items": []}
     badges: list[str] = []
+
+    # A retrieval is being shown, so the corpus becomes the backdrop it is for
+    # that question. Dimming the whole map rather than enlarging the twelve
+    # points that matter keeps every glyph at a size that still means "one
+    # sample sits here".
+    showing_retrieval = bool(retrieval and (retrieval.get("hit_points")
+                                            or retrieval.get("query_point") is not None))
+    dim = theme.RETRIEVAL_DIM_ARCHS4 if showing_retrieval else None
+    # OSDR stays brighter than ARCHS4: 2,108 diamonds at the cloud's opacity
+    # vanish entirely, and losing the spaceflight corpus is the one thing this
+    # map may not do.
+    dim_osdr = theme.RETRIEVAL_DIM_OSDR if showing_retrieval else None
 
     if coords.shape[0] == 0:
         fig.update_layout(**theme.base_figure_layout(is_3d))
@@ -303,7 +425,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
         if covers_archs4:
             for trace in _categorical_traces(coords, idx, codes[idx], legend,
                                              is_3d, ARCHS4_SIZE, "circle", None,
-                                             recede_residual=True):
+                                             recede_residual=True, opacity=dim):
                 fig.add_trace(trace)
             badges.append(f"ARCHS4 live: <b>{len(idx):,}</b>")
         else:
@@ -313,7 +435,8 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
             # made 99.8% of the map look like measured-and-empty.
             fig.add_trace(_scatter(coords, idx, theme.ARCHS4_CONTEXT, is_3d,
                                    ARCHS4_CONTEXT_SIZE, "circle", None,
-                                   name="ARCHS4 (context)", opacity=0.35))
+                                   name="ARCHS4 (context)",
+                                   opacity=min(0.35, dim) if dim else 0.35))
             badges.append(f"ARCHS4: <b>context only</b> · {spec.label} is OSDR-only")
 
     # --- Layer 2: OSDR overlay ---------------------------------------------
@@ -325,7 +448,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
             for trace in _categorical_traces(
                     coords, osdr_global, osdr_codes, legend, is_3d, OSDR_SIZE,
                     theme.OSDR_SYMBOL, theme.OSDR_OUTLINE,
-                    hover_lines=OSDR_HOVER, customdata=rows):
+                    hover_lines=OSDR_HOVER, customdata=rows, opacity=dim_osdr):
                 fig.add_trace(trace)
         else:
             # An ARCHS4-only field. OSDR keeps its distinct glyph in a single
@@ -334,8 +457,17 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
             fig.add_trace(_scatter(coords, osdr_global, theme.OSDR_HIGHLIGHT,
                                    is_3d, OSDR_SIZE, theme.OSDR_SYMBOL,
                                    theme.OSDR_OUTLINE, name="OSDR",
-                                   hover_lines=OSDR_HOVER, customdata=rows))
+                                   hover_lines=OSDR_HOVER, customdata=rows,
+                                   opacity=dim_osdr))
         badges.append(f"OSDR: <b>{n_osdr:,}</b>")
+
+    # --- Layer 3: the retrieval, on top of everything ----------------------
+    if showing_retrieval:
+        for trace in _retrieval_traces(coords, is_3d, retrieval):
+            fig.add_trace(trace)
+        n_hits = len(retrieval.get("hit_points", []))
+        badges.append(
+            f"Showing retrieval: <b>{n_hits}</b> hit{'s' if n_hits != 1 else ''}")
 
     fig.update_layout(**theme.base_figure_layout(is_3d))
     return fig, legend_data, badges

@@ -222,6 +222,25 @@ def register(app) -> None:
 
 
     @app.callback(
+        Output("see-on-map", "style"),
+        Output("see-on-map", "children"),
+        Input("hits-store", "data"),
+    )
+    def offer_the_map(hits_payload: dict[str, Any] | None):
+        """Offer the map only once there is a retrieval to show on it.
+
+        Hits retrieved before `archs4_index` existed, or by the demo path,
+        cannot be located on the map. Offering the link anyway would send
+        someone to a map that draws nothing and looks broken.
+        """
+        hits = (hits_payload or {}).get("hits") or []
+        locatable = [h for h in hits if h.get("archs4_index") is not None]
+        if not locatable:
+            return {"display": "none"}, ""
+        n = len(locatable)
+        return {}, f"See {n} hit{'s' if n != 1 else ''} on the map →"
+
+    @app.callback(
         Output("selected-node-store", "data"),
         Input("network-graph", "clickData"),
     )
