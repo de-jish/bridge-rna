@@ -1,12 +1,15 @@
-"""Figure construction: layered WebGL scatter over a density underlay.
+"""Figure construction: layered WebGL scatter.
 
 Layers, back to front:
-  1. Density underlay - a precomputed raster of all 940k points as a layout
-     image, so the global manifold shape is always visible.
-  2. ARCHS4 background - a stratified WebGL sample, split into categorical
-     traces by the selected field.
-  3. OSDR overlay - all OSDR points, larger diamonds with a white ring, always
+  1. ARCHS4 background - a WebGL sample of the 940,455-point corpus, split into
+     categorical traces by the selected field.
+  2. OSDR overlay - all OSDR points, larger diamonds with a white ring, always
      on top so the 2,108 spaceflight samples stay findable in 940k.
+
+There used to be a third layer underneath both: a precomputed density raster of
+all 942,563 points, placed as a layout image. It is gone. Everything drawn here
+is now a real glyph at a real sample's coordinates, which is why the point
+budget goes all the way to the whole corpus.
 
 Two decisions here are what keep the map honest.
 
@@ -18,14 +21,13 @@ two corpora had different category orderings, which is a legend that lies.
 
 *A corpus a field does not describe is drawn as context, not as data.* Picking
 an OSDR-only field used to paint 940,455 uniform grey glyphs, which reads as
-"ARCHS4 was measured and has no structure here". Instead the ARCHS4 glyph layer
-steps aside for the density raster, which shows the true manifold shape and
-cannot be mistaken for a category. See manifold/colorby.py.
+"ARCHS4 was measured and has no structure here". Instead those points are drawn
+in one deliberately faint context colour at 0.35 opacity, outside the legend, so
+they read as scenery rather than as a category. See manifold/colorby.py.
 """
 
 from __future__ import annotations
 
-import base64
 from functools import lru_cache
 
 import numpy as np
@@ -38,20 +40,20 @@ ARCHS4_SIZE = 3.4
 ARCHS4_CONTEXT_SIZE = 2.6
 OSDR_SIZE = 8.5
 TOP_N = 11
+
+# 3-D keeps a cap the 2-D view no longer needs, and it was re-measured rather
+# than inherited when the 2-D budget was raised to the whole corpus. `Scatter3d`
+# has no equivalent of `Scattergl`'s fast path, and the cost that matters is
+# rotation, not first paint. Measured in a headless browser over the real 3-D
+# coordinates, first paint barely moves (1.1 s at 40k, 1.9 s at 400k) but a
+# twelve-step camera drag scales linearly with glyph count: 5.6 s at 42k, 10.4 s
+# at 102k, 18.5 s at 202k, 31.4 s at 402k. Spinning it is the whole point of a
+# 3-D view, so the cap stays where rotation stays usable.
 SCATTER3D_ARCHS4_CAP = 40000
 
 # Label for everything past the palette's capacity, merged with any residual
 # category ("Other", "Unknown") so the legend has one grey row rather than two.
 OVERFLOW = "Other"
-
-
-@lru_cache(maxsize=4)
-def _density_data_uri(name: str) -> str:
-    path = data.paths.DENSITY_DIR / f"{name}.png"
-    if not path.exists():
-        return ""
-    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{b64}"
 
 
 def _archs4_sample_indices(coords_xy, budget, viewport):
@@ -117,10 +119,60 @@ def _category_plan(values: np.ndarray) -> tuple[dict, list[dict]]:
     return lookup, legend
 
 
-def _display_values(values: np.ndarray, lookup: dict) -> np.ndarray:
-    """Map raw categories onto display categories for the whole corpus at once."""
-    series = pd.Series(values.astype(str))
-    return series.map(lambda v: lookup.get(v, OVERFLOW)).to_numpy()
+NOT_COVERED_CODE = -1
+
+
+def _display_codes(values: np.ndarray, lookup: dict, legend: list[dict]) -> np.ndarray:
+    """Legend slot for every point, as one compact integer array.
+
+    Deliberately integer codes rather than the obvious array of display-label
+    strings, for two reasons that both bite at 942,563 points.
+
+    Memory: under pandas 3.0 a string Series materializes a *fresh* Python str
+    per element on ``.to_numpy()``, so the string version of this array held
+    942,563 distinct objects to represent 13 distinct values - 127 MB per
+    colour-by, measured, which across the registry would have made the memoized
+    plan below cost more than a gigabyte. The codes cost 1.9 MB.
+
+    Speed: ``codes == slot`` is a vectorized integer compare, where
+    ``labels == "Liver"`` over an object array is 942,563 Python string
+    comparisons, once per category.
+
+    Points the field says nothing about get ``NOT_COVERED_CODE``, which matches
+    no legend slot, so they are drawn by the context path rather than silently
+    folded into the overflow bucket.
+    """
+    slot = {row["label"]: i for i, row in enumerate(legend)}
+    overflow = slot.get(OVERFLOW, NOT_COVERED_CODE)
+    raw_codes, uniques = pd.factorize(values, sort=False)
+    lut = np.array(
+        [NOT_COVERED_CODE if u == colorby.NOT_COVERED
+         else slot.get(lookup.get(str(u), OVERFLOW), overflow)
+         for u in uniques],
+        dtype=np.int16)
+    return lut[raw_codes]
+
+
+@lru_cache(maxsize=len(colorby.REGISTRY))
+def _colour_plan(key: str) -> tuple[np.ndarray, list[dict]]:
+    """The (legend slot per point, legend rows) for a colour-by, cached.
+
+    This is the dominant per-figure cost - resolving one label array over all
+    942,563 points, ranking the categories, and assigning each point a slot runs
+    about 0.8 s for Tissue - and none of it depends on the projection, the
+    dimensionality, the point budget, or the viewport. Only the colour-by key
+    changes the answer.
+
+    Caching it here is what keeps a zoom, a budget change, or a switch between
+    PCA and UMAP cheap now that those redraw the whole corpus rather than a
+    100,000-point sample. The registry is small and fixed and each entry is
+    1.9 MB, so every key can be held at once. This inherits the same assumption
+    the loaders in data.py already make: cache artifacts do not change while the
+    app is running.
+    """
+    values = colorby.labels(key)
+    lookup, legend = _category_plan(values)
+    return _display_codes(values, lookup, legend), legend
 
 
 def _scatter(coords, idx, color, is_3d, size, symbol, outline, name,
@@ -174,10 +226,13 @@ RESIDUAL_OPACITY = 0.26
 RESIDUAL_SIZE_SCALE = 0.82
 
 
-def _categorical_traces(coords, idx, display, legend, is_3d, size, symbol,
+def _categorical_traces(coords, idx, codes, legend, is_3d, size, symbol,
                         outline, hover_lines=(), customdata=None, opacity=None,
                         recede_residual=False):
     """One trace per display category, coloured from the shared legend mapping.
+
+    ``codes`` holds each point's legend slot, so selecting a category is one
+    vectorized integer compare rather than 942,563 Python string comparisons.
 
     Residual categories are emitted FIRST so they sit underneath. Plotly paints
     traces in the order they are added, and with the residual bucket last its
@@ -187,30 +242,35 @@ def _categorical_traces(coords, idx, display, legend, is_3d, size, symbol,
     rows_for = (lambda sel: None) if customdata is None else (
         lambda sel: [customdata[i] for i in np.where(sel)[0]])
 
-    ordered = sorted(legend, key=lambda row: not colorby.is_residual(row["label"]))
+    ordered = sorted(range(len(legend)),
+                     key=lambda s: not colorby.is_residual(legend[s]["label"]))
     traces = []
-    for row in ordered:
-        label = row["label"]
-        sel = display == label
+    for slot in ordered:
+        row = legend[slot]
+        sel = codes == slot
         if not sel.any():
             continue
-        residual = recede_residual and colorby.is_residual(label)
+        residual = recede_residual and colorby.is_residual(row["label"])
         traces.append(_scatter(
             coords, idx[sel], row["color"], is_3d,
             size * (RESIDUAL_SIZE_SCALE if residual else 1.0), symbol, outline,
-            name=label, hover_lines=hover_lines, customdata=rows_for(sel),
+            name=row["label"], hover_lines=hover_lines, customdata=rows_for(sel),
             opacity=RESIDUAL_OPACITY if residual else opacity))
     return traces
 
 
-def _osdr_customdata(display: np.ndarray) -> list[list]:
-    """Rows of [sample_key, category] for the OSDR overlay hover."""
+def _osdr_customdata(codes: np.ndarray, legend: list[dict]) -> list[list]:
+    """Rows of [sample_key, category] for the OSDR overlay hover.
+
+    A slot of NOT_COVERED_CODE means this field says nothing about the sample,
+    which the hover shows as "-" rather than inventing a category for it.
+    """
     meta = data.osdr_metadata()
     keys = (meta["sample_key"].astype(str).to_numpy()
             if "sample_key" in meta.columns
             else np.array([f"OSDR {i}" for i in range(len(meta))]))
-    return [[str(k), "-" if v == colorby.NOT_COVERED else str(v)]
-            for k, v in zip(keys, display)]
+    return [[str(k), legend[c]["label"] if c >= 0 else "-"]
+            for k, c in zip(keys, codes.tolist())]
 
 
 def build_figure(method, dims, color_by, layers, budget, viewport):
@@ -229,60 +289,41 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
         return fig, legend_data, [f"{method.upper()} not available"]
 
     coords_xy = coords[:, :2]
-    values = colorby.labels(spec.key)
-    lookup, legend = _category_plan(values)
-    display = _display_values(values, lookup)
+    codes, legend = _colour_plan(spec.key)
     legend_data["items"] = legend
 
     covers_archs4 = colorby.covers_corpus(spec.key, colorby.ARCHS4)
-    density_on = "density" in layers and not is_3d
 
-    # --- Layer 1: density underlay (2D only) -------------------------------
-    images = []
-    if density_on:
-        uri = _density_data_uri(data.METHODS[method]["density"])
-        extent = data.stats().get(f"density_{data.METHODS[method]['density']}")
-        if uri and extent:
-            images.append(dict(
-                source=uri, xref="x", yref="y",
-                x=extent["x0"], y=extent["y1"],
-                sizex=extent["x1"] - extent["x0"], sizey=extent["y1"] - extent["y0"],
-                sizing="stretch", layer="below", opacity=0.85,
-            ))
-
-    # --- Layer 2: ARCHS4 background ----------------------------------------
+    # --- Layer 1: ARCHS4 background ----------------------------------------
     if "archs4" in layers:
         idx = _archs4_sample_indices(coords_xy, int(budget), viewport)
         if is_3d and len(idx) > SCATTER3D_ARCHS4_CAP:
             idx = np.random.default_rng(1).choice(idx, SCATTER3D_ARCHS4_CAP,
                                                   replace=False)
         if covers_archs4:
-            for trace in _categorical_traces(coords, idx, display[idx], legend,
+            for trace in _categorical_traces(coords, idx, codes[idx], legend,
                                              is_3d, ARCHS4_SIZE, "circle", None,
                                              recede_residual=True):
                 fig.add_trace(trace)
             badges.append(f"ARCHS4 live: <b>{len(idx):,}</b>")
-        elif density_on:
-            # The raster already shows all 940,455 points and shows them more
-            # truthfully than a uniform glyph cloud would. Drawing nothing here
-            # is the honest option, not a degraded one.
-            badges.append(f"ARCHS4: <b>density only</b> · {spec.label} is OSDR-only")
         else:
-            # No raster to fall back on (3-D, or the underlay is switched off),
-            # so draw a deliberately faint cloud purely for spatial context.
+            # These points have no value under this field, so they are drawn as
+            # scenery: one faint colour, no legend row, nothing that could be
+            # read as a category. A uniform grey glyph *in the palette* is what
+            # made 99.8% of the map look like measured-and-empty.
             fig.add_trace(_scatter(coords, idx, theme.ARCHS4_CONTEXT, is_3d,
                                    ARCHS4_CONTEXT_SIZE, "circle", None,
                                    name="ARCHS4 (context)", opacity=0.35))
             badges.append(f"ARCHS4: <b>context only</b> · {spec.label} is OSDR-only")
 
-    # --- Layer 3: OSDR overlay ---------------------------------------------
+    # --- Layer 2: OSDR overlay ---------------------------------------------
     if "osdr" in layers and n_osdr > 0:
         osdr_global = np.arange(n_archs4, n_archs4 + n_osdr)
-        osdr_display = display[osdr_global]
-        rows = _osdr_customdata(osdr_display)
+        osdr_codes = codes[osdr_global]
+        rows = _osdr_customdata(osdr_codes, legend)
         if colorby.covers_corpus(spec.key, colorby.OSDR):
             for trace in _categorical_traces(
-                    coords, osdr_global, osdr_display, legend, is_3d, OSDR_SIZE,
+                    coords, osdr_global, osdr_codes, legend, is_3d, OSDR_SIZE,
                     theme.OSDR_SYMBOL, theme.OSDR_OUTLINE,
                     hover_lines=OSDR_HOVER, customdata=rows):
                 fig.add_trace(trace)
@@ -296,8 +337,5 @@ def build_figure(method, dims, color_by, layers, budget, viewport):
                                    hover_lines=OSDR_HOVER, customdata=rows))
         badges.append(f"OSDR: <b>{n_osdr:,}</b>")
 
-    layout = theme.base_figure_layout(is_3d)
-    if images:
-        layout["images"] = images
-    fig.update_layout(**layout)
+    fig.update_layout(**theme.base_figure_layout(is_3d))
     return fig, legend_data, badges

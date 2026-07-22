@@ -48,9 +48,6 @@ COORDS_PCA3 = CACHE_DIR / "coords_pca3.parquet"
 COORDS_UMAP2 = CACHE_DIR / "coords_umap2.parquet"
 COORDS_UMAP3 = CACHE_DIR / "coords_umap3.parquet"
 
-# Datashader-style density rasters (built with numpy, no datashader dep).
-DENSITY_DIR = CACHE_DIR / "density"
-
 PROJECTION_STATS_JSON = CACHE_DIR / "projection_stats.json"
 
 
@@ -80,6 +77,5 @@ ARCHS4_METADATA_PARQUET = CACHE_DIR / "archs4_metadata.parquet"
 
 
 def ensure_cache_dirs() -> None:
-    """Create the writable cache directories if they do not yet exist."""
+    """Create the writable cache directory if it does not yet exist."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    DENSITY_DIR.mkdir(parents=True, exist_ok=True)

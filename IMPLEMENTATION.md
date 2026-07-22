@@ -22,7 +22,7 @@ A color-by that describes only the 2,108 OSDR samples paints 99.8% of the map a 
 So the tool must carry at least one whole-map field that is genuine biology (tissue, folded onto one vocabulary shared by both corpora), it must state in the interface exactly how many points the selected field colors, and when a field genuinely does not describe a corpus it must render that corpus as *context* rather than as a category.
 The rule, stated once: **the tool must never present an uncolored corpus as though the absence of a label were data.**
 
-It must render ~940k points smoothly at interactive frame rates using Plotly WebGL scatter traces over a precomputed density raster, with stratified sampling and viewport level-of-detail.
+It must render all 942,563 points smoothly at interactive frame rates using Plotly WebGL scatter traces, with stratified sampling and viewport level-of-detail available for anyone who wants a lighter view.
 It must make batch structure visible and disclose the measured cross-corpus technical effect where a user will actually read it.
 
 ### Non-goals
@@ -77,11 +77,10 @@ embed_osdr.py                                  app_manifold.py
   cache/osdr_sample_embeddings.float32.npy       points_meta.parquet   (identity table)
   cache/osdr_metadata.parquet                    osdr_metadata.parquet (OSDR labels)
                                                  archs4_metadata.parquet (GEO join)
-build_projections.py                             density/{pca2,umap2}.png
-  L2-normalize -> IncrementalPCA-50
-  -> {pca2, pca3, umap2, umap3} parquets         renders go.Scattergl over the raster
-  -> density/{pca2,umap2}.png                    colorby registry -> one label array
-  -> points_meta.parquet, archs4_geo.parquet     stratified sample + viewport LOD
+build_projections.py
+  L2-normalize, then two full-corpus fits       renders every point as go.Scattergl
+  -> {pca2, pca3, umap2, umap3} parquets        colorby registry -> one label array
+  -> points_meta.parquet, archs4_geo.parquet    stratified sample + viewport LOD
 
 fetch_archs4_meta.py
   sigpy JSON API -> archs4_metadata.parquet
@@ -89,8 +88,9 @@ fetch_archs4_meta.py
    and the canonical tissue bucket)
 ```
 
-The app never runs the model, never runs UMAP, never opens the 963 MB memmap, and never holds all 940k glyphs live.
-It reads small precomputed tables, samples them, and draws them.
+The app never runs the model, never runs UMAP, and never opens the 963 MB memmap.
+It reads small precomputed tables and draws them.
+It *can* hold all 942,563 glyphs live, and by default it does; what it must never do is compute the coordinates they sit at.
 The whole serving dependency surface is `dash`, `plotly`, `numpy`, `pandas`, and `pyarrow`: no scientific stack at all.
 
 A practical consequence worth stating explicitly: `BRIDGE_RNA_ROOT` is needed to **build** the cache, not to **run** the app.
@@ -210,33 +210,62 @@ Ordering matters: `fetch_archs4_meta.py` joins onto `archs4_geo.parquet` and `po
 
 ## 5. Dimensionality reduction
 
-### 5.1 The reduction spine: L2-normalize -> PCA-50 -> UMAP
+### 5.1 The reduction spine: L2-normalize, then fit on everything
 
 Measured on a 25k ARCHS4 sample before normalization, PC1 alone captures 57.8% of variance and the first 50 PCs capture 96.4%.
 That giant PC1 is a magnitude axis, which is exactly why we L2-normalize first.
 It is *not* a sequencing-depth axis, though this document said so for a long time; see `REFERENCE.md` section 4 for the measurement that corrected it.
-PCA to 50 dimensions then denoises and compresses the input to UMAP, which makes UMAP both faster and cleaner.
 
-### 5.2 PCA
+Everything downstream of that normalization is fit on **all 942,563 points**.
+This is a change from the first build, which fit PCA on a 60,000-point subsample and UMAP on a 122,563-point landmark set, and it is worth stating why the approximations were there and why they are not any more.
+Both were adopted on estimates, not measurements: a direct UMAP fit was assumed to cost hours and risk memory blowup, and PCA was assumed to need the subsample because streaming the corpus through `IncrementalPCA` was the only full-corpus route considered.
+Neither assumption survived being measured, and both are recorded in section 5.2 and 5.3 below.
 
-PCA is cheap: `IncrementalPCA-50` is fit on a 60,000-point stratified ARCHS4 subsample plus all 2,108 OSDR points, then the full corpus is streamed through the fitted components in 50k blocks.
-Measured on the real corpus, the fit took 1 s and the transform of all 942,563 points took 1 s.
-We write `pca2` and `pca3` coordinates for the full joint corpus.
+An intermediate PCA-50 step also used to sit between normalization and UMAP.
+It was removed earlier, on the measurement in `run_umap`: reducing to 50 components first discarded the 4.9% of variance those components do not carry, and cost 12% of local fidelity against feeding UMAP the raw 512-d vectors under cosine.
+So the spine is now two independent reductions of the same normalized 512-d corpus rather than a chain.
 
-After normalization, **PC1 = 40.9% and the cumulative over 50 PCs = 95.1%**.
-That pair is the objective test for the normalization invariant: a build landing near 57.8% is evidence that normalization was silently skipped, and `precompute/validate_artifacts.py` fails the build above a 50% ceiling.
+### 5.2 PCA, exact over every point
+
+PCA needs nothing from the data beyond its mean and its second moment, and both are sums.
+One streaming pass accumulating `s = sum_i x_i` and `G = sum_i x_i x_i^T` in float64 determines the covariance exactly, `C = (G - n mu mu^T) / (n - 1)`, and `eigh(C)` then yields the same components and the same explained-variance ratios as `sklearn.decomposition.PCA` fit on the materialized 942,563 x 512 matrix, to float64 round-off.
+`tests/test_projections.py` asserts exactly that equality rather than trusting the derivation.
+
+Measured on the real corpus: the accumulation over all 942,563 points took **6 s** and the projection onto the leading 3 components took **2 s**.
+The subsampled `IncrementalPCA` it replaced took about 1 s to fit and 1 s to transform, so exactness cost roughly 6 extra seconds, which is not a tradeoff so much as an oversight being corrected.
+
+Two consequences follow from the fit being exact rather than truncated.
+The full 512-eigenvalue spectrum is available for free, so `projection_stats.json` records all of it instead of the leading 50, and `validate_artifacts.py` checks that it sums to 1 as evidence the build did not silently fall back to a truncated fit.
+Eigenvector signs are pinned with the same largest-absolute-entry rule sklearn's `svd_flip` uses, because an eigensolver is free to return `-v` for `v` and a rebuild that mirrored the map for no reason visible in the data would be a bad surprise.
+
+The exact full-corpus figures are **PC1 = 41.3% and the cumulative over 50 PCs = 95.0%**, against the 40.9% / 95.1% the 60,000-point subsample reported.
+The subsample was close, which is the honest thing to say about it; it was still an estimate of a number that costs 6 seconds to know.
+That PC1 figure is the objective test for the normalization invariant: a build landing near 57.8% is evidence normalization was silently skipped, and `precompute/validate_artifacts.py` fails the build above a 50% ceiling.
 Because PC1 still dominates, a raw PCA-2D view is mostly one axis plus noise; we keep it because it is honest about global magnitude structure and it is a fast sanity layer, but UMAP is the primary exploratory view.
 
-### 5.3 UMAP
+### 5.3 UMAP, fit on the whole corpus
 
-UMAP is expensive and strictly offline.
-A direct fit on all 940k would take hours and risk memory blowup, so we use the landmark pattern: fit on a stratified 120,000-point ARCHS4 subsample plus all OSDR, then `.transform()` the remaining ~820k in 50k batches.
-Measured on the real corpus: the 2-d fit took 71 s and its transform 71 s; the 3-d fit and transform together took 143 s.
+UMAP is expensive and strictly offline, but it is not as expensive as this document assumed for the whole first build.
+The landmark pattern it used, fitting 122,563 points and pushing the remaining 819,999 through `.transform()`, is worth being precise about, because `.transform()` does not lay those points out at all.
+It places each new point by a weighted average of where its landmark neighbours already sit, so 87% of the corpus could only ever land inside the region the landmarks had already staked out, and none of it exerted any force on the layout it appears in.
 
-The whole projection build ran end to end in **5 min 47 s** (347 s), against an original estimate of 30 to 90 minutes that was wrong by an order of magnitude.
-Of that, 52 s built the ANN index and 4 s computed population moments, neither of which happens any more, so a current build is a **291 s** job, a little under 5 minutes.
-Peak RSS was about 2.5 GB.
-UMAP emits `n_jobs value 1 overridden to 1 by setting random_state`; at 71 s per fit, determinism is worth more than the threads, so `random_state=42` stays.
+The current build fits all 942,563 points directly.
+The k-nearest-neighbour graph is built once with `pynndescent` and handed to both the 2-d and the 3-d fit through UMAP's `precomputed_knn`, because the graph depends on the input space and `n_neighbors` and never on `n_components`.
+That halves the neighbour search for the build and, more usefully, guarantees the two maps are layouts of the *same* graph rather than of two independent approximations of it.
+
+Measured on the real corpus, on a 10-core M4 with 16 GB of RAM:
+
+| stage | cost |
+| --- | --- |
+| materialize the normalized 942,563 x 512 corpus | 2 s, 1.93 GB resident |
+| k=15 cosine neighbour graph, `n_jobs=1` | 115 s |
+| UMAP 2-d layout | see `REFERENCE.md` section 4 |
+| UMAP 3-d layout | see `REFERENCE.md` section 4 |
+
+`n_jobs=1` on the neighbour graph is deliberate and is the default of the `--knn-jobs` flag.
+NN-descent's heap updates race under threads, so the same seed gives a slightly different graph run to run at `n_jobs=-1`, and this graph is the artifact every downstream coordinate derives from.
+Single-threaded it takes 115 s, which is a small price for a reproducible build; `--knn-jobs -1` is roughly 10x faster for anyone who wants it and does not care.
+UMAP itself forces `n_jobs=1` whenever `random_state` is set (`umap_.py:1952`), so the layout is single-threaded regardless, and `random_state=42` stays for the same reason it always did.
 
 The app loads these coordinates and never invokes UMAP.
 
@@ -257,20 +286,43 @@ The renderer is one `dcc.Graph` holding one set of Plotly `go.Scattergl` (WebGL)
 
 Layers, back to front:
 
-1. **Density underlay.**
-   Offline, all 942,563 coordinates go through a 2048x2048 numpy `histogram2d`, `log1p`, and a navy-to-blue-to-teal ramp rendered to a PNG by Pillow, placed as a `layout.images` underlay at its recorded extent.
-   This is deliberately not datashader: a plain histogram is trivially fast at this scale and removes a fragile dependency.
-   The ramp is normalized against the 99.5th percentile of *occupied* bins rather than the global maximum, because occupancy is heavy-tailed (median occupied bin holds 2 points, maximum 638) and dividing by the maximum crushed the whole ramp into its bottom fraction: measured on the real raster, only 8 pixels reached the teal half.
-   Alpha ramps across the same span with a 0.22 floor so sparse-but-occupied bins still read.
-   `build_projections.py --density-only` re-renders the rasters from cached coordinates in seconds, so tuning the ramp never repeats the projection build.
-2. **ARCHS4 background.**
-   A single stratified WebGL sample, 3.4 px, hover disabled, split into one trace per display category.
+1. **ARCHS4 background.**
+   A WebGL sample of the 940,455-point corpus, 3.4 px, hover disabled, split into one trace per display category.
    Hover hit-testing is a dominant cost at this scale, and `hoverinfo="skip"` alone is not enough because a `hovertemplate` overrides it; the two are turned off together.
    ARCHS4 traces carry **no `customdata`**.
    It existed only to feed the removed selection tool, and it was roughly 600 KB of dead payload per figure.
-3. **OSDR overlay.**
-   All 2,108 OSDR points, always drawn, 8.5 px diamonds with a 1.1 px white ring and full hover, so the spaceflight samples stay findable above a 100k-point cloud.
+2. **OSDR overlay.**
+   All 2,108 OSDR points, always drawn, 8.5 px diamonds with a 1.1 px white ring and full hover, so the spaceflight samples stay findable in the cloud.
    Hover carries `[sample_key, category]`: which sample this is, and what it is under the current color-by.
+
+There used to be a third layer underneath both, and its removal is the reason the budget table below looks different from the one this document used to carry.
+
+**The density underlay, and why it is gone.**
+Offline, all 942,563 coordinates went through a 2048x2048 numpy `histogram2d`, a `log1p`, and a navy-to-blue-to-teal ramp rendered to a PNG by Pillow, placed as a `layout.images` underlay at its recorded extent.
+It existed to solve a problem: 940k live WebGL glyphs was assumed to be out of reach, so ~100k were drawn live and the raster carried the rest, keeping the global shape honest while interaction stayed smooth.
+
+The premise turned out to be wrong, and measurably so.
+Building the figure costs the same at every budget, because the dominant cost is resolving one label array over the full corpus rather than the size of the sample drawn from it.
+Serializing all 942,563 points costs 0.15 s and produces an 11.3 MB payload, against 0.03 s and 1.3 MB at 100,000, and the coordinates travel as plotly 6 base64 typed arrays rather than as JSON number lists, which is what keeps that number small.
+So the raster was buying a smoothness that did not need buying, at the cost of a second, unlabelled encoding of the same data sitting under the glyphs, a PNG artifact per projection, an extra build stage, a `--density-only` flag, and the Pillow dependency.
+
+Removing it also collapses a branch that was quietly load-bearing.
+The raster was doing double duty as the honest fallback for an uncovered corpus (section 7.4), which meant the fallback had two forms: draw nothing and let the raster carry the shape, or, where there was no raster (3-D, or the underlay toggled off), draw a faint context cloud.
+Two paths to the same requirement is one more than the requirement needs, and the 3-D path was already the general one.
+Now there is only the context cloud, in 2-D and 3-D alike.
+
+Point budgets (decisive):
+
+| Layer | Default | Range |
+| --- | --- | --- |
+| OSDR | 2,108 (100%, never subsampled) | 2,108 |
+| ARCHS4, 2D | 940,455 (100%) | 100,000 / 250,000 / 500,000 / all 940,455 |
+| ARCHS4, 3D | capped at 40,000 | 40,000 |
+| Total live glyphs, 2D | 942,563 | 102k to 942,563 |
+
+The default is now the whole corpus, which is the point of the change: the map's first frame shows every sample it has rather than a tenth of them over a picture of the rest.
+The lower tiers stay because they are genuinely faster to pan and zoom on a slower machine, and because a viewport re-sample at a partial budget is how fine structure is revealed on zoom.
+3-D keeps its own much lower cap because `Scatter3d` is not `Scattergl`: it has no WebGL fast path of the same kind, and 40,000 is where it stays interactive.
 
 **One palette across both corpora.**
 Categories are ranked once over the whole covered population and every layer draws from that single mapping, so a liver in GEO and a liver in OSDR get the same color.
@@ -281,17 +333,6 @@ A legend number is read as "how many such samples exist", and it should answer t
 
 **A corpus a field does not describe is drawn as context, not as data.**
 See section 7.4 for the full argument.
-
-Point budgets (decisive):
-
-| Layer | Default | Range |
-| --- | --- | --- |
-| OSDR | 2,108 (100%, never subsampled) | 2,108 |
-| ARCHS4, 2D | 100,000 (10.6%) | 60,000 / 100,000 / 150,000 |
-| ARCHS4, 3D | capped at 40,000 | 40,000 |
-| Total live glyphs, 2D | ~102k | ~152k |
-
-These budgets sit comfortably under the ~150k to 300k range where Scattergl pan and zoom begin to degrade, and 3D WebGL is heavier so it gets its own cap.
 
 Level of detail: on zoom (`relayout`), the new x/y bounds become a viewport and the server re-runs stratified sampling over the full 940k coordinates restricted to that window, so zooming reveals fine structure instead of enlarging sparse dots.
 A relayout that is not a zoom (a hover, a legend click, a drag-mode switch) returns a sentinel that leaves the current sample alone rather than triggering a resample.
@@ -375,7 +416,7 @@ What the declaration buys, in the interface:
   Dash's dropdown has no option-group support, so the grouping is carried by ordering plus the suffix rather than by faked disabled header rows.
 - **A field with no data at all is shown and disabled, with the command that enables it**, not hidden.
   Hiding it makes the app look like it never had the feature; showing it disabled next to `precompute/fetch_archs4_meta.py` says the feature exists and how to switch it on.
-- **A coverage bar and an exact point count sit directly under the control**: "Colours all 942,563 points." against "Colours 2,108 of 942,563 points (0.2%). ARCHS4 is shown as density for context."
+- **A coverage bar and an exact point count sit directly under the control**: "Colours all 942,563 points." against "Colours 2,108 of 942,563 points (0.2%). ARCHS4 is drawn as faint context."
   The partial bar is amber, not red, because an OSDR-only field is working correctly and is not failing.
   This is the control that answers "why is so much of my map not coloured?" before the user has to ask it.
 - **The app opens on the best whole-map field that works**, and falls back to species rather than raising if a browser holds a stale key across a rebuild.
@@ -387,12 +428,14 @@ That state is what a fresh clone starts in, so `tests/conftest.py` provides a `w
 
 **The renderer never paints a uniform grey glyph cloud.**
 
-When the selected field does not describe ARCHS4, the ARCHS4 glyph layer steps aside and the precomputed density raster carries the manifold shape, with a badge on the plot saying exactly that: "ARCHS4: density only · Flight vs Ground is OSDR-only".
-The raster already shows all 940,455 points, and it shows them more truthfully than a uniform glyph cloud would, because a density field cannot be mistaken for a category.
-Drawing nothing in that layer is the honest option, not a degraded one.
-
-Only when there is no raster to fall back on, which means 3D or the underlay toggled off, is a context cloud drawn: 2.6 px at 0.35 opacity in its own color (`#43597c`, close to the plot background), badged "context only", and deliberately never given a legend swatch.
+When the selected field does not describe ARCHS4, those 940,455 points are drawn as a context cloud: 2.6 px at 0.35 opacity in a single color of their own (`#43597c`, deliberately close to the plot background), badged "ARCHS4: context only · Flight vs Ground is OSDR-only", and never given a legend swatch.
 Points with no value under the current field are the absence of a value, not a value, and giving them a swatch is what made the map read as grey data in the first place.
+The color matters as much as the opacity: `#43597c` is not in the categorical palette, so nothing about the cloud invites a reader to look for it in the legend.
+
+This used to be the second of two paths.
+The first was to draw nothing at all and let the precomputed density raster carry the shape, on the argument that a density field cannot be mistaken for a category, with the context cloud reserved for the cases where there was no raster (3-D, or the underlay toggled off).
+The raster is gone (section 6), so the context cloud is now the only path, and it applies in 2-D and 3-D alike.
+That is a simplification rather than a loss: the requirement was always "show the shape, do not impersonate a category", the context cloud satisfies it in every view, and having one path instead of two removes a branch where the two could have diverged.
 
 The mirror case is handled too: under an ARCHS4-only field, OSDR keeps its distinct diamond in a single warm highlight, so the spaceflight corpus stays locatable without borrowing a color that means something else in the legend.
 
@@ -426,8 +469,10 @@ It is arbitrary (seed-to-seed ARI of about 0.45), 81% species-pure, and explains
 Painting an arbitrary partition on a scientific instrument and numbering it "Cluster 1..24" invites exactly the over-reading the rest of this design prevents, and a numbered cluster is unusually good at inviting it because integers look like findings.
 A comment in `manifold/colorby.py` records the decision at the point where someone would add it back.
 
-**(d) Local UMAP density. Rejected as redundant.**
-The density raster is already rendered underneath every 2-D view, so a density color-by would encode the same quantity twice, once as color and once as the picture it sits on.
+**(d) Local UMAP density. Rejected as redundant, on an argument that has since expired.**
+The rejection was that the density raster is already rendered underneath every 2-D view, so a density color-by would encode the same quantity twice, once as color and once as the picture it sits on.
+That raster is gone (section 6), so this candidate is genuinely open again rather than settled.
+Anyone revisiting it should note that with every point now drawn live, glyph crowding *is* the density readout, and should hold the candidate to section 7.6 rather than treating this paragraph as a standing verdict.
 
 **(e) PC1 to PC3 as color-bys. Rejected.**
 They are free, since they already sit in `coords_pca3.parquet`, but they are redundant with the axes on screen, and PC1 is a transcriptome-concentration axis, which is interesting in its own right but is not what a user reaches for a spaceflight map to see.
@@ -458,9 +503,16 @@ This keeps the heavy exploratory tool from destabilizing the retrieval product, 
 The tradeoff is a small amount of duplicated app scaffolding, which is worth it for isolation.
 
 **Offline precompute over interactive computation.**
-Every expensive step (model inference, UMAP, density rasters) is precomputed and cached, and the app only ever loads artifacts.
+Every expensive step (model inference, PCA, UMAP) is precomputed and cached, and the app only ever loads artifacts.
 This is forced by the measured cost and is what makes the app responsive.
 The tradeoff is a build step and cache management, which is the right trade for a 943k-point tool.
+
+**Fit both reductions on the whole corpus, having checked what that actually costs.**
+The first build subsampled both: `IncrementalPCA` on 60,000 points, UMAP on a 122,563-point landmark set with the remaining 819,999 pushed through `.transform()`.
+Both approximations were adopted from estimates rather than measurements, and both estimates were wrong.
+Exact full-corpus PCA is a single streaming pass that costs 6 s, and a direct UMAP fit on all 942,563 points is a job measured in tens of minutes, not the "hours" this document asserted for its entire first life.
+The tradeoff is a longer build, paid once, offline, for coordinates in which every point participated in the layout it appears in.
+The general lesson is the one worth keeping: an approximation adopted to dodge a cost nobody measured is not a tradeoff, it is a guess with a justification attached.
 
 **Color-by coverage is a declared property, not a per-branch decision.**
 Every field states which corpora it can color right now, and the menu, the coverage readout, and the renderer all read that one declaration.
@@ -489,15 +541,18 @@ The magnitude is redundant rather than technical: it is recoverable from the nor
 Rather than applying Harmony or ComBat and risking erasure of real biology, the tool exposes study and species as color-by dimensions and discloses the measured 54x tissue-controlled cross-corpus effect on the control rail.
 Josh confirmed this is the final call: no correction algorithm, not even as a later toggle.
 
-**Bounded glyph budget with a density underlay.**
-Instead of trying to render 940k live points, we render ~100k live glyphs over a raster of all 942,563, so the global shape is always honest while interaction stays smooth.
-That underlay then does double duty as the honest fallback for an uncovered corpus (section 7.4), which is a large part of why the fallback is cheap.
+**Draw every point, having checked what that actually costs too.**
+The first build rendered ~100k live glyphs over a density raster of all 942,563, on the assumption that 940k live points was out of reach.
+Measured, all 942,563 serialize in 0.15 s to an 11.3 MB payload, and figure build time does not vary with the budget at all.
+So the raster was buying smoothness that did not need buying, and paying for it with a second unlabelled encoding of the same data, a per-projection PNG, a build stage, a flag, and a dependency.
+It is gone, the budget now defaults to the whole corpus, and the lower tiers survive only as a comfort control (section 6).
+This is the same lesson as the entry above, arriving from the rendering side rather than the compute side.
 
 **No on-demand statistics.**
 The selection readout was removed rather than repaired.
 It was the app's largest source of complexity (a 450-line statistics module, a 2.07 GB ANN index, an exact covariance artifact, a third UI column) in service of a question the map itself answers qualitatively, and every number it produced had to be defended against a null that most readers would never see.
 Removing it dropped the cache from about 2.3 GB to a measured 219.2 MB (of which the app opens 82.3 MB), took the serving app's dependency surface down to `dash`/`plotly`/`numpy`/`pandas`/`pyarrow`, and cut the test suite from 4.54 s to about 0.55 s.
-The two dead artifacts are still physically present on this machine as leftovers from the 2026-07-21 build, which is why `cache/` currently measures 2,293.8 MB; they can be deleted (`REFERENCE.md` section 12).
+Those two dead artifacts have since been deleted, along with the density rasters, so `cache/` now measures what `REFERENCE.md` section 12 records.
 
 ## 9. Directory layout
 
@@ -514,15 +569,15 @@ Bridge Manifold/
     tissue.py                # the shared tissue vocabulary, used by both corpora
     colorby.py               # the coverage-aware color-by registry
     sampling.py              # stratified quota sampling, viewport re-stratification
-    render.py                # layered figure: density underlay, ARCHS4 cloud, OSDR overlay
+    render.py                # layered figure: ARCHS4 cloud, OSDR overlay
     theme.py                 # plot theme (dark canvas) + validated categorical palette
     layout.py                # header, left control rail, plot (two columns)
     callbacks.py             # color-by, coverage readout, layers, method, zoom LOD, legend filter
   precompute/
     embed_osdr.py            # OSDR counts -> 2,108 x 512 embeddings (loads torch), resumable
-    build_projections.py     # L2 -> PCA-50 -> {pca2,pca3,umap2,umap3}, density rasters
+    build_projections.py     # L2 -> exact full-corpus PCA + full-corpus UMAP -> 4 coord parquets
     fetch_archs4_meta.py     # sigpy API -> per-GSM series/title/source/characteristics + tissue
-    validate_artifacts.py    # objective build gate; exits nonzero on failure
+    validate_artifacts.py    # objective build gate: structure, invariant 2, mixing, projection quality
   tests/
     fixture_corpus.py        # synthetic corpus with known latent clusters and GEO-style metadata
     conftest.py              # points the package at that corpus before import
@@ -531,10 +586,11 @@ Bridge Manifold/
     test_tissue.py           # the vocabulary: ordering collisions, boundary collisions, coalescing
     test_colorby.py          # declared coverage vs produced labels, availability, degraded state
     test_render.py           # shared palette, context-not-grey, budgets, viewport, legend
+    test_projections.py      # the exact PCA against sklearn, sign stability, global point order
     test_app.py              # callback wiring, coverage readout, CSS class coverage
   assets/
     manifold.css             # Bridge RNA tokens, Dash 4 token remap, dark-canvas + legend rules
-  cache/                     # generated (gitignored): embeddings, coords, density, metadata
+  cache/                     # generated (gitignored): embeddings, coords, metadata
   requirements.txt
   REFERENCE.md
   IMPLEMENTATION.md
@@ -594,16 +650,16 @@ Implement `embed_osdr.py` with the gene-digest gate; embed all eligible samples;
 Validate: digest matches, output shape is `2108 x 512`, and the batched preprocessing path reproduces Bridge RNA's single-sample path bit-for-bit (measured: max abs diff 0.0 across three studies).
 
 **Phase 2. PCA projections.**
-L2-normalize, fit `IncrementalPCA-50` on a stratified subsample plus all OSDR, project the joint corpus, write `pca2` and `pca3`.
-Validate: PC1 lands well below the 57.8% pre-normalization figure, which is the objective test that normalization was applied (measured: 40.9%, cumulative 95.1%).
+L2-normalize, then take the exact PCA of the whole corpus from a streaming second-moment pass, project it, write `pca2` and `pca3`.
+Validate: the components and explained-variance ratios equal a full `sklearn` fit to float64 round-off (`tests/test_projections.py`), the recorded 512-eigenvalue spectrum sums to 1, and PC1 lands well below the 57.8% pre-normalization figure, which is the objective test that normalization was applied (measured: 41.3%, cumulative over 50 PCs 95.0%).
 
 **Phase 3. First interactive plot.**
-Wire the Scattergl renderer, the density underlay, stratified sampling, the dataset and method toggles, and color-by.
-Validate: 100k + 2,108 points pan and zoom smoothly; every drawn glyph sits on a real corpus coordinate; the OSDR overlay draws every OSDR point exactly once; color-by switches without a full reload.
+Wire the Scattergl renderer, stratified sampling, the dataset and method toggles, and color-by.
+Validate: the whole corpus pans and zooms smoothly; every drawn glyph sits on a real corpus coordinate; the OSDR overlay draws every OSDR point exactly once; color-by switches without a full reload.
 
 **Phase 4. UMAP projections.**
-Implement the landmark fit-and-transform in `build_projections.py`; write `umap2` and `umap3`.
-Validate: `validate_artifacts.py` passes structurally (row counts agree across every artifact, all coordinates finite, every axis has real spread) and OSDR occupies a real region of the map rather than collapsing to a blob.
+Build the shared k-NN graph once and lay it out in 2-d and 3-d over all 942,563 points; write `umap2` and `umap3`.
+Validate: `validate_artifacts.py` passes structurally (row counts agree across every artifact, all coordinates finite, every axis has real spread), OSDR occupies a real region of the map rather than collapsing to a blob, and `--quality` shows each coordinate set clearing its nulls on 15-NN recall and 25-NN tissue purity.
 
 **Phase 5. Coloring both corpora.**
 Fetch the ARCHS4 GEO metadata over the sigpy API, build the shared tissue vocabulary, and replace the renderer's per-key branching with the coverage-aware registry.
@@ -612,7 +668,7 @@ Validate, objectively and not by looking at the map:
 - every enabled menu option produces a non-empty legend and a figure with at least one trace,
 - the coverage a field **advertises** equals the number of labels its resolver actually **produces** (`covered == (labels != NOT_COVERED).sum()`, checked for every registered field),
 - every whole-map field covers all 942,563 points and the app's default field is one of them,
-- an OSDR-only field draws zero ARCHS4 glyphs when the raster is on, and a faint context trace with no legend swatch when it is off,
+- an OSDR-only field draws its ARCHS4 points as a faint context trace, in a color outside the categorical palette and with no legend swatch, in 2-D and 3-D alike,
 - a category keeps one color across both corpora, and legend counts do not move with the point budget,
 - with the metadata join removed, Tissue degrades to OSDR-only coverage and names the command that restores it, rather than vanishing or lying.
 
@@ -631,13 +687,17 @@ The order matters: the metadata fetch joins onto artifacts that `build_projectio
 
 ```bash
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/embed_osdr.py         # OSDR embeddings, gene-digest gated. Hours.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # PCA + UMAP coords, density rasters. ~5 min.
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~50 min.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                  # http://127.0.0.1:8051
 
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py --density-only   # re-render rasters only
+# Score a candidate projection against the shipped one, on the same sample:
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --quality --compare /path/to/other/coords
 ```
+
+`build_projections.py --skip-umap` stops after the PCA stage, which takes 8 s, for anyone who only needs coordinates to exist.
+`--knn-jobs -1` trades reproducibility of the neighbour graph for roughly 10x on that one stage.
 
 Tests:
 
@@ -645,6 +705,7 @@ Tests:
 cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
 ```
 
-144 tests in about 0.55 s, against a hermetic synthetic corpus (4,000 ARCHS4 + 300 OSDR points) that never touches the real memmap, the checkpoint, or the multi-hour artifacts.
-The suite was 103 tests at 4.54 s before the redesign; removing the selection feature took the ANN index out of the fixture, which was 43% of the old runtime, and the color-by and tissue tests added back more coverage than was removed.
+152 tests in a few seconds, against a hermetic synthetic corpus (4,000 ARCHS4 + 300 OSDR points) that never touches the real memmap, the checkpoint, or the multi-hour artifacts.
+The suite was 103 tests at 4.54 s before the redesign; removing the selection feature took the ANN index out of the fixture, which was 43% of the old runtime, and the color-by, tissue, and projection tests added back more coverage than was removed.
+`test_projections.py` is the one file that imports from `precompute/`, because the exact-PCA claim is the kind that has to be checked against a reference implementation rather than asserted in a docstring.
 The per-file split is in `REFERENCE.md` section 12.

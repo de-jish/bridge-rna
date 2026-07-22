@@ -302,9 +302,15 @@ html, body {
    the selected field actually paints. This is the answer to "why is most of
    my map not coloured?", given before the question is asked. */
 .bm-coverage { margin-top: 9px; }
+/* The track needs enough contrast to read as a track. An OSDR-only field fills
+   0.2% of it, and against the old near-white #e3eaf3 that sliver looked like a
+   stray dot floating on the panel rather than like a nearly-empty bar - which
+   inverts the message, since the point of the bar is to show how much is NOT
+   covered. */
 .bm-coverage-bar {
   height: 4px; border-radius: 2px; overflow: hidden;
-  background: #e3eaf3; margin-bottom: 6px;
+  background: #d7e0ed; margin-bottom: 6px;
+  box-shadow: inset 0 0 0 1px rgba(20, 41, 74, 0.07);
 }
 .bm-coverage-fill {
   height: 100%; border-radius: 2px;

@@ -63,30 +63,84 @@ PCA variance (25k sample, before normalization): PC1 = 57.8% of variance; cumula
 PCA-50 fit on 25k x 512 = 11.7 s; projecting 200k to 2D via fitted components = 1.44 s, extrapolating to ~6.7 s for all 940k.
 
 UMAP (on PCA-50 input, L2-normalized): fit on 40k = 171 s; `.transform()` 60k = 21.5 s.
-Landmark hybrid (fit ~200k subsample, transform the rest) is the tractable path.
+Landmark hybrid (fit ~200k subsample, transform the rest) was believed to be the only tractable path.
+It was not; see the full-corpus build below.
 
-### Full-corpus build, actually measured (2026-07-21)
+### Landmark build, measured (2026-07-21, superseded)
 
-The 30-to-90-minute estimate above was wrong by an order of magnitude.
-The real `build_projections.py` run over 942,563 points (940,455 ARCHS4 + 2,108 OSDR) took **5 min 47 s end to end** on defaults.
+The 30-to-90-minute estimate above was wrong by an order of magnitude, and the landmark design it justified has since been replaced.
+Kept because the numbers are the baseline the full-corpus build is scored against.
 
-| stage | 2026-07-21, original | 2026-07-21, retuned | still run? |
-| --- | --- | --- | --- |
-| population moments, exact mean + covariance per corpus | 4 s | - | no, removed with the lasso |
-| IncrementalPCA-50 fit (60k ARCHS4 + 2,108 OSDR) | 1 s | 1 s | yes |
-| PCA transform, all 942,563 points | 1 s | 2 s | yes |
-| UMAP-2d landmark fit, 122,108 points | 71 s | 68 s | yes |
-| UMAP-2d transform, remaining 820,455 | 71 s | 404 s | yes |
-| UMAP-3d fit + transform | 143 s | 467 s | yes |
-| hnswlib cosine index, 942,563 points, M=16 ef=120 | 52 s | - | no, removed with the lasso |
-| **total** | **347 s** | **~950 s (15.8 min)** | |
+| stage | original | after the n_neighbors/metric retune |
+| --- | --- | --- |
+| IncrementalPCA-50 fit (60k ARCHS4 + 2,108 OSDR) | 1 s | 1 s |
+| PCA transform, all 942,563 points | 1 s | 2 s |
+| UMAP-2d landmark fit, 122,108 points | 71 s | 68 s |
+| UMAP-2d transform, remaining 820,455 | 71 s | 404 s |
+| UMAP-3d fit + transform | 143 s | 467 s |
+| **total** | **347 s** | **~950 s (15.8 min)** |
 
-Peak RSS ~2.5 GB against 17 GB.
+The retune roughly tripled the build, and all of the increase was in `.transform()`.
 
-The retune (`n_neighbors` 30 to 15, and cosine on the raw 512-d instead of euclidean on PCA-50) roughly **triples the build**, from about 5 minutes to about 16 minutes, and all of the increase is in `.transform()`.
-The landmark *fit* actually got slightly faster, because halving `n_neighbors` more than pays for the 10x wider vectors.
-A cost probe before the rebuild predicted 7.3 minutes and was wrong by a factor of two: it timed a transform batch drawn as one contiguous random sample, whereas the real batches index the scattered `setdiff1d` complement of the landmark set, so the memmap gather dominates.
-Time a transform batch on genuinely scattered indices if this is ever re-estimated.
+### Full-corpus build, actually measured (2026-07-22)
+
+**Both reductions are now fit on all 942,563 points.** No subsample, no landmark set, no `.transform()`.
+Measured end to end on a 10-core M4 with 16 GB of RAM:
+
+| stage | cost | notes |
+| --- | --- | --- |
+| exact PCA over all 942,563 points | **4.5 s** | one streaming pass accumulating a 512x512 second moment in float64 |
+| PCA transform to 3 components | 1 s | |
+| materialize the normalized corpus | 1 s | 1.93 GB resident, the build's largest allocation |
+| k=15 cosine neighbour graph, `n_jobs=1` | **59 s** | built once, reused by both fits via `precomputed_knn` |
+| UMAP-2d layout, all 942,563 points | **251 s** | |
+| UMAP-3d layout, all 942,563 points | **251 s** | |
+| **total** | **~10.5 min** | against 15.8 min for the landmark build it replaced |
+
+So fitting everything is not merely affordable, it is **faster than the landmark build was**, because the 404 s and 467 s `.transform()` passes are gone.
+The "a direct 940k fit is hours" claim that shaped the entire first design was never measured.
+
+Three settings make that possible, and two of them are non-obvious.
+
+- **`precomputed_knn`, one graph for both fits.**
+  The graph depends on the input space and `n_neighbors`, never on `n_components`, so it is built once with `pynndescent` and handed to both.
+  That halves the neighbour search and guarantees the 2-d and 3-d maps are layouts of the *same* graph.
+  UMAP assigns the arrays through without copying and then writes into them in place to disconnect far neighbours (`umap_.py:2647-2654`), so each fit gets its own copy.
+- **`init` is the exact PCA, not spectral.**
+  This one is not an optimization, it is the difference between finishing and not.
+  `_spectral_layout` sizes its Lanczos basis as `max(2k+1, sqrt(n))` (`spectral.py:489`), which at n = 942,563 is 970 vectors, so `eigsh` allocates a **942,563 x 970 float64 basis: 7.31 GB**.
+  Measured, that drove the build into 7.6 GB of swap and produced no progress in 25 minutes.
+  `init="tswspectral"` uses the same formula and does not help.
+  `init="pca"` is the documented alternative but would run a second PCA over the same matrix and copy it to centre it, so the exact PCA coordinates from the previous stage are passed directly, scaled the way `noisy_scale_coords` (`umap_.py:930`) scales UMAP's own.
+- **`random_state=42`, and what it costs.**
+  Seeding forces single-threaded execution three separate ways: `_validate_parameters` overwrites `n_jobs` to 1 (`umap_.py:1950-1954`, and its warning is printed after the assignment so it always reads the confusing "n_jobs value 1 overridden to 1"), `fit()` calls `numba.set_num_threads(1)` for the whole fit (`:2413-2415`, restored at `:2855`) which serializes the `njit(parallel=True)` kernels inside `fuzzy_simplicial_set`, and `_fit_embed_data` passes `random_state is None` as the `parallel` flag (`:2891`), selecting the serial layout kernel at `layouts.py:222-224`.
+  Measured on this machine against a real UMAP graph, the serial layout costs **4.3x to 7.5x** the parallel one.
+  Determinism is kept anyway: this is a once-per-corpus offline artifact, and the whole build is 10.5 minutes.
+
+`--knn-jobs` defaults to 1 for the same reason and is a separate knob: NN-descent's heap updates race under threads, so the same seed gives a slightly different graph run to run at `n_jobs=-1`.
+That is roughly 10x faster on that one 59-second stage and gives up graph reproducibility.
+You cannot have both a parallel neighbour search and a bitwise-reproducible map.
+
+### Was fitting everything worth it? (measured 2026-07-22)
+
+Scored by `validate_artifacts.py --quality --compare`, on one 60,000-point sample, against the exact 15-NN of the same points in the original 512-d space:
+
+| coords | 15-NN recall, landmark | 15-NN recall, full | 25-NN tissue purity, landmark | full |
+| --- | --- | --- | --- | --- |
+| pca2 | 0.0374 | 0.0374 | 0.1653 | 0.1654 |
+| pca3 | 0.1211 | 0.1199 | 0.2758 | 0.2758 |
+| **umap2** | 0.3660 | **0.3955 (+8.1%)** | 0.5926 | 0.5838 (-1.5%) |
+| **umap3** | 0.4291 | **0.4596 (+7.1%)** | 0.6080 | **0.6169 (+1.5%)** |
+
+The honest summary: **the full UMAP fit buys about 8% more local fidelity and leaves biological fidelity where it was**, moving 1.5% down in 2-d and 1.5% up in 3-d.
+That is the shape of result a full fit should produce, since `.transform()` placed 87% of the corpus by averaging landmark positions rather than by letting those points act on the layout.
+Against the anchors that make those numbers readable, umap2 keeps **92.3%** and umap3 **98.2%** of the tissue structure recoverable in 512-d (permuted-label null 0.0710, 512-d ceiling 0.6267).
+
+**PCA barely moved, and that is worth recording as a negative result.**
+The exact full-corpus fit and the 60,000-point `IncrementalPCA` fit agree to r = 0.999998 on PC1, 0.999941 on PC2 and 0.994802 on PC3, and PC1's share went 40.948% to 41.318%.
+The subsample was an excellent approximation.
+The exact fit is kept because it costs 4.5 seconds, removes an approximation from the pipeline, and yields the full 512-eigenvalue spectrum for free, not because it changed the picture.
+Note the degradation with component index: by PC3 the agreement is already 0.9948, so a build wanting more than three components should not assume the subsample stays adequate.
 
 ### UMAP settings, chosen by measurement (2026-07-21)
 
@@ -105,12 +159,12 @@ The two changes compose. Reducing to PCA-50 first was discarding the 4.9% of var
 Confirmed on the **real 942,563-point map**, not just the sample: 25-NN tissue purity over all 853,989 points carrying a real tissue bucket, 30,000 queries, went **0.6448 to 0.6756 (+4.8%)** against a permuted-label null of 0.0761, so the lift over null went 8.5x to 8.9x.
 The OSDR spread ratio also improved, 0.827 to 0.850, meaning the spaceflight corpus occupies more of the map rather than less.
 
-UMAP emits `n_jobs value 1 overridden to 1 by setting random_state`: seeding forces a single-threaded layout.
-At 71 s per fit that is not worth trading determinism for, so `random_state=42` stays.
-
-**PCA after L2 normalization: PC1 = 40.9%, cumulative over 50 PCs = 95.1%.**
+**PCA after L2 normalization, exact over the whole corpus: PC1 = 41.3%, cumulative over the first 50 of 512 components = 95.0%.**
+(The 60,000-point subsample the earlier build used reported 40.9% and 95.1%.)
 Contrast with the 57.8% above, which is the *pre-normalization* magnitude axis.
 This pair is the objective test for invariant 2 - see `precompute/validate_artifacts.py`, which fails the build if PC1 is not well below 50%.
+The full spectrum is now recorded in `projection_stats.json` and the validator checks that it has 512 entries summing to 1, which is the evidence the fit was exact rather than truncated.
+Cumulative shares: PC2 49.0%, PC3 53.3%, PC10 70.4%, PC50 95.0%, PC100 99.0%, PC256 99.9%.
 
 ### What the embedding norm actually is (measured 2026-07-21, corrects an earlier claim)
 
@@ -167,26 +221,28 @@ The versions recorded during design had drifted by the time the build ran; these
 | numpy | 2.4.6 | |
 | pandas | 3.0.3 | major release - see the behaviour note below |
 | pyarrow | 20.0.0 | |
-| scikit-learn | 1.9.0 | precompute only (IncrementalPCA) |
+| scikit-learn | 1.9.0 | precompute only, and now only for the `--quality` scoring |
 | umap-learn | 0.5.12 | precompute only |
+| pynndescent | 0.6.0 | precompute only; the shared k-NN graph both UMAP fits use |
 | plotly | 6.8.0 | serializes numpy arrays as base64 typed arrays |
 | dash | 4.4.0 | rewritten Dropdown/RadioItems, new `--Dash-*` design tokens |
 | torch | 2.12.1 | precompute only; MPS available, CUDA absent |
-| pillow | 12.2.0 | precompute only (density raster PNGs) |
 | requests | 2.34.2 | precompute only (ARCHS4 GEO metadata fetch) |
 | pytest | 9.1.1 | dev |
 | playwright | 1.61.0 | dev, browser checks against the running app |
-| scipy | 1.16.0 | present in the shared venv, **no longer used** by Bridge Manifold |
+| scipy | 1.16.0 | present in the shared venv, pulled in by umap-learn; not imported by Bridge Manifold |
+| pillow | 12.2.0 | present in the shared venv, **no longer used** - it existed for the density raster PNGs |
 | hnswlib | 0.8.0 | present in the shared venv, **no longer used** by Bridge Manifold |
 | h5py | 3.16.0 | installed for the ARCHS4 HDF5 experiment in section 8; not imported by any shipped code |
 
 `requirements.txt` splits the surface deliberately.
 The serving app (`manifold/` + `app_manifold.py`) needs only `dash`, `plotly`, `numpy`, `pandas`, `pyarrow`: it draws a precomputed map, opens no embeddings, and computes no statistics, so it carries no scientific stack at all.
-`torch`, `scikit-learn`, `umap-learn`, `pillow`, and `requests` are precompute-only.
+`torch`, `scikit-learn`, `umap-learn`, `pynndescent`, and `requests` are precompute-only.
+`scikit-learn` survives in that list only for `validate_artifacts.py --quality`; the build itself stopped importing it when `IncrementalPCA` was replaced by an exact streaming eigendecomposition.
 
-Absent: `datashader` (not needed - the density raster is a numpy 2D histogram), `archs4py`, `cuml`, `pacmap`, `openTSNE`.
+Absent: `datashader`, `archs4py`, `cuml`, `pacmap`, `openTSNE`.
 
-Three library behaviours the code actively depends on, each of which caused a real defect during the build:
+Four library behaviours the code actively depends on, each of which caused a real defect during the build:
 
 - **pandas 3.0**: `Series.astype(str)` no longer stringifies missing values; they stay NA.
   A later `.replace({"nan": "Unknown"})` therefore never matches them, and the NA survives into legends as a phantom category.
@@ -198,6 +254,10 @@ Three library behaviours the code actively depends on, each of which caused a re
 - **dash 4.x**: `dcc.Dropdown` is a radix popover (not react-select), so all `.Select-*` CSS is dead; `labelClassName` on `RadioItems`/`Checklist` lands on an inner text span rather than the label.
   Components are styled through Dash's own structural classes and its `--Dash-*` tokens.
   Dash's dropdown also has no option-group support, which is why `colorby.menu_options()` carries grouping through ordering plus a scope suffix rather than faked header rows.
+- **pandas 3.0, again, and this one is a memory trap rather than a correctness one**: `.to_numpy()` on a string-dtype Series materializes a *fresh* Python `str` object per element.
+  `render._colour_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry, against an app that otherwise opens 81.5 MB.
+  It is stored as `int16` legend slots instead, which is 1.9 MB, and category selection becomes a vectorized integer compare rather than 942,563 Python string comparisons.
+  Measured effect on the render path: a warm figure over the whole corpus went from 1.33 s to 0.06 s.
 
 ## 5b. Measured at build time
 
@@ -397,7 +457,8 @@ Categorical palette, validated with the dataviz skill's checker against `#0e1d34
 Slot order is the CVD-safety mechanism and must not be shuffled without re-validating: `#3987e5`, `#d95926`, `#199e70`, `#c98500`, `#d55181`, `#008300`, `#9085e9`, `#e66767`, `#1b95a3`, `#7d9a3c`, `#d84f96`.
 
 Two greys sit at the neutral end, because "Other" and "Unknown" are different answers: `OTHER_COLOR #7f8ea3` and the dimmer `UNKNOWN_COLOR #56657a`, so absence recedes furthest.
-`ARCHS4_CONTEXT #43597c` is deliberately close to the plot background and is used only for the faint context cloud drawn when the selected field does not describe ARCHS4 and there is no density raster to carry the shape.
+`ARCHS4_CONTEXT #43597c` is deliberately close to the plot background, and is not in the categorical palette, so the faint context cloud drawn when the selected field does not describe ARCHS4 reads as scenery and offers a reader nothing to look up in the legend.
+It used to apply only where there was no density raster to carry the shape; with the raster gone it applies in every view.
 `OSDR_HIGHLIGHT #f2a03d` is the single warm color the OSDR overlay takes when the field describes ARCHS4 only.
 The OSDR overlay is always a white-ringed `diamond`, so the 2,108 spaceflight samples stay findable among 940k circles.
 
@@ -476,9 +537,12 @@ Built, run on the real corpus, measured, and then deleted along with its precomp
 A structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points of modal agreement.
 It is arbitrary (seed-to-seed ARI ~0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm variance.
 Numbering an arbitrary partition "Cluster 1..24" on a scientific instrument invites exactly the over-reading the rest of the design prevents.
-Note that `cache/projection_stats.json` on this machine still carries `cluster_k`, `cluster_sizes_archs4`, `cluster_sizes_osdr` and `cluster_osdr_span` keys from that build; nothing reads them and the current script does not write them.
+(Those stale `cluster_*` keys are gone from `cache/projection_stats.json` too: the 2026-07-22 rebuild rewrote the file from scratch.)
 
-**(d) Local UMAP density.** Redundant with the density raster already rendered underneath every 2-D view.
+**(d) Local UMAP density. Rejected on an argument that has since expired.**
+The rejection was that the density raster is already rendered underneath every 2-D view, so a density color-by would encode the same quantity twice.
+That raster no longer exists, so this candidate is open again rather than settled.
+Anyone revisiting it should note that with every point now drawn live, glyph crowding *is* a density readout, and should hold the candidate to the methodological note below rather than treating this entry as a standing verdict.
 
 **(e) PC1-3 as color-bys.** Free, since they are already in `coords_pca3.parquet`, but redundant with the axes on screen.
 
@@ -504,24 +568,25 @@ Judge a candidate against a structure-free null **of the same form**, and check 
 | `osdr_metadata.parquet` | 0.027 MB | embed_osdr | yes |
 | `coords_pca2.parquet` | 8.78 MB | build_projections | yes |
 | `coords_pca3.parquet` | 13.17 MB | build_projections | yes |
-| `coords_umap2.parquet` | 8.78 MB | build_projections | yes |
-| `coords_umap3.parquet` | 13.17 MB | build_projections | yes |
-| `density/pca2.png`, `density/umap2.png` | 0.86 MB + 0.61 MB | build_projections | yes, as a base64 layout image |
-| `projection_stats.json` | 2.3 KB | build_projections | yes (variance profile, raster extents) |
+| `coords_umap2.parquet` | 8.79 MB | build_projections | yes |
+| `coords_umap3.parquet` | 13.18 MB | build_projections | yes |
+| `projection_stats.json` | 14.4 KB | build_projections | **no** - a build record the validator reads, nothing the app opens |
 | `archs4_geo.parquet` | 4.63 MB | build_projections | no, join key for the metadata fetch |
 | `archs4_metadata.parquet` | 32.51 MB | fetch_archs4_meta | yes, optional |
 | `osdr_sample_embeddings.float32.npy` | 4.32 MB | embed_osdr | no, input to build_projections |
 | `osdr_expression.float32.npy` | 127.87 MB | embed_osdr | no, resume intermediate for the multi-hour job |
 | `osdr_expression_meta.parquet` | 0.097 MB | embed_osdr | no |
 
-Total live cache: **219.2 MB**: 82.3 MB is what the serving app actually opens, 132.3 MB is embedding intermediates that exist so a re-embed never re-reads the counts CSVs, and 4.6 MB is the accession sidecar the metadata fetch joins onto.
+Total live cache: **217.8 MB**: 80.8 MB is what the serving app actually opens, 132.3 MB is embedding intermediates that exist so a re-embed never re-reads the counts CSVs, and 4.6 MB is the accession sidecar the metadata fetch joins onto.
+`projection_stats.json` grew from 2.3 KB to 14.4 KB because it now records all 512 explained-variance ratios rather than the leading 50.
 
-Two artifacts are **no longer produced**, and were deleted on 2026-07-21:
+Three artifacts are **no longer produced**:
 
 | removed artifact | size | why it is gone |
 | --- | --- | --- |
 | `joint_cosine.hnsw` | 2,070.4 MB | the ANN index existed only for the lasso's kNN-purity statistic and for the mixing check, which now computes exact neighbours in 10.3 s |
 | `population_moments.npz` | 4.2 MB | the exact per-corpus mean and covariance existed only for the lasso's analytic null |
+| `density/pca2.png`, `density/umap2.png` | 0.86 MB + 0.61 MB | the underlay they fed is gone (2026-07-22): every point is now drawn as a real glyph, measured at 0.15 s to serialize and 11.3 MB on the wire for all 942,563 |
 
 `cache/` measured 2.1 GB before the deletion and 214 MB after it, and both the suite and `validate_artifacts.py` pass without them.
 Neither was source data: both were derived from embeddings that are still intact, so nothing was lost that cannot be recomputed.
@@ -533,35 +598,45 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**144 tests, all passing, in 0.55 s** (`cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-21 by running the suite.
+**156 tests, all passing, in about 1.2 s** (`cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-22 by running the suite.
 
 | file | tests |
 | --- | --- |
-| `tests/test_app.py` | 27 |
-| `tests/test_colorby.py` | 17 |
-| `tests/test_data.py` | 22 |
-| `tests/test_render.py` | 32 |
 | `tests/test_tissue.py` | 46 |
+| `tests/test_render.py` | 34 |
+| `tests/test_app.py` | 27 |
+| `tests/test_data.py` | 22 |
+| `tests/test_colorby.py` | 18 |
+| `tests/test_projections.py` | 9 |
 
-The suite was 103 tests in 4.54 s before this session.
-The runtime fell by 88% mostly because the fixture no longer builds an approximate-nearest-neighbour index, which was 43% of the old wall clock.
+The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
+The runtime fell by 88% mostly because the fixture no longer builds an approximate-nearest-neighbour index, which was 43% of the old wall clock; it rose again to ~1.2 s because `test_projections.py` runs several 512-dimensional eigendecompositions.
+
+`tests/test_projections.py` is new and is the only file that imports from `precompute/`.
+It exists because the build's central claim, that a streaming second-moment pass reproduces a full-corpus PCA exactly, is not the kind of thing a docstring can establish: it is scored against `sklearn.decomposition.PCA` on planted low-rank data, to a max explained-variance-ratio difference below 1e-9 and component agreement below 1e-6.
+It also pins the sign convention across block sizes, that the recorded spectrum is all 512 components and sums to 1, and that the corpus streams in the fixed global order every other artifact is positionally joined on.
 
 The whole suite runs against a synthetic corpus built into a temp directory by `tests/fixture_corpus.py` (4,000 ARCHS4 + 300 OSDR points around known latent cluster centers), with `BRIDGE_RNA_ROOT` and `MANIFOLD_CACHE_DIR` set at conftest import time.
 It never touches the 963 MB memmap or the multi-hour embedding artifacts and runs on a machine that has neither.
 The fixture writes a synthetic `archs4_metadata.parquet` whose source strings are in ARCHS4's free-text register (`"liver"`, `"whole blood"`, `"Brain cortex"`, `"HeLa"`, `"left kidney"`, `"skeletal muscle biopsy"`) and maps them through the **real** canonicalizer, so the tests exercise the mapping rather than assuming it.
 `tests/conftest.py` provides a `without_archs4_metadata` fixture that points `ARCHS4_METADATA_PARQUET` at a non-existent file and clears the loader caches on both sides, because the degraded state is what a fresh clone starts in and needs real coverage.
+`render._colour_plan` is cleared there alongside the two data loaders: it memoizes a label array derived from the metadata, and a test proved that leaving it warm let Tissue keep colouring 940,455 ARCHS4 points from a join that no longer existed.
 
 ### Commands, in build order
 
 ```bash
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/embed_osdr.py          # OSDR embeddings, gene-digest gated. Hours.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py   # PCA + UMAP coords, density rasters. ~5 min.
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py   # full-corpus PCA + UMAP coords.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py   # ARCHS4 GEO metadata. ~35 s, needs network.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                   # http://127.0.0.1:8051
 
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py --density-only   # re-render rasters only
+# Score a candidate projection against the shipped one, on the same sample:
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --quality --compare DIR
 ```
 
 The metadata fetch runs third because it joins onto artifacts `build_projections.py` writes.
-`BRIDGE_RNA_ROOT` is needed for the first two steps and for `--mixing`, and not for running the app.
+`BRIDGE_RNA_ROOT` is needed for the first two steps and for `--mixing` and `--quality`, and not for running the app.
+
+Flags that appear in older prose and no longer exist: `--skip-hnsw`, `--density-only`, `--pca-fit-sample`, `--umap-fit-sample`, `--pca-components`.
+The current `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`.

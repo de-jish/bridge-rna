@@ -32,7 +32,7 @@ def _segmented(id_: str, options: list[dict], value: str):
 
 
 def control_rail() -> html.Div:
-    n_archs4, n_osdr, total = data.counts()
+    n_archs4, n_osdr, _ = data.counts()
     umap_ok = data.method_available("umap")
     method_options = [
         {"label": "UMAP", "value": "umap", "disabled": not umap_ok},
@@ -81,22 +81,31 @@ def control_rail() -> html.Div:
                     options=[
                         {"label": f"ARCHS4 cloud ({n_archs4:,})", "value": "archs4"},
                         {"label": f"OSDR overlay ({n_osdr:,})", "value": "osdr"},
-                        {"label": f"Density underlay (all {total:,})", "value": "density"},
                     ],
-                    value=["archs4", "osdr", "density"],
+                    value=["archs4", "osdr"],
                     className="bm-checklist",
                 ),
             ]),
+            # The budget used to top out at 150,000 because a density raster was
+            # carrying the other 790,455 points underneath. With the raster gone
+            # the glyph sample is the only thing representing them, so the
+            # ceiling is now the whole corpus. It is affordable: measured on the
+            # real corpus, every tier costs the same ~0.6 s to build, and even
+            # all 942,563 points serialize in 0.15 s to an 11.3 MB payload.
             html.Div(className="bm-group", children=[
                 html.Div("ARCHS4 point budget", className="bm-group-label"),
                 _segmented("budget", [
-                    {"label": "60k", "value": "60000"},
                     {"label": "100k", "value": "100000"},
-                    {"label": "150k", "value": "150000"},
-                ], "100000"),
+                    {"label": "250k", "value": "250000"},
+                    {"label": "500k", "value": "500000"},
+                    {"label": "All", "value": str(n_archs4)},
+                ], str(n_archs4)),
                 html.Div(
-                    "Live glyphs are a stratified sample over the density raster. "
-                    "Zoom re-samples the visible window.",
+                    "Every glyph is one sample. Below the full corpus the cloud "
+                    "is a species-stratified sample, and zoom re-samples the "
+                    "visible window. 3-D caps the cloud at 40,000 whatever is "
+                    "chosen here, because rotation cost grows with glyph count; "
+                    "the badge on the plot always states what was drawn.",
                     className="bm-hint",
                 ),
             ]),

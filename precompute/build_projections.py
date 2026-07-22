@@ -2,10 +2,10 @@
 """Phase 2+4: build the joint projection artifacts the serving app loads.
 
 Produces, for the union of ARCHS4 (940,455) and OSDR (2,108) embeddings:
-  - cache/coords_pca2.parquet, coords_pca3.parquet   (L2 -> IncrementalPCA-50)
-  - cache/coords_umap2.parquet, coords_umap3.parquet  (landmark UMAP on PCA-50)
-  - cache/density/*.png                               (numpy density rasters)
-  - cache/projection_stats.json                       (variance, extents, timings)
+  - cache/coords_pca2.parquet, coords_pca3.parquet    (exact full-corpus PCA)
+  - cache/coords_umap2.parquet, coords_umap3.parquet  (full-corpus UMAP)
+  - cache/points_meta.parquet, cache/archs4_geo.parquet
+  - cache/projection_stats.json                       (spectrum, extents, timings)
 
 Global point order is fixed as [all ARCHS4 in global_index order, then all
 OSDR in row order]; every artifact shares this order so the app can index
@@ -15,10 +15,13 @@ npy[i - N_ARCHS4].
 Design notes:
   * L2-normalize before any reduction. Raw ARCHS4 norms span 6.7-25.5 and PC1
     would otherwise be a magnitude axis (REFERENCE.md section 4).
-  * UMAP is a landmark fit on a stratified subsample (all OSDR + an ARCHS4
-    sample) then .transform() of the rest, because a direct 940k fit is hours.
-  * Density is a plain numpy 2D histogram, not datashader - fewer fragile deps,
-    full control, and trivially fast at this scale.
+  * Both reductions are fit on **every** point, not on a subsample. PCA gets
+    there by accumulating an exact 512x512 second-moment matrix in one pass;
+    UMAP gets there by fitting the 942,563-point graph directly. Neither is a
+    landmark approximation any more - see fit_exact_pca and run_umap for the
+    measurements that made the direct route affordable.
+  * The k-nearest-neighbour graph is built once and reused for the 2-d and the
+    3-d embedding, because the graph does not depend on the output dimension.
 """
 
 from __future__ import annotations
@@ -36,14 +39,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from manifold import paths, preflight  # noqa: E402
 
 EMB_DIM = 512
-
-# Density raster ramp. Occupancy is heavy-tailed, so the colour scale is
-# normalized against this percentile of the OCCUPIED bins rather than the
-# global max; see render_density for the measurement that motivated it.
-DENSITY_CLIP_PCT = 99.5
-# Faintest visible alpha for a bin that has any points at all, so sparse
-# structure (thin filaments, small islands) does not vanish into the canvas.
-DENSITY_ALPHA_FLOOR = 0.22
 
 
 def log(msg: str) -> None:
@@ -73,64 +68,183 @@ def chunks(n: int, size: int):
         yield s, min(s + size, n)
 
 
-def fit_incremental_pca(mm, n_archs4, osdr_norm, sample_idx, n_components, batch):
-    from sklearn.decomposition import IncrementalPCA
+def stream_corpus(mm, n_archs4: int, osdr_norm: np.ndarray, batch: int):
+    """Yield (start, stop, block) over the whole corpus in fixed global order.
 
-    ipca = IncrementalPCA(n_components=n_components)
-    # Fit in mini-batches over a shuffled ARCHS4 subsample plus all OSDR.
-    log(f"fitting IncrementalPCA-{n_components} on {len(sample_idx)} ARCHS4 + "
-        f"{len(osdr_norm)} OSDR samples")
-    t0 = time.time()
-    buf = []
-    buf_n = 0
-    for s, e in chunks(len(sample_idx), batch):
-        idx = np.sort(sample_idx[s:e])
-        block = l2_normalize(np.asarray(mm[idx], dtype=np.float32))
-        buf.append(block)
-        buf_n += len(block)
-        if buf_n >= batch:
-            ipca.partial_fit(np.concatenate(buf))
-            buf, buf_n = [], 0
-    # Fold OSDR into the fit so its manifold is represented.
-    tail = ([np.concatenate(buf)] if buf else []) + [osdr_norm]
-    ipca.partial_fit(np.concatenate(tail))
-    log(f"PCA fit done in {time.time() - t0:.0f}s; "
-        f"PC1 var {ipca.explained_variance_ratio_[0]*100:.1f}%, "
-        f"cum50 {ipca.explained_variance_ratio_.sum()*100:.1f}%")
-    return ipca
-
-
-def transform_all_pca(ipca, mm, n_archs4, osdr_norm, batch):
-    """Stream the full corpus through the fitted PCA into a (N, 50) float32 array."""
-    total = n_archs4 + len(osdr_norm)
-    out = np.empty((total, ipca.n_components_), dtype=np.float32)
-    t0 = time.time()
+    Blocks are L2-normalized float32. The ARCHS4 half is read straight off the
+    memmap, so the 1.93 GB normalized corpus is never materialized by a caller
+    that only needs one pass over it.
+    """
     for s, e in chunks(n_archs4, batch):
-        block = l2_normalize(np.asarray(mm[s:e], dtype=np.float32))
-        out[s:e] = ipca.transform(block)
-        if (s // batch) % 5 == 0:
-            log(f"  pca transform {e}/{n_archs4} ({time.time()-t0:.0f}s)")
-    out[n_archs4:] = ipca.transform(osdr_norm)
-    log(f"PCA transform of {total} points done in {time.time()-t0:.0f}s")
+        yield s, e, l2_normalize(np.asarray(mm[s:e], dtype=np.float32))
+    total = n_archs4 + len(osdr_norm)
+    if len(osdr_norm):
+        yield n_archs4, total, osdr_norm
+
+
+# --- PCA: exact, over every point -------------------------------------------
+
+def fit_exact_pca(stream, total: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Exact PCA of the whole corpus from one streaming pass.
+
+    This is not an approximation of a full-corpus fit, it *is* the full-corpus
+    fit. PCA needs nothing from the data beyond its mean and its second moment,
+    and both are sums, so one pass accumulating
+
+        s   = sum_i x_i                    (512,)
+        G   = sum_i x_i x_i^T              (512, 512)
+
+    in float64 determines the covariance exactly:
+
+        C = (G - n * mu mu^T) / (n - 1),   mu = s / n
+
+    and ``eigh(C)`` then yields the same components and the same
+    ``explained_variance_ratio_`` as ``sklearn.decomposition.PCA`` fit on the
+    materialized 942,563 x 512 matrix, to within float64 round-off. The previous
+    build fit ``IncrementalPCA`` on a 60,000-point subsample instead, which was
+    an approximation adopted for a cost that turns out not to exist: the whole
+    accumulation is ~250 GFLOP of BLAS matrix multiply and finishes in seconds.
+
+    Returns (components, explained_variance_ratio, mean), components ordered by
+    descending eigenvalue with all 512 present, so the full spectrum can be
+    recorded rather than the leading 50.
+    """
+    t0 = time.time()
+    gram = np.zeros((EMB_DIM, EMB_DIM), dtype=np.float64)
+    acc = np.zeros(EMB_DIM, dtype=np.float64)
+    seen = 0
+    for i, (s, e, block) in enumerate(stream):
+        b64 = block.astype(np.float64)
+        gram += b64.T @ b64
+        acc += b64.sum(axis=0)
+        seen += len(block)
+        if i % 5 == 0:
+            log(f"  pca accumulate {e}/{total} ({time.time()-t0:.0f}s)")
+    assert seen == total, f"stream yielded {seen} rows, expected {total}"
+
+    mean = acc / seen
+    cov = (gram - seen * np.outer(mean, mean)) / (seen - 1)
+    cov = (cov + cov.T) / 2.0  # kill asymmetry from round-off before eigh
+    evals, evecs = np.linalg.eigh(cov)
+    order = np.argsort(evals)[::-1]
+    evals, evecs = evals[order], evecs[:, order]
+    components = evecs.T  # (512, 512), row k is component k
+
+    # Deterministic signs, matching sklearn's svd_flip: make the entry of
+    # largest absolute value positive in every component. Without this an
+    # eigensolver is free to return -v for v, and a rebuild would mirror the map
+    # for no reason anyone could see in the data.
+    flip = np.sign(components[np.arange(EMB_DIM),
+                              np.argmax(np.abs(components), axis=1)])
+    components *= flip[:, None]
+
+    evals = np.clip(evals, 0.0, None)
+    evr = evals / evals.sum()
+    log(f"exact PCA over {seen} points in {time.time()-t0:.0f}s; "
+        f"PC1 {evr[0]*100:.1f}%, cum50 {evr[:50].sum()*100:.1f}%")
+    return components, evr, mean
+
+
+def transform_pca(stream, total: int, components: np.ndarray,
+                  mean: np.ndarray) -> np.ndarray:
+    """Project the corpus onto the leading components in a second pass."""
+    k = len(components)
+    out = np.empty((total, k), dtype=np.float32)
+    comp = np.ascontiguousarray(components.T.astype(np.float32))  # (512, k)
+    mu = mean.astype(np.float32)
+    t0 = time.time()
+    for s, e, block in stream:
+        out[s:e] = (block - mu) @ comp
+    log(f"PCA transform of {total} points into {k}-d done in {time.time()-t0:.0f}s")
     return out
 
 
-def stratified_fit_index(n_archs4, species, n_sample, seed):
-    """Indices into the ARCHS4 block for the UMAP landmark fit, balanced by species."""
-    rng = np.random.default_rng(seed)
-    human = np.where(species == 0)[0]
-    mouse = np.where(species == 1)[0]
-    per = n_sample // 2
-    pick = np.concatenate([
-        rng.choice(human, size=min(per, len(human)), replace=False),
-        rng.choice(mouse, size=min(per, len(mouse)), replace=False),
-    ])
-    return np.sort(pick)
+# --- UMAP: fit on every point, one shared neighbour graph --------------------
+
+def load_normalized_corpus(mm, n_archs4: int, osdr_norm: np.ndarray,
+                           batch: int) -> np.ndarray:
+    """Materialize the full L2-normalized corpus as one C-contiguous float32 array.
+
+    1.93 GB at the real corpus size. UMAP needs random access to every row while
+    it fits, so unlike the PCA passes this one cannot stream; it is the single
+    largest allocation in the build and it is why peak RSS is worth watching.
+    """
+    total = n_archs4 + len(osdr_norm)
+    x = np.empty((total, EMB_DIM), dtype=np.float32)
+    t0 = time.time()
+    for s, e, block in stream_corpus(mm, n_archs4, osdr_norm, batch):
+        x[s:e] = block
+    log(f"materialized {total} x {EMB_DIM} normalized corpus "
+        f"({x.nbytes/1e9:.2f} GB) in {time.time()-t0:.0f}s")
+    return x
 
 
-def run_umap(mm, n_archs4, osdr_norm, species, n_components, fit_sample, seed,
-             transform_batch, n_neighbors):
-    """Landmark UMAP over the L2-normalized 512-d vectors, streamed from the memmap.
+def build_knn(x: np.ndarray, n_neighbors: int, seed: int, n_jobs: int):
+    """The k-nearest-neighbour graph, built once for both output dimensions.
+
+    UMAP's graph depends on the input space and on ``n_neighbors``, never on
+    ``n_components``, so the 2-d and 3-d embeddings can share one graph. Building
+    it here rather than letting each ``UMAP.fit`` build its own halves the
+    neighbour search for the build as a whole and guarantees the two maps are
+    layouts of the *same* graph rather than of two independent approximations
+    of it.
+
+    ``n_jobs=1`` is the default because NN-descent's heap updates race under
+    threads: the same seed gives a slightly different graph run to run at
+    ``n_jobs=-1``, and this is the artifact every downstream coordinate derives
+    from. This is also what UMAP would do internally, since ``random_state``
+    forces ``n_jobs=1`` there (umap_.py:1952).
+    """
+    import pynndescent
+
+    t0 = time.time()
+    log(f"building k={n_neighbors} cosine neighbour graph over {len(x):,} points "
+        f"(n_jobs={n_jobs})")
+    index = pynndescent.NNDescent(
+        x, n_neighbors=n_neighbors, metric="cosine", random_state=seed,
+        low_memory=True, n_jobs=n_jobs, compressed=False, verbose=True,
+    )
+    knn_idx, knn_dist = index.neighbor_graph
+    del index
+    log(f"neighbour graph done in {time.time()-t0:.0f}s, shape {knn_idx.shape}")
+    return np.ascontiguousarray(knn_idx), np.ascontiguousarray(knn_dist)
+
+
+def umap_init_from_pca(pca_coords: np.ndarray, n_components: int,
+                       seed: int) -> np.ndarray:
+    """The initial layout the UMAP optimization starts from, taken from the PCA.
+
+    UMAP's default ``init="spectral"`` is not merely slow at this scale, it is
+    unusable. ``_spectral_layout`` sizes its Lanczos basis as
+    ``max(2k+1, sqrt(n))`` (spectral.py:489), which at n=942,563 is 970 vectors,
+    so ``eigsh`` allocates a 942,563 x 970 float64 basis: **7.31 GB**, on top of
+    the 1.93 GB corpus and the graph. Measured on this 16 GB machine, that drove
+    the build into 7.6 GB of swap and produced no progress in 25 minutes.
+    ``init="tswspectral"`` uses the same formula and does not help.
+
+    ``init="pca"`` is the documented alternative, but it would run a *second*
+    PCA over the same 942,563 x 512 matrix and copy it to centre it. We already
+    have the exact full-corpus PCA from the previous stage, so its coordinates
+    are handed to UMAP directly, with the same treatment UMAP gives its own:
+    scale the largest absolute coordinate to 10, then add a little noise. That
+    is ``noisy_scale_coords`` (umap_.py:930), and the noise is what stops
+    duplicate rows - GEO does contain resubmitted samples - from starting on top
+    of each other.
+
+    Using PCA rather than a spectral start is a real difference, not just a
+    faster route to the same place: a spectral init is generally kinder to
+    global structure. It is measured rather than assumed, by
+    ``validate_artifacts.py --quality``.
+    """
+    coords = np.asarray(pca_coords[:, :n_components], dtype=np.float64)
+    coords = coords * (10.0 / np.abs(coords).max())
+    rng = np.random.RandomState(seed)
+    return (coords + rng.normal(scale=1e-4, size=coords.shape)).astype(np.float32)
+
+
+def run_umap(x: np.ndarray, knn, n_components: int, seed: int,
+             n_neighbors: int, init: np.ndarray) -> np.ndarray:
+    """UMAP over every point in the corpus, from the shared neighbour graph.
 
     Two settings here were chosen by measurement rather than by default, and both
     matter more than they look. Scored against the original 512-d space on a
@@ -148,51 +262,40 @@ def run_umap(mm, n_archs4, osdr_norm, species, n_components, fit_sample, seed,
     carry, and n_neighbors=30 was over-smoothing the local structure this map
     exists to show.
 
-    This is why the reducer now reads the 512-d vectors instead of `pca_all`.
-    The full normalized corpus would be 1.93 GB in float32, so it is never
-    materialized: the landmark block is gathered once, and the rest is streamed
-    through .transform() in batches.
+    There is no landmark fit and no ``.transform()`` step. The earlier build fit
+    a 122,563-point subsample and pushed the remaining ~820k through
+    ``.transform()``, which does not lay those points out at all: it places each
+    one by a weighted average of where its landmark neighbours already sit, so
+    820,000 of 942,563 points could only ever land inside the convex region the
+    landmarks had already staked out. Fitting the whole corpus lets every point
+    exert force on the layout it appears in. It cost hours in the original
+    estimate and minutes in measurement.
     """
     import umap
 
-    total = n_archs4 + len(osdr_norm)
-    fit_idx = stratified_fit_index(n_archs4, species, fit_sample, seed)
-    log(f"UMAP-{n_components}d landmark fit on {len(fit_idx) + len(osdr_norm)} points "
-        f"({len(fit_idx)} ARCHS4 + {len(osdr_norm)} OSDR), "
+    t0 = time.time()
+    log(f"UMAP-{n_components}d fit on all {len(x):,} points, "
         f"n_neighbors={n_neighbors}, cosine on 512-d")
-
-    # Always include all OSDR points in the landmark fit; there are only 2,108 of
-    # them and leaving them to .transform() would place the corpus the whole tool
-    # is about into a space fitted without it.
-    landmark = np.vstack([
-        l2_normalize(np.asarray(mm[fit_idx], dtype=np.float32)),
-        osdr_norm,
-    ])
+    # Hand each fit its own copy of the graph. UMAP assigns the arrays through
+    # without copying and then writes into them in place to disconnect far
+    # neighbours (umap_.py:2647-2654), so a graph shared between the 2-d and the
+    # 3-d fit would let the first quietly edit the second one's input. Nothing
+    # should trip that write here - cosine disconnects at distance 2 and these
+    # are 15 nearest neighbours of concentrated vectors - but 226 MB is a cheap
+    # price for not depending on that.
     reducer = umap.UMAP(
         n_components=n_components,
         n_neighbors=n_neighbors,
         min_dist=0.1,
         metric="cosine",
         random_state=seed,
+        precomputed_knn=(knn[0].copy(), knn[1].copy()),
+        init=init,
         verbose=True,
     )
-    t0 = time.time()
-    emb_landmark = reducer.fit_transform(landmark).astype(np.float32)
-    log(f"UMAP fit done in {time.time()-t0:.0f}s; transforming remaining points")
-    del landmark
-
-    out = np.empty((total, n_components), dtype=np.float32)
-    out[fit_idx] = emb_landmark[:len(fit_idx)]
-    out[n_archs4:] = emb_landmark[len(fit_idx):]
-
-    remaining = np.setdiff1d(np.arange(n_archs4), fit_idx, assume_unique=True)
-    t1 = time.time()
-    for s, e in chunks(len(remaining), transform_batch):
-        idx = remaining[s:e]
-        block = l2_normalize(np.asarray(mm[idx], dtype=np.float32))
-        out[idx] = reducer.transform(block).astype(np.float32)
-        log(f"  umap transform {e}/{len(remaining)} ({time.time()-t1:.0f}s)")
-    log(f"UMAP transform done in {time.time()-t1:.0f}s")
+    out = reducer.fit_transform(x).astype(np.float32)
+    log(f"UMAP-{n_components}d done in {time.time()-t0:.0f}s")
+    del reducer
     return out
 
 
@@ -203,106 +306,30 @@ def write_coords(coords: np.ndarray, path: Path) -> None:
     log(f"wrote {path.name} {coords.shape}")
 
 
-def render_density(coords2d: np.ndarray, name: str, res: int = 2048) -> dict:
-    """Log-scaled 2D histogram -> navy-to-teal PNG underlay. Returns placement extent."""
-    from PIL import Image
-
-    x, y = coords2d[:, 0], coords2d[:, 1]
-    # Robust extent (1st-99th percentile) so a few outliers don't shrink the map.
-    xlo, xhi = np.percentile(x, [0.2, 99.8])
-    ylo, yhi = np.percentile(y, [0.2, 99.8])
-    H, _, _ = np.histogram2d(
-        x, y, bins=res, range=[[xlo, xhi], [ylo, yhi]]
-    )
-    H = H.T  # histogram2d returns [x, y]; image wants [row=y, col=x]
-    dens = np.log1p(H)
-    # Normalize against a high percentile of the OCCUPIED bins, not the global
-    # max. Bin occupancy is heavy-tailed (median 2 points, max 638 on the real
-    # corpus), so dividing by the max crushes the whole ramp into its bottom
-    # fraction: measured, only 0.78% of occupied bins cleared the 0.5 threshold
-    # where the teal half begins, leaving the high end of the ramp unused and
-    # the map a flat two-tone wash. Clipping at a percentile spends the ramp on
-    # the range that actually has pixels in it.
-    occupied = dens > 0
-    if occupied.any():
-        ref = float(np.percentile(dens[occupied], DENSITY_CLIP_PCT))
-        dens = np.clip(dens / max(ref, 1e-9), 0.0, 1.0)
-    # Map density -> RGBA: transparent where empty, navy->teal->white where dense.
-    rgba = np.zeros((res, res, 4), dtype=np.uint8)
-    # Colour ramp anchored to the plot navy.
-    c0 = np.array([14, 29, 52])      # PLOT_BG navy (low)
-    c1 = np.array([34, 90, 140])     # mid blue
-    c2 = np.array([34, 199, 189])    # teal (header line) high
-    t = dens[..., None]
-    lo = c0 + (c1 - c0) * np.clip(t * 2, 0, 1)
-    hi = c1 + (c2 - c1) * np.clip((t - 0.5) * 2, 0, 1)
-    col = np.where(t < 0.5, lo, hi).astype(np.uint8)
-    rgba[..., :3] = col
-    # Alpha grows with density; empty cells stay fully transparent. The old
-    # 2.2x slope saturated alpha at dens 0.4545, i.e. *before* the colour ramp
-    # reached its teal half at 0.5, so the densest cores were indistinguishable
-    # from merely-busy regions. Ramp alpha across the same 0..1 span the colour
-    # uses, with a floor so sparse-but-occupied bins still read.
-    alpha = np.where(occupied, DENSITY_ALPHA_FLOOR
-                     + (1.0 - DENSITY_ALPHA_FLOOR) * dens, 0.0)
-    rgba[..., 3] = (alpha * 235).astype(np.uint8)
-    # Flip vertically because image row 0 is the top but y increases upward.
-    img = Image.fromarray(rgba[::-1], mode="RGBA")
-    out = paths.DENSITY_DIR / f"{name}.png"
-    img.save(out)
-    log(f"wrote density {out.name}")
-    return {"x0": float(xlo), "x1": float(xhi), "y0": float(ylo), "y1": float(yhi)}
-
-
-def rerender_density_only() -> None:
-    """Redraw the density rasters from cached coordinates and refresh their extents.
-
-    The rasters are a pure function of the 2-d coordinates, so tuning the colour
-    ramp does not require repeating PCA, UMAP, or the index build.
-    """
-    if not paths.PROJECTION_STATS_JSON.exists():
-        raise SystemExit("ABORT: no projection_stats.json; run a full build first.")
-    stats = json.loads(paths.PROJECTION_STATS_JSON.read_text())
-    todo = [("pca2", paths.COORDS_PCA2), ("umap2", paths.COORDS_UMAP2)]
-    rendered = 0
-    for name, path in todo:
-        if not path.exists():
-            log(f"skipping {name}: {path.name} not present")
-            continue
-        coords = pd.read_parquet(path).to_numpy(dtype=np.float64)[:, :2]
-        stats[f"density_{name}"] = render_density(coords, name)
-        rendered += 1
-    if not rendered:
-        raise SystemExit("ABORT: no coordinate parquets found to render from.")
-    paths.PROJECTION_STATS_JSON.write_text(json.dumps(stats, indent=2))
-    log(f"re-rendered {rendered} density raster(s); extents refreshed in "
-        f"{paths.PROJECTION_STATS_JSON.name}")
-
-
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build joint PCA/UMAP/density artifacts.")
-    ap.add_argument("--pca-fit-sample", type=int, default=60000)
-    ap.add_argument("--umap-fit-sample", type=int, default=120000)
+    ap = argparse.ArgumentParser(description="Build joint PCA/UMAP projection artifacts.")
     ap.add_argument("--umap-neighbors", type=int, default=15,
                     help="UMAP n_neighbors. 15 beat the previous 30 on both local "
                          "fidelity and tissue purity by 8-37 seed standard "
                          "deviations; see run_umap.")
-    ap.add_argument("--pca-components", type=int, default=50)
-    ap.add_argument("--batch", type=int, default=50000)
+    ap.add_argument("--pca-report", type=int, default=50,
+                    help="How many leading components to summarize in "
+                         "projection_stats.json. The fit is always exact over "
+                         "all 512; this only sets the cumulative figure that "
+                         "invariant 2 is quoted against.")
+    ap.add_argument("--batch", type=int, default=50000,
+                    help="Rows per streaming block for the two PCA passes.")
+    ap.add_argument("--knn-jobs", type=int, default=1,
+                    help="Threads for the neighbour graph. The default of 1 is "
+                         "reproducible; -1 is roughly 10x faster and gives a "
+                         "slightly different graph run to run.")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--archs4-limit", type=int, default=0, help="Debug: cap ARCHS4 rows.")
     ap.add_argument("--skip-umap", action="store_true")
-    ap.add_argument("--density-only", action="store_true",
-                    help="Re-render the density rasters from the cached coordinate "
-                         "parquets and update their extents, then exit. For tuning "
-                         "the colour ramp without repeating the projection build.")
     args = ap.parse_args()
 
     paths.ensure_cache_dirs()
 
-    if args.density_only:
-        rerender_density_only()
-        return
     preflight.require(
         [("ARCHS4 memmap", paths.ARCHS4_MMAP), ("ARCHS4 locations", paths.ARCHS4_LOCATIONS),
          ("OSDR embeddings", paths.OSDR_EMBEDDINGS_NPY)],
@@ -331,13 +358,16 @@ def main() -> None:
                 "precompute/embed_osdr.py."
             )
 
+    total = n_archs4 + len(osdr_norm)
     stats: dict = {"n_archs4": int(n_archs4), "n_osdr": int(len(osdr_norm)),
-                   "total": int(n_archs4 + len(osdr_norm))}
+                   "total": int(total)}
 
     def save_stats() -> None:
         """Persist after every stage, so a later failure does not lose the earlier work."""
         paths.PROJECTION_STATS_JSON.write_text(json.dumps(stats, indent=2))
 
+    def stream():
+        return stream_corpus(mm, n_archs4, osdr_norm, args.batch)
 
     # --- Identity table (dataset + src_index), fixed global order ----------
     dataset = np.concatenate([np.zeros(n_archs4, np.int8), np.ones(len(osdr_norm), np.int8)])
@@ -354,38 +384,55 @@ def main() -> None:
         paths.ARCHS4_GEO_PARQUET, index=False)
     log("wrote points_meta.parquet + archs4_geo.parquet")
 
-    # --- PCA ---------------------------------------------------------------
-    rng = np.random.default_rng(args.seed)
-    pca_sample = rng.choice(n_archs4, size=min(args.pca_fit_sample, n_archs4), replace=False)
-    ipca = fit_incremental_pca(mm, n_archs4, osdr_norm, pca_sample, args.pca_components, args.batch)
-    stats["pca_explained_variance_ratio"] = ipca.explained_variance_ratio_.tolist()
-    stats["pca_pc1_pct"] = float(ipca.explained_variance_ratio_[0] * 100)
-    stats["pca_cum_pct"] = float(ipca.explained_variance_ratio_.sum() * 100)
+    # --- PCA: exact, over every point --------------------------------------
+    t_pca = time.time()
+    components, evr, mean = fit_exact_pca(stream(), total)
+    k = min(args.pca_report, EMB_DIM)
+    stats["pca_fit"] = "exact, full corpus (streaming second moment)"
+    stats["pca_explained_variance_ratio"] = evr.tolist()
+    stats["pca_components_reported"] = int(k)
+    stats["pca_pc1_pct"] = float(evr[0] * 100)
+    stats["pca_cum_pct"] = float(evr[:k].sum() * 100)
 
-    pca_all = transform_all_pca(ipca, mm, n_archs4, osdr_norm, args.batch)
-    write_coords(pca_all[:, :2], paths.COORDS_PCA2)
-    write_coords(pca_all[:, :3], paths.COORDS_PCA3)
-    stats["density_pca2"] = render_density(pca_all[:, :2], "pca2")
+    pca3 = transform_pca(stream(), total, components[:3], mean)
+    write_coords(pca3[:, :2], paths.COORDS_PCA2)
+    write_coords(pca3, paths.COORDS_PCA3)
+    stats["pca_seconds"] = round(time.time() - t_pca, 1)
     save_stats()
-    # The reducer reads the 512-d vectors now, so the 188 MB PCA-50 array has no
-    # further use once the PCA coordinates are written.
-    del pca_all
+    del components
 
-    # --- UMAP --------------------------------------------------------------
+    # --- UMAP: fit on every point ------------------------------------------
     if not args.skip_umap:
+        t_umap = time.time()
+        stats["umap_fit"] = "full corpus, no landmark subsample"
         stats["umap_neighbors"] = int(args.umap_neighbors)
         stats["umap_metric"] = "cosine"
         stats["umap_input"] = "raw 512-d L2-normalized"
-        umap2 = run_umap(mm, n_archs4, osdr_norm, species, 2, args.umap_fit_sample,
-                         args.seed, args.batch, args.umap_neighbors)
+        stats["umap_init"] = "exact full-corpus PCA, scaled (not spectral)"
+
+        x = load_normalized_corpus(mm, n_archs4, osdr_norm, args.batch)
+        t_knn = time.time()
+        knn = build_knn(x, args.umap_neighbors, args.seed, args.knn_jobs)
+        stats["knn_seconds"] = round(time.time() - t_knn, 1)
+        stats["knn_jobs"] = int(args.knn_jobs)
+        save_stats()
+
+        t = time.time()
+        umap2 = run_umap(x, knn, 2, args.seed, args.umap_neighbors,
+                         umap_init_from_pca(pca3, 2, args.seed))
+        stats["umap2_seconds"] = round(time.time() - t, 1)
         write_coords(umap2, paths.COORDS_UMAP2)
-        stats["density_umap2"] = render_density(umap2, "umap2")
         save_stats()
         del umap2
-        umap3 = run_umap(mm, n_archs4, osdr_norm, species, 3, args.umap_fit_sample,
-                         args.seed, args.batch, args.umap_neighbors)
+
+        t = time.time()
+        umap3 = run_umap(x, knn, 3, args.seed, args.umap_neighbors,
+                         umap_init_from_pca(pca3, 3, args.seed))
+        stats["umap3_seconds"] = round(time.time() - t, 1)
         write_coords(umap3, paths.COORDS_UMAP3)
         save_stats()
+        del umap3, knn, x
+        stats["umap_seconds"] = round(time.time() - t_umap, 1)
 
     save_stats()
     log(f"ALL DONE. stats -> {paths.PROJECTION_STATS_JSON.name}")

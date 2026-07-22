@@ -6,6 +6,11 @@ Nothing here imports torch or umap, and nothing here
 opens the 963 MB ARCHS4 embedding memmap - the app draws a precomputed map, so
 it never needs a 512-d vector at request time.
 
+`projection_stats.json` is deliberately not loaded here. The app read it only to
+place the density raster at its recorded extent, and with the raster gone the
+file is a build record that `precompute/validate_artifacts.py` checks, not
+something the app needs open.
+
 Global point order is fixed as [ARCHS4 (0..N_ARCHS4-1), then OSDR
 (N_ARCHS4..N-1)], matching build_projections.py. A point index `i` addresses
 the same sample across every artifact.
@@ -13,7 +18,6 @@ the same sample across every artifact.
 
 from __future__ import annotations
 
-import json
 from functools import lru_cache
 
 import numpy as np
@@ -22,16 +26,9 @@ import pandas as pd
 from . import paths, tissue
 
 METHODS = {
-    "pca": {"2d": paths.COORDS_PCA2, "3d": paths.COORDS_PCA3, "density": "pca2"},
-    "umap": {"2d": paths.COORDS_UMAP2, "3d": paths.COORDS_UMAP3, "density": "umap2"},
+    "pca": {"2d": paths.COORDS_PCA2, "3d": paths.COORDS_PCA3},
+    "umap": {"2d": paths.COORDS_UMAP2, "3d": paths.COORDS_UMAP3},
 }
-
-
-@lru_cache(maxsize=1)
-def stats() -> dict:
-    if paths.PROJECTION_STATS_JSON.exists():
-        return json.loads(paths.PROJECTION_STATS_JSON.read_text())
-    return {}
 
 
 @lru_cache(maxsize=1)

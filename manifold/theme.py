@@ -69,10 +69,9 @@ def residual_color(label: str) -> str:
     return UNKNOWN_COLOR if label == UNKNOWN_LABEL else OTHER_COLOR
 
 # ARCHS4 drawn purely as spatial context, when the selected field describes only
-# OSDR and there is no density raster to carry the shape (3-D, or the underlay
-# switched off). Deliberately close to the plot background: it must read as
-# scenery rather than as a category, because the whole point of the context
-# state is that these points have no value under this field.
+# OSDR. Deliberately close to the plot background: it must read as scenery
+# rather than as a category, because the whole point of the context state is
+# that these points have no value under this field.
 ARCHS4_CONTEXT = "#43597c"
 
 # OSDR overlay marker: distinct symbol with a white ring so it pops above cloud.

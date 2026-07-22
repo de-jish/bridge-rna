@@ -9,9 +9,8 @@ It dimensionally reduces the 512-dimensional ExpressionPerformer embeddings of b
 ## Status
 
 Application complete and running on the real data.
-The full pipeline has been run end to end on the 942,563-point corpus (940,455 ARCHS4 + 2,108 OSDR): OSDR embeddings, joint PCA and UMAP in 2D and 3D, density rasters, and the ARCHS4 GEO metadata join.
-144 tests pass in about 0.55 s.
-The live cache is 219.2 MB, of which the serving app opens 82.3 MB.
+The full pipeline has been run end to end on the 942,563-point corpus (940,455 ARCHS4 + 2,108 OSDR): OSDR embeddings, joint PCA and UMAP in 2D and 3D fit on every point, and the ARCHS4 GEO metadata join.
+153 tests pass in a few seconds.
 See `progress.md` for the live status log.
 
 ## What it does
@@ -22,11 +21,13 @@ See `progress.md` for the live status log.
   All 48 OSDR raw values land in a named bucket rather than in "Other" or "Unknown", and so do 851,881 of 940,455 ARCHS4 samples (90.6%).
   The "Tissue" color-by covers 942,563 of 942,563 points.
 - **Reduces both corpora into one shared 2D and 3D space**, with PCA (fast, linear) and UMAP (structure-preserving, nonlinear).
+  Both are fit on **all 942,563 points**, not on a subsample: the PCA is an exact eigendecomposition of the whole corpus taken from a single streaming pass, and the UMAP is a direct fit rather than a landmark fit with the rest pushed through `.transform()`.
   Vectors are L2-normalized first: raw ARCHS4 norms span 6.7 to 26.4, and without normalization PC1 is 57.8% of the variance and is a magnitude axis.
   That magnitude is not sequencing depth, as this file used to claim - it measures transcriptome concentration, at r = +0.987 with the share of expression held by a sample's top 100 genes.
-  The built map has PC1 at 40.9%, with 95.1% cumulative over 50 components.
-- **Renders ~100k live glyphs over a density raster of all 942,563 points**, using Plotly WebGL scatter traces, so the global shape is always visible and interaction stays smooth.
-  Zooming re-stratifies the sample inside the visible window rather than just enlarging sparse dots.
+  The built map has PC1 at 41.3%, with 95.0% cumulative over the first 50 of the 512 components.
+- **Draws every one of the 942,563 points as a live WebGL glyph**, using Plotly scatter traces.
+  There is no density raster underneath and no sampling by default; what is on screen is the corpus.
+  Lower point budgets (100k, 250k, 500k) remain on the control rail for a lighter view, and at those settings zooming re-stratifies the sample inside the visible window rather than just enlarging sparse dots.
 - **States what each color-by actually covers, before you pick it.**
   The menu lists whole-map fields first and labels every option with its scope ("Tissue · whole map", "Flight vs Ground · OSDR only").
   A coverage bar and an exact point count sit directly under the control.
@@ -48,9 +49,9 @@ Those are opposite claims, and the map made the false one look like a measuremen
 
 `manifold/colorby.py` fixes it by making coverage a declared, first-class property.
 Every color-by reports which corpora it can color *right now*, given which artifacts exist on this machine, and that one fact drives the menu order, the disabled state, the coverage readout, and what the renderer does.
-When a field does not describe ARCHS4, the glyph layer steps aside and the precomputed density raster carries the manifold shape, with a badge saying so.
-The raster shows the true distribution of all 940,455 points and cannot be mistaken for a category.
-Drawing nothing there is the honest option, not the degraded one.
+When a field does not describe ARCHS4, those 940,455 points are still drawn, but as scenery: one faint color that is deliberately not in the categorical palette, at 0.35 opacity, with a badge saying "context only" and no legend swatch.
+The shape of the manifold stays visible, and nothing about the cloud invites a reader to look it up in the legend.
+Points with no value under the current field are the absence of a value, not a value, and giving them a swatch is what made the map read as grey data in the first place.
 
 The same standard was applied to the color-bys themselves, and it eliminated most of the candidates.
 Each of these was built or measured before it was cut, and the evidence is recorded so nobody has to rediscover it:
@@ -106,8 +107,8 @@ All imports from the sibling repo are funnelled through `manifold/bridge_rna.py`
 OFFLINE (run once, cached)                      ONLINE (Dash app, loads artifacts only)
 embed_osdr.py         -> osdr embeddings         app_manifold.py
 build_projections.py  -> pca/umap coords          loads coord parquets + label tables
-                      -> density rasters          color-by registry declares coverage
-                      -> point identity table     renders Scattergl over a density underlay
+                      -> point identity table     color-by registry declares coverage
+                      -> ARCHS4 accession sidecar renders every point as Scattergl
 fetch_archs4_meta.py  -> ARCHS4 GEO metadata
                          + canonical tissue
 validate_artifacts.py -> exit code; gates a build
@@ -137,14 +138,19 @@ The order matters: the metadata fetch joins positionally onto the identity table
 PY=/Users/josh/Bridge-RNA/.venv/bin/python
 
 $PY precompute/embed_osdr.py                       # OSDR embeddings, gene-digest gated. Hours; resumable.
-$PY precompute/build_projections.py                # PCA + UMAP coords, density rasters. ~5 min.
+$PY precompute/build_projections.py                # full-corpus PCA + UMAP coords. ~50 min.
 $PY precompute/fetch_archs4_meta.py                # ARCHS4 GEO metadata. ~35 s, needs network.
-$PY precompute/validate_artifacts.py --mixing      # gates the build; exits nonzero on failure.
+$PY precompute/validate_artifacts.py --mixing --quality   # gates the build; exits nonzero on failure.
 $PY app_manifold.py                                # http://127.0.0.1:8051
 ```
 
 `embed_osdr.py` writes progress as it goes and resumes where it stopped, so an interrupted run does not restart from zero.
-`build_projections.py` supports `--skip-umap` for a faster first pass, and `--density-only` to re-render just the rasters from cached coordinates when tuning the color ramp.
+`build_projections.py` supports `--skip-umap` for a faster first pass; that leaves only the PCA stage, which takes 8 seconds for the whole corpus.
+`--knn-jobs -1` makes the neighbour graph roughly 10x faster at the cost of reproducing it exactly on a rerun.
+
+`validate_artifacts.py --quality` is the check that a structural pass cannot give you.
+Row counts and finite coordinates are satisfied by any set of numbers, so `--quality` scores each coordinate set on how well it preserves the 512-d space it came from: 15-NN recall against the exact 512-d neighbours, and 25-NN tissue purity, each against a null that says what the number would be if the map carried no information.
+`--compare DIR` scores a second set of coordinate parquets on the same sample, which is how a candidate build is held against the shipped one.
 
 `fetch_archs4_meta.py` deserves a note, because the obvious route is a trap.
 ARCHS4's per-sample metadata lives in gene-level HDF5 files that are 62.3 GB for human and 50.7 GB for mouse, which is why the ARCHS4 cloud stayed grey for so long.
@@ -177,9 +183,12 @@ That is the degraded state a fresh clone starts in, and it is the fastest way to
 /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q
 ```
 
-144 tests, about 0.55 s.
+153 tests, a few seconds.
 The suite builds its own synthetic corpus in a temp directory (4,000 ARCHS4 + 300 OSDR points) and never touches the 963 MB memmap or the checkpoint, so it runs on a machine that has neither.
 
 The corpus is generated from known latent clusters with metadata derived from those clusters, which gives the render tests real category structure to assert against rather than noise.
 Its synthetic `archs4_metadata.parquet` is deliberately written in ARCHS4's free-text register and mapped through the *real* canonicalizer, so `manifold/tissue.py` is tested against strings shaped like GEO's rather than against its own rules.
-A `without_archs4_metadata` fixture runs the degraded path - the state a fresh clone starts in - so the coverage UI, the disabled menu entry, and the density fallback are covered rather than assumed.
+A `without_archs4_metadata` fixture runs the degraded path - the state a fresh clone starts in - so the coverage UI, the disabled menu entry, and the context-cloud fallback are covered rather than assumed.
+
+`tests/test_projections.py` is the exception to the "never touch the real artifacts" rule in one narrow sense: it imports from `precompute/` to score the exact PCA against `sklearn.decomposition.PCA` on synthetic data.
+The claim that a streaming second-moment pass reproduces a full fit is the kind that has to be checked against a reference implementation rather than asserted in a docstring.

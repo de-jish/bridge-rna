@@ -73,7 +73,7 @@ def test_mask_restricts_the_sample_pool():
 
 # --- Figure construction ---------------------------------------------------
 
-ALL_LAYERS = ["archs4", "osdr", "density"]
+ALL_LAYERS = ["archs4", "osdr"]
 
 
 def _drawn_xy(fig):
@@ -160,25 +160,29 @@ def test_legend_counts_are_whole_corpus_not_the_drawn_sample(corpus):
 
 # --- The no-grey-cloud contract --------------------------------------------
 
-def test_an_osdr_only_field_draws_no_archs4_glyphs_over_the_raster(corpus):
-    """The core fix: ARCHS4 steps aside for the density raster, it does not
-    become a flat grey cloud pretending to be data."""
+def test_an_osdr_only_field_draws_archs4_as_faint_context_not_as_a_category(corpus):
+    """The core fix: ARCHS4 keeps its shape on screen without impersonating data.
+
+    It is drawn in one context colour that is not in the palette, faintly, and
+    labelled as context, rather than taking a grey palette slot and reading as
+    "measured, and empty here".
+    """
     fig, _, badges = render.build_figure(
         "pca", "2d", "flight_status", ALL_LAYERS, 2000, None)
-    assert len(_drawn_xy(fig)) == corpus["n_osdr"], "ARCHS4 glyphs were drawn anyway"
-    assert fig.layout.images, "the density underlay must carry the ARCHS4 shape"
-    assert any("density only" in b for b in badges), badges
-
-
-def test_without_a_raster_an_osdr_only_field_falls_back_to_faint_context(corpus):
-    """With the underlay off there is nothing to carry the shape, so a
-    deliberately faint cloud is drawn and labelled as context."""
-    fig, _, badges = render.build_figure(
-        "pca", "2d", "flight_status", ["archs4", "osdr"], 2000, None)
     assert len(_drawn_xy(fig)) > corpus["n_osdr"], "no context cloud was drawn"
     context = [t for t in fig.data if t.marker.color == theme.ARCHS4_CONTEXT]
     assert context, "the context cloud is not using the context colour"
     assert context[0].marker.opacity < 0.5, "context must be faint, not data-like"
+    assert theme.ARCHS4_CONTEXT not in theme.CATEGORICAL
+    assert any("context only" in b for b in badges), badges
+
+
+def test_the_context_cloud_is_drawn_in_3d_too(corpus):
+    """Context is not a 2-D fallback; it is what an uncovered corpus always gets."""
+    fig, _, badges = render.build_figure(
+        "pca", "3d", "flight_status", ALL_LAYERS, 1000, None)
+    context = [t for t in fig.data if t.marker.color == theme.ARCHS4_CONTEXT]
+    assert context, "3-D lost the ARCHS4 context cloud"
     assert any("context only" in b for b in badges), badges
 
 
@@ -189,12 +193,6 @@ def test_context_points_never_enter_the_legend(corpus):
     labels = [i["label"] for i in legend["items"]]
     assert colorby.NOT_COVERED not in labels
     assert sum(i["count"] for i in legend["items"]) == corpus["n_osdr"]
-
-
-def test_3d_always_draws_the_cloud_since_there_is_no_raster(corpus):
-    fig, _, _ = render.build_figure("pca", "3d", "flight_status", ALL_LAYERS, 1000, None)
-    assert not fig.layout.images
-    assert len(fig.data) > 1, "3-D lost the ARCHS4 layer with no raster to replace it"
 
 
 # --- Layers, budget, viewport ----------------------------------------------
@@ -209,22 +207,68 @@ def test_layer_toggles_actually_remove_layers(corpus):
     assert badges == []
 
 
-def test_density_underlay_is_placed_at_the_recorded_extent(corpus):
-    fig, _, _ = render.build_figure("pca", "2d", "tissue", ALL_LAYERS, 1000, None)
-    images = fig.layout.images
-    assert len(images) == 1
-    ext = data.stats()["density_pca2"]
-    img = images[0]
-    assert img.x == pytest.approx(ext["x0"])
-    assert img.y == pytest.approx(ext["y1"])
-    assert img.sizex == pytest.approx(ext["x1"] - ext["x0"])
-    assert img.sizey == pytest.approx(ext["y1"] - ext["y0"])
-    assert img.layer == "below"
+# --- The memoized colour plan -----------------------------------------------
+
+def test_the_colour_plan_is_compact_integer_codes(corpus):
+    """The plan is memoized for every colour-by, so its size is load-bearing.
+
+    An array of display-label strings looks equivalent and is not: under pandas
+    3.0 a string Series materializes a fresh Python str per element on
+    ``.to_numpy()``, so it held 942,563 distinct objects to express 13 distinct
+    values, measured at 127 MB per colour-by. Across the registry that is more
+    than a gigabyte of cache for a map that otherwise opens 81.5 MB.
+    """
+    codes, legend = render._colour_plan("tissue")
+    _, _, total = data.counts()
+    assert codes.dtype == np.int16, f"codes widened to {codes.dtype}"
+    assert len(codes) == total
+    assert codes.nbytes == total * 2
+    assert codes.max() < len(legend), "a code points past the end of the legend"
+    assert codes.min() >= render.NOT_COVERED_CODE
 
 
-def test_density_is_not_drawn_in_3d(corpus):
-    fig, _, _ = render.build_figure("pca", "3d", "tissue", ALL_LAYERS, 1000, None)
-    assert not fig.layout.images
+def test_every_covered_point_lands_in_exactly_one_legend_row(corpus):
+    """Codes are the only link between a glyph and its swatch, so the mapping
+    from points to legend rows must be total and must agree with the counts."""
+    for key in ("tissue", "species", "flight_status"):
+        codes, legend = render._colour_plan(key)
+        counted = sum(row["count"] for row in legend)
+        assert int((codes >= 0).sum()) == counted, (
+            f"{key}: {int((codes >= 0).sum())} points carry a slot but the "
+            f"legend totals {counted}")
+        for slot, row in enumerate(legend):
+            assert int((codes == slot).sum()) == row["count"], (
+                f"{key}: legend row {row['label']!r} claims {row['count']} "
+                f"points but {int((codes == slot).sum())} carry its slot")
+
+
+def test_the_colour_plan_is_cached_and_returns_the_same_object(corpus):
+    a, _ = render._colour_plan("tissue")
+    b, _ = render._colour_plan("tissue")
+    assert a is b, "the colour plan is being recomputed on every figure build"
+
+
+def test_the_figure_carries_no_layout_images(corpus):
+    """Nothing is painted underneath the glyphs any more.
+
+    The density raster used to sit here as a `layout.images` underlay. Every
+    point on screen is now a real glyph at a real sample's coordinates, and a
+    picture that reappeared under them would be a second, unlabelled encoding
+    of the same data.
+    """
+    for dims in ("2d", "3d"):
+        for color_by in ("tissue", "flight_status"):
+            fig, _, _ = render.build_figure("pca", dims, color_by, ALL_LAYERS,
+                                            1000, None)
+            assert not fig.layout.images, f"{dims}/{color_by} drew an underlay"
+
+
+def test_the_whole_corpus_can_be_drawn_when_the_budget_allows(corpus):
+    """The budget tops out at every point, not at a sample of them."""
+    fig, _, badges = render.build_figure(
+        "pca", "2d", "species", ALL_LAYERS, corpus["total"], None)
+    assert len(_drawn_xy(fig)) == corpus["total"]
+    assert any(f"{corpus['n_archs4']:,}" in b for b in badges), badges
 
 
 def test_budget_caps_the_live_archs4_glyphs(corpus):
@@ -293,7 +337,7 @@ def test_unknown_and_other_stay_distinguishable(corpus):
 
 def test_missing_projection_renders_a_message_not_a_crash(corpus, monkeypatch, tmp_path):
     missing = tmp_path / "absent.parquet"
-    monkeypatch.setitem(data.METHODS, "umap", {"2d": missing, "3d": missing, "density": "umap2"})
+    monkeypatch.setitem(data.METHODS, "umap", {"2d": missing, "3d": missing})
     data.coords.cache_clear()
     try:
         fig, legend, badges = render.build_figure("umap", "2d", "tissue", ALL_LAYERS, 1000, None)

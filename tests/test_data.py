@@ -104,7 +104,7 @@ def test_method_availability_reflects_disk(corpus):
 def test_missing_method_returns_empty_not_error(corpus, monkeypatch, tmp_path):
     """A projection that was never built must yield an empty array, not a crash."""
     missing = tmp_path / "nope.parquet"
-    monkeypatch.setitem(data.METHODS, "pca", {"2d": missing, "3d": missing, "density": "pca2"})
+    monkeypatch.setitem(data.METHODS, "pca", {"2d": missing, "3d": missing})
     data.coords.cache_clear()
     try:
         assert data.coords("pca", "2d").shape == (0, 2)

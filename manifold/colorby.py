@@ -16,8 +16,8 @@ downstream:
     run attached, instead of silently missing or silently grey,
   * the control rail states the exact point count a field colors, and
   * the renderer never paints a uniform grey glyph cloud: a corpus a field does
-    not describe is drawn as *context* (the density raster), which shows the
-    real manifold shape instead of impersonating data.
+    not describe is drawn as *context*, in one faint colour with no legend row,
+    which shows the real manifold shape instead of impersonating data.
 
 `labels()` returns one array over the full corpus in fixed global order, with
 `NOT_COVERED` marking points the field does not describe. Everything else is a

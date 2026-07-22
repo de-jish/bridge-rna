@@ -24,9 +24,9 @@ pyarrow>=20.0.0        # parquet engine for the coordinate and metadata tables
 
 # --- Offline precompute (precompute/) ---------------------------------------
 torch>=2.12.0          # ExpressionPerformer inference, CPU fp32
-scikit-learn>=1.9.0    # IncrementalPCA
-umap-learn>=0.5.12     # landmark UMAP fit + transform
-pillow>=12.0.0         # density raster PNGs
+scikit-learn>=1.9.0    # validation only (kNN scoring in validate_artifacts.py)
+umap-learn>=0.5.12     # full-corpus UMAP fit; needs precomputed_knn (0.5.2+)
+pynndescent>=0.6.0     # the shared k-NN graph both UMAP fits are laid out from
 requests>=2.32.0       # ARCHS4 GEO metadata fetch (precompute/fetch_archs4_meta.py)
 
 # --- Development ------------------------------------------------------------

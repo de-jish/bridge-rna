@@ -6,14 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Bridge Manifold is the exploratory map companion to **Bridge RNA** (a separate repo at `/Users/josh/Bridge-RNA`).
 Bridge RNA retrieves the closest Earth analogs for one NASA spaceflight RNA-seq sample.
-Bridge Manifold zooms out: it dimensionally reduces the 512-d ExpressionPerformer embeddings of both corpora - OSDR (2,108 NASA GeneLab spaceflight samples) and ARCHS4 (940,455 GEO samples) - into one shared 2D/3D space, renders about 100k live WebGL glyphs over a density raster of all 942,563 points, and colors them by biology.
+Bridge Manifold zooms out: it dimensionally reduces the 512-d ExpressionPerformer embeddings of both corpora - OSDR (2,108 NASA GeneLab spaceflight samples) and ARCHS4 (940,455 GEO samples) - into one shared 2D/3D space, renders every one of the 942,563 points as a live WebGL glyph, and colors them by biology.
 
 **Current state: built, run on the real corpus, and tested.**
-`manifold/` and `precompute/` are complete, the full offline pipeline has been executed against the real 942,563-point corpus, and 144 tests pass in about half a second.
+`manifold/` and `precompute/` are complete, the full offline pipeline has been executed against the real 942,563-point corpus, and 152 tests pass in a few seconds.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
-Two features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), and the hnswlib ANN index and population-moment artifacts that existed only to serve it.
+Three features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), the hnswlib ANN index and population-moment artifacts that existed only to serve it, and the precomputed density raster underlay (with its PNGs, its `--density-only` flag, and the Pillow dependency).
 Where that history is instructive it is recorded as history, clearly marked.
+
+Two approximations that appear in older prose are also gone: PCA is no longer fit on a 60,000-point subsample and UMAP is no longer a landmark fit plus `.transform()`.
+**Both reductions are now fit on every one of the 942,563 points.**
+The cost that justified the approximations turned out not to exist, and both measurements are in `REFERENCE.md` section 4.
 
 ## Read these first
 
@@ -26,15 +30,15 @@ When plans change, update these docs so they reflect what was actually built, no
 ## Architecture: the offline/online split is the load-bearing decision
 
 Everything expensive is precomputed once and cached; the app only ever loads artifacts.
-This is forced by measured cost (the landmark UMAP fit plus transform of 942,563 points is the bulk of a roughly five-minute projection build, and a direct 940k fit is hours) and is what keeps the app responsive.
-Do not move model inference, UMAP, or density rasterization into the serving app.
+UMAP over 942,563 points is a job measured in tens of minutes and gigabytes, which is not something to do inside a callback, and it is what keeps the app responsive.
+Do not move model inference or UMAP into the serving app.
 
 ```
 OFFLINE (precompute/, run once -> cache/)        ONLINE (app_manifold.py, loads artifacts only)
 embed_osdr.py        -> osdr embeddings npy       coord parquets + points_meta + osdr_metadata
-build_projections.py -> pca/umap coord parquets   + archs4_metadata + density PNGs  (82.3 MB opened)
-                     -> points_meta identity      renders go.Scattergl over the density underlay
-                     -> density raster PNGs       colorby.py decides coverage; render.py draws it
+build_projections.py -> pca/umap coord parquets   + archs4_metadata                (81.5 MB opened)
+                     -> points_meta identity      renders every point as go.Scattergl
+                     -> archs4_geo sidecar         colorby.py decides coverage; render.py draws it
 fetch_archs4_meta.py -> archs4_metadata parquet
    (HTTP JSON API, ~35 s, no HDF5 download)
 validate_artifacts.py -> exit code, gates a build
@@ -53,7 +57,7 @@ manifold/preflight.py    PRECOMPUTE_REQUIRED vs APP_REQUIRED, LFS pointer guard
 manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, archs4 tissue
 manifold/tissue.py       the shared tissue vocabulary (canonical_tissue, coalesce_tissue)
 manifold/colorby.py      the coverage-aware color-by registry; the map's honesty layer
-manifold/render.py       layered figure build (density underlay, ARCHS4 cloud, OSDR overlay)
+manifold/render.py       layered figure build (ARCHS4 cloud, OSDR overlay)
 manifold/sampling.py     stratified + viewport-aware ARCHS4 subsampling
 manifold/layout.py       two-column shell, control rail, floating legend
 manifold/callbacks.py    controls -> figure, zoom -> level of detail, coverage readout
@@ -61,7 +65,8 @@ manifold/theme.py        chrome tokens, dark plot canvas, validated categorical 
 manifold/bridge_rna.py   thin import shim for the reusable Bridge RNA functions
 ```
 
-Only `precompute/` imports `torch`, `umap`, `sklearn`, `PIL`, or `requests`.
+Only `precompute/` imports `torch`, `umap`, `pynndescent`, `sklearn`, or `requests`.
+`PIL` is no longer a dependency of anything, because the density raster was the only thing that used it.
 The serving app's dependency surface is `dash`, `plotly`, `numpy`, `pandas`, `pyarrow` and nothing scientific.
 
 ## Non-negotiable invariants
@@ -73,7 +78,7 @@ Violating them produces output that looks fine but is scientifically wrong.
 2. **L2-normalize before any reduction.** Raw ARCHS4 vectors are NOT normalized (norms 6.7-26.4, a 3.9x spread); unnormalized, PC1 captures 57.8% of variance and is a magnitude axis. The real normalized build lands at PC1 = 40.9%, and `validate_artifacts.py` fails if it drifts back above 50%. **Do not describe that magnitude as sequencing depth** - the docs said so for a long time and it is wrong. The encoder's input is log1p-TPM, which is depth-normalized by construction, and the norm was measured on OSDR against the exact matrix that produced each embedding: it correlates **r = +0.987** with the share of expression held by the top 100 genes and **r = -0.930** with Shannon entropy. It is a transcriptome-*concentration* axis, and it is biology: liver 13.6, skeletal muscle 12.9 and heart 12.6 sit at the top, brain 8.3 and skin 7.8 at the bottom, which is the textbook ordering. Normalizing is still right, because a 3.9x magnitude spread would otherwise dominate the map, but it removes a redundant encoding rather than an artifact - the norm stays recoverable from the normalized direction at held-out R^2 = 0.977. See `REFERENCE.md` section 4.
 3. **Read model hyperparameters from `ckpt['config']`, not the demo's fallback constants.** The demo defaults differ from the true trained config.
 4. **Verify Git LFS pointers resolve before any run that touches Bridge RNA.** The checkpoint and memmap live in Bridge RNA as LFS objects and can arrive as stub pointers. This now applies to `precompute/` only: the serving app reads its own cache and never opens an LFS object, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` in `manifold/preflight.py` have no overlap. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
-5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must let the density raster carry those 940,455 points, or, where there is no raster (3-D, or the underlay switched off), draw them as a deliberately faint context cloud in their own color at 0.35 opacity. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4".
+5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must draw those 940,455 points as a deliberately faint context cloud in a single color that is not in the categorical palette (`theme.ARCHS4_CONTEXT`), at 0.35 opacity, with no legend row. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4". This used to have a second branch, in which the ARCHS4 layer drew nothing at all and a precomputed density raster carried the shape; the raster is gone, so the context cloud is now the only answer and it applies in 2-D and 3-D alike.
 6. **Both corpora share one tissue vocabulary.** `manifold/tissue.canonical_tissue` is the only entry point, used by `precompute/fetch_archs4_meta.py` for ARCHS4 and by `manifold/data.osdr_tissue` for OSDR. Two tissue color-bys wearing one name would each leave the other corpus grey, which is invariant 5 by another route.
 
 ## The color-by system
@@ -145,7 +150,9 @@ Built, run on the real corpus, measured, then deleted along with its precompute 
 It is arbitrary (seed-to-seed ARI about 0.45), 81% species-pure, and explains 80.7% of the raw-L2-norm variance.
 Numbering an arbitrary partition "Cluster 1..24" on a scientific instrument invites exactly the over-reading the rest of the design prevents.
 
-**Local UMAP density** is redundant with the density raster already rendered underneath.
+**Local UMAP density** was rejected as redundant with the density raster rendered underneath.
+That raster is now gone, so the argument no longer holds and the candidate is genuinely open again.
+If it is revisited, note that a density color-by encodes something the eye already reads off glyph crowding, and that it must be judged against the methodological note below rather than reinstated on the strength of this paragraph.
 **PC1-3 as color-bys** are free (already in `coords_pca3.parquet`) but redundant with the axes on screen.
 **GEO series (GSE)** has 51,284 distinct values, so a Top-11 legend would color about 3% of the map and dump the rest in "Other", a grey map by another route; it is also a pure batch label (333x lift). It stays in the parquet for provenance and is not offered as a color.
 
@@ -168,30 +175,31 @@ Compare within a corpus, not across.
 
 Shares the Bridge RNA venv at `/Users/josh/Bridge-RNA/.venv`.
 Pinned lower bounds and the reason for each are in `requirements.txt`; the bounds are not decorative, since pandas 3.0 stopped stringifying missing values in `astype(str)`, dash 4.0 replaced the Dropdown/RadioItems internals and their class names, and plotly 6.0 serializes numpy arrays as base64 typed arrays.
-Density rasters are a plain numpy 2D histogram rendered through PIL, deliberately not datashader, to keep the dependency surface small.
+That last one is why shipping all 942,563 points to the browser is affordable at all: the coordinates travel as base64 typed arrays rather than as JSON number lists.
 
 Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity table `build_projections.py` writes.
 
 ```bash
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/embed_osdr.py         # OSDR embeddings, gene-digest gated. Hours; resumable.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # PCA + UMAP coords, density rasters. ~5 min.
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~50 min.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app_manifold.py                  # http://127.0.0.1:8051
 
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py --density-only   # re-render rasters from cached coords
-cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q   # 144 tests, ~0.5 s
+cd "/Users/josh/Bridge Manifold" && /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q   # 152 tests, a few seconds
 ```
 
-The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--pca-fit-sample`, `--umap-fit-sample`, `--pca-components`, `--batch`, `--seed`, `--archs4-limit`, `--skip-umap`, `--density-only`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`.
-The old `--skip-hnsw` flag no longer exists, because there is no index to skip.
+The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.
+Three flags that appear in older prose no longer exist: `--skip-hnsw` (there is no index to skip), `--density-only` (there is no raster to re-render), and `--pca-fit-sample` / `--umap-fit-sample` (neither reduction is fit on a subsample any more).
 
 There is no multi-gigabyte download anywhere in this pipeline.
 The metadata step is optional: without `cache/archs4_metadata.parquet` the app still runs, the Tissue option is shown disabled with the command that enables it, and Species remains the whole-map default.
 
-Every build stage ends with an **objective validation**, not a visual glance: digest match, an explained-variance profile checked against invariant 2, and the stratified cross-corpus mixing check.
+Every build stage ends with an **objective validation**, not a visual glance: digest match, an explained-variance profile checked against invariant 2, the stratified cross-corpus mixing check, and the projection-quality score.
 `validate_artifacts.py --mixing` computes the *exact* top-51 neighbours of each OSDR sample by streaming the ARCHS4 memmap in 50k blocks and keeping a running top-k, which is what let the 2.07 GB ANN index be deleted.
 That mixing check is not a lasso remnant; it is the honesty check behind the app's premise, and it must keep working.
+`validate_artifacts.py --quality` scores every coordinate set on 15-NN recall against the exact 512-d neighbours and on 25-NN tissue purity, each against a null, and `--compare DIR` scores a second set of coordinate parquets alongside so a candidate build can be held against the shipped one.
+Structural checks pass for any set of finite numbers, so they cannot tell a good projection from a scrambled one; that is what the quality check is for.
 
 ## Visual language
 

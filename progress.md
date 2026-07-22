@@ -3,7 +3,45 @@
 Living status log.
 Update after each meaningful change so another session can resume without losing context.
 
-## Current status: 2026-07-21 - built, colored by real biology on both corpora, and tested
+## Current status: 2026-07-22 - every point drawn, every reduction fit on every point
+
+Two changes this session, both of which came down to the same thing: a cost that had been estimated rather than measured, and was wrong.
+
+**1. The density underlay is gone. The map draws all 942,563 points.**
+The raster existed because 940k live WebGL glyphs was assumed to be out of reach, so ~100k were drawn live and a precomputed PNG carried the rest.
+Measured: building the figure costs the same at every budget, because the dominant cost is resolving one label array over the full corpus rather than the size of the sample drawn from it, and serializing all 942,563 points takes 0.15 s and 11.3 MB against 0.03 s and 1.3 MB at 100,000.
+The default budget is now the whole corpus; 100k / 250k / 500k remain for a lighter view.
+Verified in a browser: first interactive frame in **1.3 s** with **942,563 glyphs**, no console errors, budget switches re-rendering in 0.1 to 0.3 s.
+
+**2. PCA and UMAP are both fit on all 942,563 points, in 2-D and 3-D.**
+PCA was fit on a 60,000-point subsample; UMAP was a 122,563-point landmark fit with the remaining 819,999 pushed through `.transform()`, which does not lay those points out at all - it places each one by averaging where its landmark neighbours already sit.
+The full build takes **10.5 minutes**, which is *faster* than the 15.8-minute landmark build it replaces, because the two `.transform()` passes (404 s and 467 s) are gone.
+The "a direct 940k fit is hours" claim that shaped the entire first design was never measured.
+
+Measured effect, by `validate_artifacts.py --quality --compare` against the saved landmark coordinates on one 60,000-point sample: **15-NN recall +8.1% in 2-D and +7.1% in 3-D**, tissue purity -1.5% and +1.5%.
+So the full fit buys local fidelity and leaves biological fidelity where it was.
+PCA barely moved at all (PC1 correlates 0.999998 with the subsampled fit), and that is recorded as a negative result: the exact fit is kept because it costs 4.5 s and removes an approximation, not because it changed the picture.
+
+- `precompute/build_projections.py` ran end to end in ~10.5 min, rc=0: exact PCA 4.5 s, k-NN graph 59 s, UMAP-2d 251 s, UMAP-3d 251 s.
+- `validate_artifacts.py --mixing --quality` passes, with the one documented cross-corpus batch-effect warning (54x, unchanged - it is a property of the 512-d space, not of the projection).
+- **160 tests pass in about 1.1 s**, up from 144.
+- The live cache is 217.8 MB, of which the app opens 80.8 MB.
+
+### Three things this session found that were not the task
+
+- **UMAP's spectral init cannot run on this corpus at all.**
+  `_spectral_layout` sizes its Lanczos basis as `max(2k+1, sqrt(n))`, which at n = 942,563 is 970, so `eigsh` allocates a 942,563 x 970 float64 basis: **7.31 GB**.
+  The first full-corpus attempt drove the machine into 7.6 GB of swap and made no progress in 25 minutes before it was killed.
+  Passing the exact PCA coordinates as `init` instead took the 2-D fit to 251 s.
+  This is the single change that made the whole thing viable.
+- **The memoized colour plan was going to cost 1.4 GB.**
+  Caching the per-point category array is what keeps a zoom or a budget change cheap now that they redraw the whole corpus, but under pandas 3.0 `.to_numpy()` on a string Series materializes a *fresh* Python `str` per element: 942,563 distinct objects to express 13 distinct values, measured at 127.5 MB per colour-by.
+  Storing `int16` legend slots instead is 1.9 MB, and a warm full-corpus figure went from 1.33 s to 0.06 s because category selection became a vectorized integer compare rather than 942,563 string comparisons.
+- **UMAP writes into the k-NN arrays it is given.**
+  `fit()` assigns them through without copying and then writes into them in place to disconnect far neighbours (`umap_.py:2647-2654`), so the 2-D and 3-D fits sharing one graph would have let the first quietly edit the second one's input.
+  Each fit now gets its own copy.
+
+## Session 2026-07-21 - built, colored by real biology on both corpora, and tested
 
 The full offline pipeline has run to completion on real data, and the app has been redesigned around one question the first build got wrong: what should the map show for the corpus the selected color-by does not describe.
 
@@ -24,7 +62,9 @@ The full offline pipeline has run to completion on real data, and the app has be
 - **Phase 1 OSDR embeddings**: `embed_osdr.py`, gene-digest gated, resumable, with a cached expression stage. **Complete.**
   Preprocessing proven bit-for-bit identical to Bridge RNA's single-sample path.
 - **Phase 2/4 projections**: `build_projections.py` writes PCA-2/3, landmark UMAP-2/3, the identity table, the ARCHS4 accession sidecar, and the density rasters. **Complete.**
+  (Superseded 2026-07-22: both reductions are now fit on the full corpus and there are no density rasters.)
 - **Phase 3 interactive plot**: layered renderer (density underlay, stratified ARCHS4 cloud, OSDR overlay), layer toggles, point budget, viewport level-of-detail.
+  (Superseded 2026-07-22: no underlay, and the budget defaults to every point.)
 - **Phase 5 coloring both corpora**: the ARCHS4 GEO metadata join, the shared tissue vocabulary, and the coverage-aware color-by registry that replaced the renderer's per-key branching.
 - **Phase 6 polish**: searchable legend, theme-matched Dash 4 controls, hover cards, 3D, honest empty and degraded states.
 - **Tests**: `tests/` with a synthetic corpus built from known latent clusters plus a synthetic `archs4_metadata.parquet` written in ARCHS4's free-text register and mapped through the real canonicalizer, so the tissue vocabulary is tested against GEO-shaped strings rather than against its own rules.
@@ -39,7 +79,7 @@ Consequences, all of them verified:
 
 - `build_projections.py` no longer builds `cache/joint_cosine.hnsw` (2.07 GB) or `cache/population_moments.npz` (4.2 MB), and its `--skip-hnsw` flag is gone.
 - `requirements.txt` dropped `hnswlib` and `scipy` and added `requests`. The serving app's dependency surface is now `dash`, `plotly`, `numpy`, `pandas`, `pyarrow`, and nothing scientific.
-- The live cache fell from about 2.3 GB to a measured **219.2 MB**, of which the app opens **82.3 MB**. The two dead files are still physically present on this machine as leftovers, which is why `cache/` measures 2,293.8 MB; deleting them is safe.
+- The live cache fell from about 2.3 GB to a measured **219.2 MB**, of which the app opens **82.3 MB**. (Both dead files have since been deleted, along with the density rasters; the cache now measures 217.8 MB with 80.8 MB opened.)
 - The serving app no longer opens the 963 MB ARCHS4 memmap at all, so `BRIDGE_RNA_ROOT` is needed to *build* the cache and not to *run* the app.
 - `validate_artifacts.py --mixing` used to load the ANN index.
   It now computes the **exact** top-51 neighbours of each of the 2,108 OSDR samples by streaming the memmap in 50,000-row blocks and merging a running top-k (`_osdr_neighbours`), which costs 10.3 s warm.
@@ -131,6 +171,7 @@ Full write-ups in `IMPLEMENTATION.md` section 7.5 and `REFERENCE.md` section 11.
   Built, run on the real corpus, measured, then deleted along with its precompute stage. 81.9% of the label is recoverable from the 2-D UMAP coordinates alone (15-NN over a 120k sample, against a 12.4% majority-class baseline); a structure-free 24-cell Voronoi null reproduced its spatial coherence to within 1.5 points; seed-to-seed ARI ~0.45; 81% species-pure; explains 80.7% of the raw-L2-norm variance.
   A comment in `manifold/colorby.py` records the decision where someone would add it back.
 - **Local UMAP density.** Redundant with the raster already drawn underneath.
+  (That raster was removed on 2026-07-22, so this rejection no longer holds either. With every point now drawn live, glyph crowding is itself the density readout, which is a different argument and a weaker one.)
 - **PC1-3.** Free but redundant with the axes on screen.
 - **GEO series (GSE).** 51,284 distinct values, so a Top-11 legend would color ~3% of the map and dump the rest in "Other".
   Also a pure batch label (333x lift).
@@ -187,12 +228,18 @@ Found by adversarial audit, browser-driven testing, and by running against the r
 7. ~~Delete the two dead cache files~~ **DONE** 2026-07-21. `cache/` went from 2.1 GB to 214 MB; the suite and `validate_artifacts.py` both pass without them.
    Neither was source data, so nothing was lost: both were derived from embeddings that are still intact, and `build_hnsw` / `build_population_moments` are recoverable from commit `3840ab3` if fast approximate kNN is ever wanted for an experiment.
 8. ~~Strip the stale `cluster_*` keys from `cache/projection_stats.json`~~ **DONE** 2026-07-21, left behind by the cut k-means build.
-9. Re-run the browser checks at the 60k and 150k point budgets and measure frame rate; only the 100k default has been exercised so far.
-10. Review the *visual* quality of the real UMAP map, which is still unreviewed at 940k.
-11. Optional: switch the metadata fetch to the versioned metadata-only HDF5 files (`human_meta_v2.5.h5` 311.8 MB, `mouse_meta_v2.5.h5` 350.9 MB) if tissue ever needs to be a build **gate** rather than a color.
+9. ~~Re-run the browser checks at the other point budgets and measure frame rate~~ **DONE** 2026-07-22.
+   All four tiers are driven headless against the real cache and assert the exact glyph count each produces (102,108 / 252,108 / 502,108 / 942,563), re-rendering in 0.1 to 0.3 s.
+   The 3-D cap was re-measured rather than inherited: first paint barely moves with glyph count (1.1 s at 42k, 1.9 s at 402k) but a twelve-step camera drag scales linearly (5.6 s, 10.4 s, 18.5 s, 31.4 s at 42k / 102k / 202k / 402k), so 40,000 stays.
+10. ~~Review the *visual* quality of the real UMAP map~~ **DONE** 2026-07-22, at the full 942,563 points rather than a 100k sample. Screenshots taken at the default view, an OSDR-only field, 3-D, PCA, and zoomed.
+11. **Try densMAP now that it is possible.**
+    Its rejection rested entirely on the landmark pattern, which no longer exists (see the evaluation section below).
+    It is a flag on `umap-learn`, the direct fit the build already performs is what densMAP needs, and it is the only evaluated method that substantially fixes a known UMAP lie: density fidelity 0.441 to 0.739.
+    Score it with `validate_artifacts.py --quality --compare` against the shipped coordinates before deciding, and note that the density raster it would have been redundant with is also gone.
+12. Optional: switch the metadata fetch to the versioned metadata-only HDF5 files (`human_meta_v2.5.h5` 311.8 MB, `mouse_meta_v2.5.h5` 350.9 MB) if tissue ever needs to be a build **gate** rather than a color.
     That buys exactly 100.000% release-matched coverage for 663 MB and ~8.5 min, against 216 MB and 35 s.
     Not worth 15x the build time for 0.089% of points on a color.
-12. Optional: `precompute/embed_osdr.py --metadata-only` if the metadata harmonization ever changes; it rewrites the parquet without re-embedding.
+13. Optional: `precompute/embed_osdr.py --metadata-only` if the metadata harmonization ever changes; it rewrites the parquet without re-embedding.
 
 ## How the projection build was chained (2026-07-21, completed)
 
@@ -232,8 +279,8 @@ Full inventory, with which of them the app opens, is `REFERENCE.md` section 12.
 | `osdr_expression.float32.npy` | 127.87 MB | resume intermediate for the multi-hour embed job |
 | `osdr_expression_meta.parquet` | 0.097 MB | its metadata sidecar |
 | `osdr_metadata.parquet` | 0.027 MB | OSDR labels, joined positionally |
-| `density/pca2.png` / `density/umap2.png` | 0.86 MB / 0.61 MB | density underlays |
-| `projection_stats.json` | 2.3 KB | variance profile and raster extents |
+| `density/pca2.png` / `density/umap2.png` | 0.86 MB / 0.61 MB | density underlays (deleted 2026-07-22) |
+| `projection_stats.json` | 2.3 KB | variance profile and raster extents (now 14.4 KB: the full 512-component spectrum, no extents) |
 
 Total live cache **219.2 MB**, of which the serving app opens **82.3 MB**.
 `embed_osdr.py` cleaned up its own partial memmap and progress JSON on success, as designed.
@@ -276,7 +323,11 @@ Perplexity 200 is not an option at 3.5 hours for 60,000 points.
 
 **Rejected, with the number that kills each:**
 
-- **densMAP** is the one method that substantially fixes a known UMAP lie, raising density fidelity from 0.441 to 0.739. It is also free, being a flag on a dependency already present. It is nevertheless unshippable here: `umap-learn` raises `NotImplementedError: Transforming data into an existing embedding not supported for densMAP`, so it cannot use the landmark pattern and would need a direct 942,563-point fit, which section 5.3 of `IMPLEMENTATION.md` exists to avoid.
+- **densMAP** raises density fidelity from 0.441 to 0.739, fixing a known UMAP lie, and is free - a flag on a dependency already present.
+  It was rejected because `umap-learn` raises `NotImplementedError: Transforming data into an existing embedding not supported for densMAP`, so it could not use the landmark pattern and would have needed a direct 942,563-point fit.
+  **That rejection expired on 2026-07-22.**
+  There is no landmark pattern any more, a direct 942,563-point fit is exactly what the build now does, and it costs 251 s.
+  The only reason densMAP is not shipped is that nobody has run it; see next steps.
 - **PaCMAP** and **LocalMAP** buy real global fidelity (0.284 and 0.316 against UMAP's 0.113) but PaCMAP is worse than UMAP on both local structure and tissue purity, and LocalMAP destroys density fidelity (0.081). Neither earns a menu slot.
 - **TriMap** collapses. Local fidelity 0.001, tissue purity 0.095 against a 0.073 null, and every point sharing a bin with OSDR - the rendered plot is empty.
 - **PHATE** has *negative* density fidelity and produces the crescent it produces when there is no trajectory. It is a tool for developmental data being pointed at a heterogeneous grab-bag of GEO.

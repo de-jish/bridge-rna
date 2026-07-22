@@ -15,7 +15,7 @@ import pytest
 from dash import html
 
 import app_manifold
-from manifold import callbacks, colorby, data, layout, paths, preflight, theme
+from manifold import callbacks, colorby, layout, paths, preflight, theme
 
 
 # --- Layout / callback wiring ---------------------------------------------
@@ -236,7 +236,8 @@ def test_coverage_states_the_exact_point_count(corpus):
     text = _text(callbacks.coverage_children("flight_status"))
     assert f"{corpus['n_osdr']:,}" in text
     assert f"{corpus['total']:,}" in text
-    assert "density" in text.lower()
+    assert "context" in text.lower(), (
+        "the readout must say what happens to the points it does not colour")
 
 
 def test_coverage_says_so_when_a_field_paints_everything(corpus):

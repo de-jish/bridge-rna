@@ -1,10 +1,13 @@
 """Stratified sampling and viewport level-of-detail for the ARCHS4 background.
 
-All 940k ARCHS4 points cannot be live WebGL glyphs at once (the plan caps live
-glyphs near 100k), so the background is a stratified sample over the full
-corpus, drawn atop a datashader-style density raster of all points. On zoom the
-sample is recomputed over just the visible window, so fine structure appears
-instead of the same sparse dots enlarging.
+The ARCHS4 background is a stratified sample over the full corpus, sized by the
+point budget on the control rail. The budget runs all the way to all 940,455
+points, so this is a responsiveness control rather than a hard ceiling; there
+used to be a density raster underneath carrying the points the sample left out,
+and with that gone the sample is the only thing showing them.
+
+On zoom the sample is recomputed over just the visible window, so a partial
+budget reveals fine structure instead of enlarging the same sparse dots.
 """
 
 from __future__ import annotations

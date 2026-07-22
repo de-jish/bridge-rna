@@ -80,7 +80,7 @@ def test_no_enabled_option_is_undrawable(corpus):
         if option["disabled"]:
             continue
         fig, legend, _ = render.build_figure(
-            "pca", "2d", option["value"], ["archs4", "osdr", "density"], 1000, None)
+            "pca", "2d", option["value"], ["archs4", "osdr"], 1000, None)
         assert len(fig.data) > 0, f"{option['value']} drew nothing"
         assert legend["items"], f"{option['value']} produced no legend"
 
@@ -106,6 +106,27 @@ def test_a_missing_join_names_the_command_that_fixes_it(corpus, without_archs4_m
     """A dead end is a bug; a dead end with the fix attached is a feature."""
     hint = colorby.get("tissue").missing_hint()
     assert "fetch_archs4_meta" in hint
+
+
+def test_the_renderer_does_not_serve_tissue_from_a_stale_cache(
+        corpus, without_archs4_metadata):
+    """The colour plan is memoized, so it has to be invalidated with the join.
+
+    ``render._colour_plan`` caches a label array derived from
+    ``archs4_metadata.parquet``. If it survives the artifact disappearing, the
+    map keeps colouring 940,455 ARCHS4 points by a tissue table that is no
+    longer there - a picture with no data behind it, which is worse than the
+    grey cloud this whole subsystem exists to prevent.
+    """
+    from manifold import render
+
+    codes, legend = render._colour_plan("tissue")
+    n_archs4, n_osdr, _ = data.counts()
+    assert (codes[:n_archs4] == render.NOT_COVERED_CODE).all(), (
+        "ARCHS4 points carry tissue categories with no metadata join present")
+    assert (codes[n_archs4:] >= 0).all(), "OSDR lost its tissue labels too"
+    assert sum(item["count"] for item in legend) == n_osdr, (
+        "the legend counts ARCHS4 points a vanished join cannot describe")
 
 
 def test_no_missing_hint_when_the_join_is_present(corpus):

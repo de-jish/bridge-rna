@@ -138,7 +138,7 @@ def build_bridge_rna_stub(root: Path, n_archs4: int,
 
 def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
                   with_umap) -> dict:
-    """Write the coordinate, identity, and density artifacts.
+    """Write the coordinate and identity artifacts.
 
     Coordinates are a genuine PCA of the L2-normalized joint corpus rather than
     random numbers, so the 2D layout actually reflects the 512-d structure and
@@ -146,7 +146,6 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
     """
     from sklearn.decomposition import PCA
 
-    (cache_dir / "density").mkdir(parents=True, exist_ok=True)
     n_archs4, n_osdr = len(archs4_vecs), len(osdr_vecs)
     total = n_archs4 + n_osdr
 
@@ -186,7 +185,6 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
 
     _write_coords(coords3[:, :2], cache_dir / "coords_pca2.parquet")
     _write_coords(coords3[:, :3], cache_dir / "coords_pca3.parquet")
-    stats["density_pca2"] = _write_density(coords3[:, :2], cache_dir / "density" / "pca2.png")
 
     if with_umap:
         # A cheap stand-in for UMAP: an isotropic rotation of the PCA coords with
@@ -197,7 +195,6 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
         u3 = np.column_stack([u2, coords3[:, 2]]).astype(np.float32)
         _write_coords(u2, cache_dir / "coords_umap2.parquet")
         _write_coords(u3, cache_dir / "coords_umap3.parquet")
-        stats["density_umap2"] = _write_density(u2, cache_dir / "density" / "umap2.png")
 
     (cache_dir / "projection_stats.json").write_text(json.dumps(stats, indent=2))
     return {"n_archs4": n_archs4, "n_osdr": n_osdr, "total": total,
@@ -208,25 +205,6 @@ def _write_coords(coords: np.ndarray, path: Path) -> None:
     cols = ["x", "y", "z"][: coords.shape[1]]
     pd.DataFrame({c: coords[:, i].astype(np.float32) for i, c in enumerate(cols)}) \
         .to_parquet(path, index=False)
-
-
-def _write_density(coords2d: np.ndarray, path: Path, res: int = 128) -> dict:
-    from PIL import Image
-
-    x, y = coords2d[:, 0], coords2d[:, 1]
-    xlo, xhi = float(x.min()), float(x.max())
-    ylo, yhi = float(y.min()), float(y.max())
-    H, _, _ = np.histogram2d(x, y, bins=res, range=[[xlo, xhi], [ylo, yhi]])
-    dens = np.log1p(H.T)
-    if dens.max() > 0:
-        dens = dens / dens.max()
-    rgba = np.zeros((res, res, 4), dtype=np.uint8)
-    rgba[..., 0] = 34
-    rgba[..., 1] = 90
-    rgba[..., 2] = 140
-    rgba[..., 3] = (np.clip(dens * 2.0, 0, 1) * 220).astype(np.uint8)
-    Image.fromarray(rgba[::-1], mode="RGBA").save(path)
-    return {"x0": xlo, "x1": xhi, "y0": ylo, "y1": yhi}
 
 
 def _write_archs4_metadata(cache_dir: Path, cluster_id: np.ndarray) -> None:

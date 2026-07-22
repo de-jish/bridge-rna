@@ -52,7 +52,7 @@ def coverage_children(color_by: str):
         text = f"Colours all {covered:,} points."
     elif covered:
         text = (f"Colours {covered:,} of {total:,} points ({pct:.1f}%). "
-                "ARCHS4 is shown as density for context.")
+                "ARCHS4 is drawn as faint context.")
     else:
         text = "No data for this field on this machine."
 

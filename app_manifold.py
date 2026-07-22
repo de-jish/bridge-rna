@@ -2,8 +2,8 @@
 """Bridge Manifold - the serving Dash app.
 
 Loads only small precomputed artifacts (coordinate parquets, the point identity
-table, the OSDR labels, the ARCHS4 GEO metadata join, and the density rasters)
-and draws them. It never runs the model, never runs UMAP, and never opens the
+table, the OSDR labels, and the ARCHS4 GEO metadata join) and draws them.
+It never runs the model, never runs UMAP, and never opens the
 963 MB ARCHS4 embedding memmap, so BRIDGE_RNA_ROOT is needed to build the cache
 but not to serve it. Run the `precompute/` scripts first to build the cache.
 
