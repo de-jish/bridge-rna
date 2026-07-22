@@ -86,6 +86,23 @@ It is off by default now, and the two places that need the text fetch it themsel
 7. **Clicking a hit faded every other node in the retrieval network.** `build_network_figure` set `clickmode="event+select"`, so Plotly applied selection styling on each click and inspecting one result made the rest look dismissed. There is no selection feature in that graph; `clickmode="event"` fires `clickData` just as well. Found by looking hard at a screenshot taken for the README.
 8. **The inspector's on-demand enrichment could never fire on a cached hit.** It asked whether any of `gse`/`title`/`geo_summary`/`pubmed_ids` had content, a fair proxy when a hit arrived either fully enriched or entirely bare. The cached path always fills `gse` and `title`, so the test passed for every hit and the abstract was never fetched. It now tests the study-context fields specifically.
 
+### Found by an adversarial review of the day's work
+
+A judged, verified review of the whole merge (5 dimensions, every finding refuted or confirmed by a second agent) caught defects the tests and my own passes had missed:
+
+9. **The retrieval-tier classifier mislabelled 717 dead samples as slow.** `sample_tier` checked only whether a sample's name is a column in its counts matrix, but `demo_osdr_top5.py` first filters to rows with a recorded spaceflight value. 733 of the 788 unavailable samples fail that filter, so the true tiers are 2,108 cached / 0 subprocess / 788 unavailable. The number was wrong three times before it was right; the correction blocks above record all three.
+10. **The inspector dropped 10 of the fields it fetched.** An on-demand NCBI fetch returns platform, entry type, release date, FTP link and the whole Publication section as `_biopython` columns the panel renders, but the merge back kept only columns the cached schema already had, which is none of those ten. It now adds a missing column before writing it.
+11. **The retrieval network's edge width encoded rank, not similarity.** A min-max rescale drew the thinnest hit at 1.5 px and the thickest at 8 px whatever the scores were, so a 0.0016 spread looked as dramatic as a 0.4 one while the legend said "similarity score". Now mapped onto a fixed [0.90, 1.0] domain.
+12. **The 3-D overlay crashed the figure callback.** `Scatter3d` rejects `star` and `cliponaxis` outright, so opening 3-D with a retrieval showing returned a 500 and left the stale 2-D figure up. The overlay had no test and the browser check never opened that state. Six tests cover it now.
+13. **The header overstated retrievability by 55.** "Eligible OSDR samples: 2,163" counted samples the picker disables; it now counts the 2,108 that are actually retrievable, which is also the OSDR points on the map. Relabelled "Retrievable".
+14. **A pasted `/?q=` deep link did nothing on cold load**, working only when followed from a live map. Handled at layout-build time now via `layout._initial_study`.
+15. **The fix for 14 shipped a regression** that emptied both dropdowns on any load, live on `main` for three commits. Caught only in the final end-to-end pass, because the callback graph stayed valid - a working callback graph is not a working app. Live navigation is a callback (with `prevent_initial_call`); cold load is handled at layout-build time.
+
+Plus a sweep of stale documentation numbers across all six docs: build time (~50 min to 10.5), test totals, browser checks (27 to 29), the top-5 cosine span (0.0041 was the top-20 span; the top-5 is 0.0016), tissue Unknown (839 unresolved against 882 total on the map), the memmap-never-opened claim (true of the map view, false of the retrieval view since the cached path opens it), and the two design docs that still described two separate apps.
+
+The lesson worth keeping: the interface-honesty standard is easy to violate by accident.
+Three of these - the tier count, the edge width, the header count - were the interface quietly asserting something the data did not support, and each looked fine until it was measured against the data it claimed to describe.
+
 ## densMAP: measured at full corpus scale, and rejected (2026-07-22)
 
 Next-step item 11 is answered.
