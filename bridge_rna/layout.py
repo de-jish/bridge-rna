@@ -248,7 +248,5 @@ def build_view() -> html.Div:
                         ),
                     ],
                 ),
-            dcc.Store(id="hits-store"),
-            dcc.Store(id="selected-node-store"),
         ],
     )

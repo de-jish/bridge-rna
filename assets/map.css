@@ -5,7 +5,10 @@
 #react-entry-point, ._dash-loading { height: 100%; }
 
 /* ---- App shell -------------------------------------------------------- */
-.bm-app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+/* Under the shell the map is a flex child below the header, so 100vh here
+   would be a header's height taller than the window and scroll the whole
+   page by that much. It claims what is left instead. */
+.bm-app { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 
 
 .bm-body { display: flex; flex: 1; min-height: 0; }

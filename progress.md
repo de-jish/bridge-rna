@@ -1,7 +1,77 @@
-# Bridge Manifold - Progress
+# Bridge RNA - Progress
 
 Living status log.
 Update after each meaningful change so another session can resume without losing context.
+
+This file used to track Bridge Manifold alone.
+The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
+
+## Current status: 2026-07-22 (later) - one app, and a retrieval 44x faster
+
+Bridge Manifold and Bridge RNA are one repository and one application.
+The merge kept all 19 of the manifold's commits rather than squashing them.
+
+**The map made the retrieval fast.**
+This was not the goal of the merge and is the most valuable thing to come out of it.
+The manifold precompute had already embedded all 2,108 eligible OSDR samples with a preprocessing path checked bit-for-bit against the retrieval's own, and had already joined GEO metadata for all 940,455 ARCHS4 samples.
+So the query vector never needed recomputing by a subprocess, and the hits never needed annotating over the network.
+
+Measured on OSD-100 `Mmus_C57-6J_EYE_FLT_Rep1_M23`, top-5:
+
+| path | wall clock | gse / title / tissue |
+| --- | --- | --- |
+| subprocess (`demo_osdr_top5.py`) | 22.1 s | all empty |
+| cached (manifold artifacts) | 0.8 s | populated, offline |
+
+Identical accessions and identical scores to six decimal places.
+The subprocess path stays for the 788 samples the manifold never embedded, and `search_hits` returns which path ran so the interface can say so.
+
+- `app.py` is the single entry point: `/` retrieves, `/map` draws the manifold, one header and one port.
+- `app_osdr_dash.py` (2,470 lines) is now the `bridge_rna/` package; 49 definitions were moved by exact line range and a checker asserts each appears once with a byte-identical body.
+- Stylesheets are layered by load order: `00-tokens.css`, `01-shell.css`, `retrieve.css`, `map.css`.
+- **176 tests pass**, up from 160, and the 27 browser checks pass against the merged app.
+
+### Defects found and fixed this session
+
+1. **The status banner announced cached results as "real demo script output".**
+   `run_search` special-cased only `mode == "precomputed"`, so the new path fell through to the else branch.
+   The interface was asserting something untrue about how the answer was made.
+2. **Five Dash component tokens were defined in both stylesheets with different values**, so whichever file sorted later silently decided how the *other* view's controls rendered on hover.
+   One token layer now, with a test that no token is defined twice.
+3. **`.app-header-chip` had no CSS rule anywhere** and the "Beta" tag was rendering as plain body text.
+   Found by widening the classname check to cover the retrieval view; it had only ever checked the map's.
+4. **The retrieval view carried two `hits-store` components.**
+   Dash only validates ids in the *initial* layout, so this stayed invisible until the shell began serving views there.
+   A test now checks each view for duplicate ids directly.
+5. **`.app-root` declared `height: 100vh` under a header**, and `#page-content` was not a flex container, so the view collapsed to content height and left a band of bare canvas.
+
+## densMAP: measured at full corpus scale, and rejected (2026-07-22)
+
+Next-step item 11 is answered.
+densMAP's rejection in the 2026-07-21 evaluation rested on `umap-learn` refusing to `.transform()` into a densMAP embedding, which was fatal under the landmark pattern and irrelevant once every point is fit directly.
+So it was rebuilt at full scale: `build_projections.py --densmap`, `dens_lambda 0.5`, the same k-NN graph settings as the shipped build, 716 s for the 2-D fit and 812 s for the 3-D.
+
+Scored by `validate_artifacts.py --quality --compare` on the same 60,000-point sample and the same nulls as the shipped coordinates:
+
+| coords | 15-NN recall | 25-NN tissue purity | share of recoverable structure |
+| --- | --- | --- | --- |
+| umap2 **shipped** | **0.3955** | **0.5838** | **92.3%** |
+| umap2 densMAP | 0.2321 | 0.5347 | 83.4% |
+| umap3 **shipped** | **0.4596** | **0.6169** | **98.2%** |
+| umap3 densMAP | 0.3389 | 0.5996 | 95.1% |
+
+**densMAP loses on both metrics in both dimensionalities**: local fidelity -41.3% in 2-D and -26.3% in 3-D, tissue purity -8.4% and -2.8%.
+
+The result worth recording is not the verdict but the size of the error in the estimate.
+The 60,000-point evaluation predicted a local-fidelity cost of about 9% (0.377 to 0.344) and a tissue cost of about 4%.
+At 942,563 points the local cost is **4.6x larger** than that prediction.
+A method comparison run on a subsample is evidence about the subsample; the ranking it produces does not transfer to a corpus fifteen times the size, and this one did not.
+
+densMAP's one advantage - density fidelity 0.441 to 0.739, measured at 60k - is real and is not enough.
+Local fidelity is the property the map exists for: it is what makes "these points are near each other" mean anything.
+Trading 41% of it for an honest impression of cluster density is the wrong trade for this instrument.
+
+`--densmap` stays in `build_projections.py` so the measurement is repeatable, and nothing in `cache/` changed.
 
 ## Current status: 2026-07-22 - every point drawn, every reduction fit on every point
 
@@ -232,10 +302,10 @@ Found by adversarial audit, browser-driven testing, and by running against the r
    All four tiers are driven headless against the real cache and assert the exact glyph count each produces (102,108 / 252,108 / 502,108 / 942,563), re-rendering in 0.1 to 0.3 s.
    The 3-D cap was re-measured rather than inherited: first paint barely moves with glyph count (1.1 s at 42k, 1.9 s at 402k) but a twelve-step camera drag scales linearly (5.6 s, 10.4 s, 18.5 s, 31.4 s at 42k / 102k / 202k / 402k), so 40,000 stays.
 10. ~~Review the *visual* quality of the real UMAP map~~ **DONE** 2026-07-22, at the full 942,563 points rather than a 100k sample. Screenshots taken at the default view, an OSDR-only field, 3-D, PCA, and zoomed.
-11. **Try densMAP now that it is possible.**
-    Its rejection rested entirely on the landmark pattern, which no longer exists (see the evaluation section below).
-    It is a flag on `umap-learn`, the direct fit the build already performs is what densMAP needs, and it is the only evaluated method that substantially fixes a known UMAP lie: density fidelity 0.441 to 0.739.
-    Score it with `validate_artifacts.py --quality --compare` against the shipped coordinates before deciding, and note that the density raster it would have been redundant with is also gone.
+11. ~~Try densMAP now that it is possible~~ **DONE** 2026-07-22, and **rejected on the evidence**.
+    Built at full scale (716 s in 2-D, 812 s in 3-D) and scored against the shipped coordinates.
+    It loses on both metrics in both dimensionalities: 15-NN recall -41.3% in 2-D and -26.3% in 3-D, tissue purity -8.4% and -2.8%.
+    Full numbers and the methodological lesson - the 60,000-point evaluation underestimated the local-fidelity cost by 4.6x - are in the densMAP section above.
 12. Optional: switch the metadata fetch to the versioned metadata-only HDF5 files (`human_meta_v2.5.h5` 311.8 MB, `mouse_meta_v2.5.h5` 350.9 MB) if tissue ever needs to be a build **gate** rather than a color.
     That buys exactly 100.000% release-matched coverage for 663 MB and ~8.5 min, against 216 MB and 35 s.
     Not worth 15x the build time for 0.089% of points on a color.

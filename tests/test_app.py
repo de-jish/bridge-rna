@@ -91,6 +91,25 @@ def test_every_callback_target_exists_in_some_view(app, mounted_ids):
     assert not missing, f"callbacks reference components no view mounts: {sorted(missing)}"
 
 
+@pytest.mark.parametrize("name", ["retrieve", "map"])
+def test_no_view_contains_a_duplicate_component_id(name):
+    """Dash raises DuplicateIdError, but only for ids in the *initial* layout.
+
+    A view mounted by a callback is never validated, so a duplicate can sit in
+    one for as long as nobody loads that route first. This repository shipped
+    exactly that: the retrieval view carried two `hits-store` components, and it
+    stayed invisible until the shell began serving views in the initial layout.
+    """
+    import collections
+
+    from bridge_rna import layout as rna_layout
+
+    tree = rna_layout.build_view() if name == "retrieve" else layout.build_view()
+    ids = [i for i in (getattr(c, "id", None) for c in _walk(tree)) if i]
+    duplicated = [i for i, n in collections.Counter(ids).items() if n > 1]
+    assert not duplicated, f"{name} view has duplicate ids: {duplicated}"
+
+
 def test_both_halves_register_their_callbacks(app):
     """A router that mounts a view but forgets its callbacks looks fine until
     a control is touched. Assert one signature callback from each half."""

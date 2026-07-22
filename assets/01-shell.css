@@ -12,10 +12,18 @@
   min-height: 100%;
 }
 
-/* The map fills the viewport and manages its own scrolling, so the shell must
-   not add a second scroll container around it. The retrieval view is a normal
-   document that scrolls. `min-height` above gives both what they need. */
-.app-shell > #page-content { flex: 1; min-height: 0; }
+/* The view slot has to be a flex container itself, not just a flex child.
+   Both views claim the height under the header with `flex: 1`, and a plain
+   block wrapper would silently ignore that and collapse to content height -
+   which is exactly what it did, leaving a band of bare canvas below the
+   retrieval view. `min-height: 0` lets the views' own scroll containers work
+   instead of the slot growing to fit them. */
+.app-shell > #page-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
 
 /* --- Header ------------------------------------------------------------- */
 
