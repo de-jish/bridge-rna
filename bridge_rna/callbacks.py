@@ -23,10 +23,10 @@ from .ai import (
 from .config import GENERIC_ENTREZ_EMAIL
 from .figures import _empty_network_figure, build_network_figure
 from .geo import _enrich_hits_from_ncbi_eutils
-from .layout import samples_df
+from .layout import ARCHS4_SAMPLE_COUNT, samples_df
 from .panels import _details_head, build_details_panel, build_status_banner
 from .retrieval import search_hits
-from .util import _last_nonempty_line, _safe_str
+from .util import _format_count, _last_nonempty_line, _safe_str
 
 
 def register(app) -> None:
@@ -146,19 +146,27 @@ def register(app) -> None:
 
         network = build_network_figure(query=q_row, hits_df=hits_df)
 
+        # Name the path that actually ran. This used to special-case only
+        # "precomputed", so when the cached path was added every one of its
+        # results was announced as "real demo script output" - the interface
+        # asserting something that was not true about how the answer was made.
+        how = {
+            "cached": "from the precomputed OSDR embedding, scored against all "
+                      f"{_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
+            "precomputed": "from a supplied query-embedding table",
+            "demo": "by embedding the counts matrix from scratch",
+        }.get(mode, mode)
+        enriched = enable_biopython and _safe_str(entrez_email)
         status_message = (
-            f"Retrieved {len(hits_df)} hits using precomputed OSDR query embeddings."
-            if mode == "precomputed"
-            else (
-                f"Retrieved {len(hits_df)} hits using real demo script output"
-                + (" + Biopython metadata enrichment." if (enable_biopython and _safe_str(entrez_email)) else ".")
-            )
+            f"Retrieved {len(hits_df)} hits {how}"
+            + (", plus GEO and PubMed enrichment." if enriched else ".")
         )
         status = build_status_banner(status_message, kind="good")
         payload = {
             "sample_id": sample_id,
             "entrez_email": email_value,
             "biopython_enabled": bool(enable_biopython),
+            "mode": mode,
             "hits": hits_df.to_dict(orient="records"),
         }
         return network, payload, status
