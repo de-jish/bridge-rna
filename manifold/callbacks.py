@@ -196,6 +196,24 @@ def register(app):
                 colorby.get(color_by).hint)
 
     @app.callback(
+        Output("budget", "options"),
+        Output("budget", "value"),
+        Input("dims", "value"),
+        State("budget", "value"),
+        prevent_initial_call=True,
+    )
+    def sync_budget_to_dims(dims, current):
+        """Re-fit the point-budget tiers to the dimensionality.
+
+        3-D caps the ARCHS4 cloud for smooth rotation, so its tiers stop at the
+        cap instead of offering "All" or "500k" pills the 3-D view would draw
+        as 40,000. The value is preserved if it is still one of this
+        dimensionality's tiers and reset to the default otherwise, so a 2-D
+        "All" cannot linger on the control after a switch to 3-D.
+        """
+        return layout.budget_options(dims), layout.resolve_budget(dims, current)
+
+    @app.callback(
         Output("picked-group", "style"),
         Output("picked-label", "children"),
         Output("picked-link", "href"),

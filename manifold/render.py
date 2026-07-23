@@ -75,10 +75,13 @@ def _category_plan(values: np.ndarray) -> tuple[dict, list[dict]]:
     """Rank categories once over the whole covered population.
 
     Returns a lookup mapping every raw category to its *display* category, and
-    the legend rows. Counts are whole-corpus counts, not counts of the drawn
-    sample, so the legend does not change as the point budget or the zoom level
-    changes - the number means "how many such samples exist", which is the
-    question a legend count is read as answering.
+    the legend rows. The counts here are whole-corpus counts, and they do two
+    jobs: they rank the categories - which fixes each one's colour and legend
+    order stably, independent of budget or zoom - and they back the
+    point-to-slot consistency check. They are not what the user sees: build_figure
+    overrides each row's displayed count with the number of points that field
+    actually plots in the current view, because a legend count is read as "how
+    many of these are on screen", not "how many exist".
 
     Residual categories keep their own legend rows rather than being folded into
     the overflow bucket. "Unknown" and "Other" are different facts - we were
@@ -173,6 +176,28 @@ def _colour_plan(key: str) -> tuple[np.ndarray, list[dict]]:
     values = colorby.labels(key)
     lookup, legend = _category_plan(values)
     return _display_codes(values, lookup, legend), legend
+
+
+def _legend_with_drawn_counts(legend: list[dict],
+                              drawn_codes: list[np.ndarray]) -> list[dict]:
+    """Legend rows re-counted to the points actually plotted.
+
+    The colour plan ranks categories over the whole corpus, which fixes each
+    row's colour and order. The count, though, is read as "how many of these
+    are on screen", so it is recomputed here from the slot codes of the drawn
+    points - the ARCHS4 sample the budget and zoom selected, plus the OSDR
+    overlay - and a category with nothing currently drawn drops out of the key.
+    Colours and order are untouched, so a category keeps its colour and its
+    place whether or not it happens to be on screen right now.
+    """
+    if drawn_codes:
+        stacked = np.concatenate(drawn_codes)
+        stacked = stacked[stacked >= 0]
+        counts = np.bincount(stacked, minlength=len(legend))
+    else:
+        counts = np.zeros(len(legend), dtype=int)
+    return [{**legend[slot], "count": int(counts[slot])}
+            for slot in range(len(legend)) if counts[slot] > 0]
 
 
 def _scatter(coords, idx, color, is_3d, size, symbol, outline, name,
@@ -426,9 +451,14 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
 
     coords_xy = coords[:, :2]
     codes, legend = _colour_plan(spec.key)
-    legend_data["items"] = legend
 
     covers_archs4 = colorby.covers_corpus(spec.key, colorby.ARCHS4)
+
+    # Slot codes of the points actually drawn into a legend category, gathered
+    # per layer so the legend can report what is on screen rather than what the
+    # whole corpus holds. Context and highlight points carry no legend row, so
+    # they are deliberately not gathered.
+    drawn: list[np.ndarray] = []
 
     # --- Layer 1: ARCHS4 background ----------------------------------------
     if "archs4" in layers:
@@ -437,10 +467,12 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
             idx = np.random.default_rng(1).choice(idx, SCATTER3D_ARCHS4_CAP,
                                                   replace=False)
         if covers_archs4:
-            for trace in _categorical_traces(coords, idx, codes[idx], legend,
+            archs4_codes = codes[idx]
+            for trace in _categorical_traces(coords, idx, archs4_codes, legend,
                                              is_3d, ARCHS4_SIZE, "circle", None,
                                              recede_residual=True, opacity=dim):
                 fig.add_trace(trace)
+            drawn.append(archs4_codes)
             badges.append(f"ARCHS4 live: <b>{len(idx):,}</b>")
         else:
             # These points have no value under this field, so they are drawn as
@@ -464,6 +496,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
                     theme.OSDR_SYMBOL, theme.OSDR_OUTLINE,
                     hover_lines=OSDR_HOVER, customdata=rows, opacity=dim_osdr):
                 fig.add_trace(trace)
+            drawn.append(osdr_codes)
         else:
             # An ARCHS4-only field. OSDR keeps its distinct glyph in a single
             # warm highlight so the spaceflight corpus stays locatable without
@@ -474,6 +507,10 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
                                    hover_lines=OSDR_HOVER, customdata=rows,
                                    opacity=dim_osdr))
         badges.append(f"OSDR: <b>{n_osdr:,}</b>")
+
+    # The legend reports the points that were actually plotted above, not the
+    # whole-corpus tallies the colour plan ranked with.
+    legend_data["items"] = _legend_with_drawn_counts(legend, drawn)
 
     # --- Layer 3: the retrieval, on top of everything ----------------------
     if showing_retrieval:

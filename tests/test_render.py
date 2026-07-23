@@ -222,12 +222,47 @@ def test_a_category_keeps_one_colour_across_both_corpora(corpus):
             f"{expected[trace.name]}")
 
 
-def test_legend_counts_are_whole_corpus_not_the_drawn_sample(corpus):
-    """Legend counts must not move when the point budget does."""
-    _, small, _ = render.build_figure("pca", "2d", "species", ALL_LAYERS, 200, None)
-    _, large, _ = render.build_figure("pca", "2d", "species", ALL_LAYERS, 3000, None)
-    assert small["items"] == large["items"]
-    assert sum(i["count"] for i in small["items"]) == corpus["total"]
+def test_legend_counts_track_the_drawn_sample(corpus):
+    """Legend counts are the points actually plotted, so they move with the
+    point budget instead of reporting the whole corpus.
+
+    Species covers both corpora with no residual bucket, so every drawn glyph
+    lands in a legend row and the counts must total exactly the glyphs drawn.
+    """
+    fig_s, small, _ = render.build_figure("pca", "2d", "species", ALL_LAYERS, 200, None)
+    fig_l, large, _ = render.build_figure("pca", "2d", "species", ALL_LAYERS, 3000, None)
+    small_total = sum(i["count"] for i in small["items"])
+    large_total = sum(i["count"] for i in large["items"])
+    assert small_total < large_total, "a smaller budget must show smaller counts"
+    assert small_total == len(_drawn_xy(fig_s)), "counts must total the drawn glyphs"
+    assert large_total == len(_drawn_xy(fig_l))
+
+
+def test_a_category_with_nothing_drawn_drops_from_the_legend(corpus):
+    """The legend shows what is plotted, so a category with no drawn points is
+    absent rather than shown as a zero.
+
+    In the fixture OSDR is all one species while ARCHS4 carries both, so drawing
+    only the OSDR layer leaves the ARCHS4-only species with nothing on screen -
+    and it must leave the legend too, with no zero-count row.
+    """
+    _, both, _ = render.build_figure("pca", "2d", "species", ALL_LAYERS, 4000, None)
+    _, osdr_only, _ = render.build_figure("pca", "2d", "species", ["osdr"], 4000, None)
+    assert len(both["items"]) == 2, "both species should show when both layers draw"
+    assert len(osdr_only["items"]) == 1, "the ARCHS4-only species must drop out"
+    assert all(i["count"] > 0 for i in osdr_only["items"]), "no zero-count rows"
+
+
+def test_3d_caps_the_cloud_and_the_legend_counts_the_cap(corpus, monkeypatch):
+    """3-D never draws more than the rotation cap, and the legend counts the
+    capped glyphs rather than the budget that was asked for."""
+    monkeypatch.setattr(render, "SCATTER3D_ARCHS4_CAP", 500)
+    fig, legend, _ = render.build_figure(
+        "pca", "3d", "species", ["archs4"], corpus["n_archs4"], None)
+    drawn = len(_drawn_xy(fig))
+    assert drawn <= 500, f"3-D drew {drawn}, above the cap"
+    assert sum(i["count"] for i in legend["items"]) == drawn, (
+        "the legend must count the capped glyphs, not the budget")
 
 
 # --- The no-grey-cloud contract --------------------------------------------
@@ -364,19 +399,18 @@ def test_viewport_restricts_the_sample_to_the_window(corpus):
 # --- Legend -----------------------------------------------------------------
 
 def test_legend_reports_categories_with_counts(corpus):
-    """Counts total the field's covered population, not the visible layers.
+    """Counts total the points actually plotted, so toggling the ARCHS4 layer
+    off leaves even a whole-map field showing only its OSDR points.
 
-    The legend explains what the colours mean, so it stays put when a layer is
-    toggled or the budget changes; only the picture changes. An OSDR-only field
-    therefore totals n_osdr, and a whole-map field totals the whole corpus, in
-    both cases regardless of which layers happen to be drawn.
+    With only the OSDR layer drawn, an OSDR-only field and a whole-map field
+    both total n_osdr - the whole-map field's ARCHS4 categories simply have
+    nothing on screen to count.
     """
-    for key, expected in (("flight_status", corpus["n_osdr"]),
-                          ("tissue", corpus["total"])):
+    for key in ("flight_status", "tissue"):
         _, legend, _ = render.build_figure("pca", "2d", key, ["osdr"], 1000, None)
         items = legend["items"]
         assert items, f"no legend produced for {key}"
-        assert sum(i["count"] for i in items) == expected
+        assert sum(i["count"] for i in items) == corpus["n_osdr"]
         labels = [i["label"] for i in items]
         assert len(labels) == len(set(labels)), f"{key} repeats a legend category"
 

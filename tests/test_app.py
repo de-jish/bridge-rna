@@ -15,7 +15,7 @@ import pytest
 from dash import html
 
 import app as shell
-from manifold import callbacks, colorby, layout, paths, preflight, theme
+from manifold import callbacks, colorby, data, layout, paths, preflight, render, theme
 
 
 # --- Layout / callback wiring ---------------------------------------------
@@ -170,6 +170,38 @@ def test_legend_parts_are_static_so_dash_can_validate_them(map_view):
     ids = {getattr(c, "id", None) for c in _walk(map_view)}
     for required in ("legend-title", "legend-search", "legend-list", "legend-store"):
         assert required in ids, f"{required} is only created at runtime"
+
+
+def test_budget_tiers_follow_dimensionality(corpus):
+    """3-D cannot draw the whole corpus, so it must not offer to.
+
+    In 2-D the tiers climb to "All"; in 3-D they stop at the rotation cap, with
+    no "All" pill that would silently redraw as 40,000.
+    """
+    n_archs4 = str(data.counts()[0])
+    two_d = layout.budget_options("2d")
+    assert any(o["label"] == "All" for o in two_d)
+    assert two_d[-1]["value"] == n_archs4
+    assert layout.default_budget("2d") == n_archs4
+
+    three_d = layout.budget_options("3d")
+    assert not any(o["label"] == "All" for o in three_d)
+    assert all(int(o["value"]) <= render.SCATTER3D_ARCHS4_CAP for o in three_d)
+    assert max(int(o["value"]) for o in three_d) == render.SCATTER3D_ARCHS4_CAP
+    assert layout.default_budget("3d") == str(render.SCATTER3D_ARCHS4_CAP)
+
+
+def test_switching_dimensionality_clamps_an_out_of_range_budget(corpus):
+    """A 2-D "All" cannot survive into 3-D, and a 3-D tier cannot survive back
+    into 2-D; a value valid for the new dimensionality is kept."""
+    n_archs4 = str(data.counts()[0])
+    cap = str(render.SCATTER3D_ARCHS4_CAP)
+    # "All" is not a 3-D tier, so it resets to the 3-D default.
+    assert layout.resolve_budget("3d", n_archs4) == cap
+    # A value already valid in 3-D is preserved.
+    assert layout.resolve_budget("3d", cap) == cap
+    # Coming back to 2-D, a 3-D-only value resets to the 2-D default.
+    assert layout.resolve_budget("2d", cap) == n_archs4
 
 
 def test_every_output_has_exactly_one_writer(app):
@@ -432,12 +464,13 @@ def test_every_field_has_a_hint_or_deliberately_none(corpus):
         assert isinstance(spec.hint, str)
 
 
-def test_the_batch_effect_caution_is_still_disclosed_somewhere(map_view):
-    """Removing the readout deleted the only place this was ever said.
+def test_the_cross_corpus_caution_is_not_shown_on_the_rail(map_view):
+    """The standing "Reading across corpora" panel was removed from the UI.
 
-    The measured 54x cross-corpus effect is a property of the map, not of any
-    selection, so losing the panel must not lose the warning.
+    The batch effect it described is still documented (README, CLAUDE.md); it
+    just no longer sits on the control rail as a paragraph of microcopy. This
+    pins the removal so the verbose panel does not creep back in.
     """
-    text = _text(map_view)
-    assert "54x" in text
-    assert "corpora" in text.lower()
+    classes = {getattr(c, "className", "") for c in _walk(map_view)}
+    assert not any("bm-caution" in str(c) for c in classes)
+    assert "54x" not in _text(map_view)

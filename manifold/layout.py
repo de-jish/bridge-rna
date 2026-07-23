@@ -12,12 +12,51 @@ from __future__ import annotations
 
 from dash import dcc, html
 
-from . import colorby, data
+from . import colorby, data, render
 
 
 def color_by_label(value: str) -> str:
     """The human-facing name for a color-by, for the legend heading."""
     return colorby.get(value).label
+
+
+def budget_options(dims: str) -> list[dict]:
+    """The ARCHS4 point-budget tiers, which depend on the dimensionality.
+
+    In 2-D the glyph cloud can carry the whole corpus, so the tiers climb to
+    "All". In 3-D the cloud is capped at ``render.SCATTER3D_ARCHS4_CAP`` so
+    rotation stays smooth, so the tiers stop there rather than offering a "500k"
+    or "All" pill the 3-D view would silently redraw as 40,000 - a control that
+    lies about what it does is worse than one that offers less.
+    """
+    n_archs4, _, _ = data.counts()
+    if dims == "3d":
+        cap = render.SCATTER3D_ARCHS4_CAP
+        step = cap // 4
+        vals = [step, step * 2, step * 3, cap]
+        return [{"label": f"{v // 1000}k", "value": str(v)} for v in vals]
+    return [
+        {"label": "100k", "value": "100000"},
+        {"label": "250k", "value": "250000"},
+        {"label": "500k", "value": "500000"},
+        {"label": "All", "value": str(n_archs4)},
+    ]
+
+
+def default_budget(dims: str) -> str:
+    """The tier a fresh view of ``dims`` starts on: everything in 2-D, the cap
+    in 3-D."""
+    n_archs4, _, _ = data.counts()
+    return str(render.SCATTER3D_ARCHS4_CAP) if dims == "3d" else str(n_archs4)
+
+
+def resolve_budget(dims: str, current: str | None) -> str:
+    """The budget value to use for ``dims``, preserving ``current`` if it is
+    still one of that dimensionality's tiers and falling back to the default
+    otherwise. This is what a dimensionality switch runs so a 3-D "All" cannot
+    survive into a view that cannot honour it."""
+    valid = {o["value"] for o in budget_options(dims)}
+    return current if current in valid else default_budget(dims)
 
 
 def _segmented(id_: str, options: list[dict], value: str):
@@ -45,11 +84,6 @@ def control_rail() -> html.Div:
             html.Div(className="bm-group", children=[
                 html.Div("Projection", className="bm-group-label"),
                 _segmented("method", method_options, "umap" if umap_ok else "pca"),
-                html.Div(
-                    "UMAP preserves local neighborhoods, not global distances. "
-                    "Cluster sizes and gaps are not quantitative.",
-                    className="bm-hint",
-                ),
             ]),
             html.Div(className="bm-group", children=[
                 html.Div("Dimensions", className="bm-group-label"),
@@ -86,26 +120,16 @@ def control_rail() -> html.Div:
                     className="bm-checklist",
                 ),
             ]),
-            # The budget used to top out at 150,000 because a density raster was
-            # carrying the other 790,455 points underneath. With the raster gone
-            # the glyph sample is the only thing representing them, so the
-            # ceiling is now the whole corpus. It is affordable: measured on the
-            # real corpus, every tier costs the same ~0.6 s to build, and even
-            # all 942,563 points serialize in 0.15 s to an 11.3 MB payload.
+            # In 2-D the glyph sample can carry the whole corpus (the density
+            # raster it used to sit above is gone, so the sample is the only
+            # thing drawing those points). In 3-D the tiers stop at the rotation
+            # cap; budget_options() decides, and callbacks.sync_budget_to_dims
+            # swaps the tiers when the dimensionality changes.
             html.Div(className="bm-group", children=[
                 html.Div("ARCHS4 point budget", className="bm-group-label"),
-                _segmented("budget", [
-                    {"label": "100k", "value": "100000"},
-                    {"label": "250k", "value": "250000"},
-                    {"label": "500k", "value": "500000"},
-                    {"label": "All", "value": str(n_archs4)},
-                ], str(n_archs4)),
+                _segmented("budget", budget_options("2d"), default_budget("2d")),
                 html.Div(
-                    "Every glyph is one sample. Below the full corpus the cloud "
-                    "is a species-stratified sample, and zoom re-samples the "
-                    "visible window. 3-D caps the cloud at 40,000 whatever is "
-                    "chosen here, because rotation cost grows with glyph count; "
-                    "the badge on the plot always states what was drawn.",
+                    "One glyph per sample; zoom re-samples the visible window.",
                     className="bm-hint",
                 ),
             ]),
@@ -148,17 +172,6 @@ def control_rail() -> html.Div:
                     "between them. Hover a hit for both orderings.",
                     className="bm-hint",
                 ),
-            ]),
-            # The measured cross-corpus batch effect used to be disclosed only
-            # inside the lasso readout. It is a property of the map itself, not
-            # of any selection, so it belongs on the map's controls.
-            html.Div(className="bm-caution", children=[
-                html.B("Reading across corpora."),
-                " OSDR and ARCHS4 were embedded on different hardware and in "
-                "different precisions. OSDR samples sharing neither study nor "
-                "tissue still neighbour each other 54x above chance, so distance "
-                "between the two corpora is partly technical. Compare within a "
-                "corpus, not across.",
             ]),
         ],
     )

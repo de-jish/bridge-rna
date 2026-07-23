@@ -212,8 +212,8 @@ Against a per-sample chance model that is 5,233x for same-study (replicate struc
 Controlling for tissue, the dominant axis of variation in bulk expression: OSDR neighbour pairs sharing **neither study nor tissue** occur at 11.491% against 0.21101% expected, **54x over chance**.
 Biology does not make liver cluster with brain, so this is a technical batch effect from fp32/CPU versus bf16/CUDA inference and preprocessing differences, not spaceflight signal.
 
-This is surfaced in the app as a standing caution at the bottom of the left control rail (`layout.control_rail`, `.bm-caution`), not inside any per-selection panel.
-It is a property of the map itself rather than of anything a user does to it, so it is stated once, always, next to the controls.
+It was once surfaced in the app as a standing caution at the bottom of the left control rail (`layout.control_rail`, `.bm-caution`), not inside any per-selection panel.
+That microcopy was removed from the UI as over-explaining; the effect is a property of the map itself rather than of anything a user does to it, and it is now recorded in the docs (here, `README.md`, `CLAUDE.md`) rather than on the rail, with `validate_artifacts.py --mixing` still recomputing the number so the claim stays tied to a measurement anyone can re-run.
 
 Corroborating asymmetry, measured 2026-07-21 by a one-off analysis that is not part of the validation script: ARCHS4 queries find OSDR neighbours only 0.0300% of the time against 0.224% chance, a 7.5x *depletion*.
 OSDR is a small dense island - dominant in its own neighbourhoods, nearly invisible from ARCHS4's.
@@ -392,7 +392,7 @@ Two invariants of this table are worth stating because both were real defects th
 
 High-cardinality fields (70 studies, 48 tissues) exceed Plotly's usable native legend (~12 rows), so the renderer keeps a Top-11-plus-residual trace model with a custom searchable legend.
 Categories are ranked **once over the whole covered population** and every layer draws from that single mapping, so a liver in GEO and a liver in OSDR get the same color; ranking per layer silently gave one category two colors.
-Legend counts are whole-corpus counts, so they do not move when the point budget or the zoom changes.
+The legend *count*, though, is the number of points actually drawn: `render._legend_with_drawn_counts` recomputes it per figure from the ARCHS4 sample plus the OSDR overlay, so it tracks the point budget and the zoom, and a category with nothing on screen drops out of the key. The category's color and legend order come from the whole-corpus ranking and stay fixed as the count moves.
 
 ## 8. ARCHS4 per-sample GEO metadata (fetched and measured, 2026-07-21)
 

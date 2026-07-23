@@ -237,16 +237,6 @@
   margin-top: 5px; background: #fdf6ea; border-radius: 6px; padding: 6px 8px;
 }
 
-/* Standing caution about cross-corpus distance. Pinned to the bottom of the
-   rail because it qualifies the whole map, not any one control. */
-.bm-caution {
-  font-size: 11px; color: var(--text-secondary); line-height: 1.5;
-  background: var(--bg-inset); border-radius: 8px;
-  border-left: 3px solid var(--accent-warm);
-  padding: 10px 11px; margin-top: 24px;
-}
-.bm-caution b { color: var(--text-primary); font-weight: 600; }
-
 a, a:visited { color: var(--accent); }
 
 /* A rail action. Quieter than the retrieval view's primary button: the map is

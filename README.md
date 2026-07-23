@@ -25,16 +25,14 @@ Nothing in the pipeline is told what tissue the query came from.
 It found the retina on its own, out of 940,455 candidates, from expression alone.
 
 **Map** (`/map`) is the same space, seen whole.
-Both corpora - 2,108 NASA OSDR samples and 940,455 ARCHS4 samples - are reduced into one shared projection and drawn as 942,563 live WebGL points, coloured by a tissue vocabulary defined on both sides.
-A retrieval from the first view can be drawn in place on it.
+Both corpora - 2,108 NASA OSDR samples and 940,455 ARCHS4 samples - are reduced into one shared projection and drawn as live WebGL points, coloured by a tissue vocabulary defined on both sides.
 
-![The Bridge RNA map, framed on a retrieval: the query as a teal star and its five hits as numbered rings, among the surrounding region of the corpus](docs/bridge-rna-map.png)
+![The Bridge RNA map: the joint corpus as a 3-D UMAP, ARCHS4 and OSDR together, coloured by tissue](docs/bridge-rna-map.png)
 
-The numbered rings are the same five hits from the screenshot above, at their real positions.
-Rings 1, 2 and 4 sit beside the query; 3 and 5 are visibly further away.
-That disagreement is the point, and the interface states it rather than hiding it: the ranking is cosine distance in 512 dimensions, and the map is a two-dimensional projection that does not preserve it.
-**No line is ever drawn between the query and a hit**, because a line has a length and that length would be read as similarity.
-Hovering a ring gives both orderings - its rank by cosine, and its rank by distance on the map.
+The screenshot is the 3-D UMAP coloured by tissue, with blood, brain, liver and the rest separating out from expression alone.
+It rotates, switches to PCA or 2-D, recolours, and takes the ARCHS4 point budget up to all 940,455 samples in 2-D; 3-D caps the cloud at 40,000 so rotation stays smooth, and the legend counts whatever is actually on screen.
+UMAP preserves local neighbourhoods but not global distances, so cluster sizes and the gaps between clusters are not quantitative.
+A retrieval from the first view can be overlaid in place - the query and its numbered hits at their real positions - with **no line ever drawn between them**, because a line's length would be read as a similarity this projection does not preserve.
 
 ## How it works
 

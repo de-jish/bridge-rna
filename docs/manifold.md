@@ -36,6 +36,7 @@ See `progress.md` for the live status log.
 - **Draws every one of the 942,563 points as a live WebGL glyph**, using Plotly scatter traces.
   There is no density raster underneath and no sampling by default; what is on screen is the corpus.
   Lower point budgets (100k, 250k, 500k) remain on the control rail for a lighter view, and at those settings zooming re-stratifies the sample inside the visible window rather than just enlarging sparse dots.
+  In 3-D the tiers instead run 10k / 20k / 30k / 40k, with no "All": `Scatter3d` is capped at 40,000 for smooth rotation, so the control offers only what that view can honour rather than a budget it would silently redraw as 40,000.
 - **States what each color-by actually covers, before you pick it.**
   The menu lists whole-map fields first and labels every option with its scope ("Tissue · whole map", "Flight vs Ground · OSDR only").
   A coverage bar and an exact point count sit directly under the control.
@@ -91,10 +92,11 @@ Judge a candidate against a structure-free null of the *same form*, and check wh
 Tissue survives that bar.
 Its 25-NN label purity is 0.8142 against a permuted null of 0.0501, and it holds at 0.7058 under both a batch control and a depth control.
 
-There is one more thing the map is honest about, and it is printed on the control rail rather than buried: OSDR and ARCHS4 were embedded on different hardware and in different precisions, and OSDR samples sharing neither study nor tissue still neighbour each other 54x above chance.
+There is one more thing the map is honest about: OSDR and ARCHS4 were embedded on different hardware and in different precisions, and OSDR samples sharing neither study nor tissue still neighbour each other 54x above chance.
 Biology cannot explain cross-tissue clustering, so some of the distance between the two corpora is technical.
 Compare within a corpus, not across it.
-`precompute/validate_artifacts.py --mixing` is the check that produces that number, and it recomputes it exactly rather than approximately, so the sentence in the interface stays tied to a measurement anyone can re-run.
+This was once printed on the control rail as a standing caution; that microcopy was removed from the UI, so it lives here and in the README now.
+`precompute/validate_artifacts.py --mixing` is the check that produces that number, and it recomputes it exactly rather than approximately, so the claim in these docs stays tied to a measurement anyone can re-run.
 
 ## How it relates to Bridge RNA
 

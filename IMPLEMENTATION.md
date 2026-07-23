@@ -161,8 +161,9 @@ Biology does not make liver cluster with brain, so that residue is technical.
 
 Those are the *exact* figures. They were first obtained through an approximate index, which returned 34.2% and 5,227x; the index is gone and `validate_artifacts.py --mixing` now computes exact neighbours, so the two differ only in the third digit (`REFERENCE.md` section 4).
 
-This is a property of the map itself, not of any particular reading of it, so it is disclosed on the control rail where every user sees it, in plain language, with the number attached.
-`precompute/validate_artifacts.py --mixing` recomputes it and raises a warning above 50x, so the claim in the interface stays tied to a measurement that can be re-run.
+This is a property of the map itself, not of any particular reading of it.
+It was once disclosed on the control rail in plain language with the number attached; that standing caution was removed from the UI as over-explaining, and the effect is now documented (README, `REFERENCE.md` section 4, `CLAUDE.md`) rather than shown on the rail.
+`precompute/validate_artifacts.py --mixing` recomputes it and raises a warning above 50x, so the claim in the docs stays tied to a measurement that can be re-run.
 
 ### 4.5 ARCHS4 sample metadata (`precompute/fetch_archs4_meta.py`)
 
@@ -281,7 +282,7 @@ The app loads these coordinates and never invokes UMAP.
 
 UMAP preserves local neighborhoods, not global distances.
 Cluster separation and cluster sizes in a UMAP plot are not quantitatively meaningful, and the gap between two blobs does not measure how different they are.
-The control rail says so, in those words, directly under the projection toggle rather than in a footnote.
+The control rail used to say so, in those words, directly under the projection toggle; that microcopy was removed - a user who reaches a UMAP/PCA toggle is assumed to know what UMAP is - and the caveat now lives here and in the README rather than on the rail.
 
 That honesty is now a constraint on what the tool is willing to *do*, not only on what it says.
 The map is a picture, so the tool draws pictures: coordinates, colors, and density.
@@ -325,19 +326,20 @@ Point budgets (decisive):
 | --- | --- | --- |
 | OSDR | 2,108 (100%, never subsampled) | 2,108 |
 | ARCHS4, 2D | 940,455 (100%) | 100,000 / 250,000 / 500,000 / all 940,455 |
-| ARCHS4, 3D | capped at 40,000 | 40,000 |
+| ARCHS4, 3D | 40,000 (the cap) | 10,000 / 20,000 / 30,000 / 40,000 |
 | Total live glyphs, 2D | 942,563 | 102k to 942,563 |
 
 The default is now the whole corpus, which is the point of the change: the map's first frame shows every sample it has rather than a tenth of them over a picture of the rest.
 The lower tiers stay because they are genuinely faster to pan and zoom on a slower machine, and because a viewport re-sample at a partial budget is how fine structure is revealed on zoom.
 3-D keeps its own much lower cap because `Scatter3d` is not `Scattergl`: it has no WebGL fast path of the same kind, and 40,000 is where it stays interactive.
+The point-budget control reflects this rather than lying about it: switching to 3-D swaps the tiers to 10k / 20k / 30k / 40k and drops the 2-D "All" pill (`layout.budget_options`, `callbacks.sync_budget_to_dims`), so the control never advertises a budget the 3-D view would silently redraw as 40,000.
 
 **One palette across both corpora.**
 Categories are ranked once over the whole covered population and every layer draws from that single mapping, so a liver in GEO and a liver in OSDR get the same color.
 Ranking per layer, which is what the first implementation did, silently gave one category two different colors whenever the two corpora ordered their categories differently, which is a legend that lies.
 The top 11 categories take the validated categorical palette; residual categories ("Other", "Unknown") keep their own rows at the neutral end and always sort last, so they never outrank a category that carries information; everything past the palette folds into one grey overflow row.
-Legend counts are whole-corpus counts, not counts of the drawn sample, so they do not move when the point budget or the zoom changes.
-A legend number is read as "how many such samples exist", and it should answer that question.
+Legend counts are the number of points actually drawn: `render._legend_with_drawn_counts` recomputes them per figure from the ARCHS4 sample the budget and zoom selected, plus the OSDR overlay, so a count tracks what is on screen and a category with nothing drawn drops out of the key.
+A legend number is read as "how many of these am I looking at", and it should answer that question; the category's color and legend position, by contrast, are fixed by the whole-corpus ranking so they stay put as the count moves.
 
 **A corpus a field does not describe is drawn as context, not as data.**
 See section 7.4 for the full argument.
@@ -698,7 +700,7 @@ Validate, objectively and not by looking at the map:
 - the coverage a field **advertises** equals the number of labels its resolver actually **produces** (`covered == (labels != NOT_COVERED).sum()`, checked for every registered field),
 - every whole-map field covers all 942,563 points and the app's default field is one of them,
 - an OSDR-only field draws its ARCHS4 points as a faint context trace, in a color outside the categorical palette and with no legend swatch, in 2-D and 3-D alike,
-- a category keeps one color across both corpora, and legend counts do not move with the point budget,
+- a category keeps one color across both corpora while its legend count tracks the points actually drawn,
 - with the metadata join removed, Tissue degrades to OSDR-only coverage and names the command that restores it, rather than vanishing or lying.
 
 These are `tests/test_colorby.py`, `tests/test_tissue.py`, and the coverage tests in `tests/test_render.py` and `tests/test_app.py`.

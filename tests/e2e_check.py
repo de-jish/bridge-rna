@@ -237,11 +237,28 @@ def main() -> int:
             c.ok(info["images"] == 0, "3-D has no underlay image")
             c.ok(all(t["type"] in ("scatter3d",) for t in info["traces"] if t["n"]),
                  "3-D traces are scatter3d")
+            # 3-D must not offer a budget it cannot honour: the tiers cap at
+            # 40,000 with no "All" pill, and the cloud is drawn at that cap.
+            budget_3d = page.locator(
+                ".bm-group:has(.bm-group-label:text-is('ARCHS4 point budget')) "
+                ".bm-seg .dash-options-list-option").all_inner_texts()
+            print(f"     3-D budget tiers: {budget_3d}")
+            c.ok(not any("All" in b for b in budget_3d),
+                 f"3-D drops the 'All' tier: {budget_3d}")
+            c.ok(bool(budget_3d) and all(b.endswith("k") for b in budget_3d),
+                 f"3-D tiers are all capped k-values: {budget_3d}")
+            c.ok(info["total"] <= 40_000 + 2_108 + 50,
+                 f"3-D caps the ARCHS4 cloud near 40k ({info['total']:,} glyphs)")
             page.screenshot(path=str(SHOTS / "03-3d.png"))
 
             print("\n=== 6. PCA and zoom ===")
             set_segment(page, "Dimensions", "2D")
             page.wait_for_timeout(2500)
+            budget_2d = page.locator(
+                ".bm-group:has(.bm-group-label:text-is('ARCHS4 point budget')) "
+                ".bm-seg .dash-options-list-option").all_inner_texts()
+            c.ok(any("All" in b for b in budget_2d),
+                 f"2-D restores the 'All' tier: {budget_2d}")
             set_segment(page, "Projection", "PCA")
             page.wait_for_timeout(4000)
             info = wait_for_points(page)

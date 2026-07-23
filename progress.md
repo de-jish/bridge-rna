@@ -6,6 +6,33 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## Current status: 2026-07-22 (map UI refinements)
+
+Five changes to the map view, driven by user feedback that the interface over-explained and that some readouts were misleading below full budget.
+
+**1. The point budget now depends on the dimensionality.**
+3-D caps the ARCHS4 cloud at 40,000 for smooth rotation, but the control still offered 100k / 250k / 500k / All and silently redrew any of them as 40,000 - a control that lied about what it did.
+In 3-D the tiers are now 10k / 20k / 30k / 40k with no "All"; `layout.budget_options(dims)` builds them and `callbacks.sync_budget_to_dims` swaps them (and clamps the value) when the dimensionality changes.
+Switching back to 2-D restores the 100k / 250k / 500k / All tiers.
+
+**2. Legend counts now report what is actually plotted, not the whole corpus.**
+The old legend showed whole-corpus counts, which are meaningless below a full budget (a "40k" 3-D view was labelling categories in the hundreds of thousands).
+`render._legend_with_drawn_counts` now recomputes each row's count per figure from the drawn ARCHS4 sample plus the OSDR overlay, so the numbers track the budget and the zoom, and a category with nothing on screen drops out of the key.
+Colour and legend order are still fixed by the whole-corpus ranking, so a category keeps its colour whether or not it is currently drawn.
+
+**3. Removed UI microcopy that read as AI-generated over-explaining.**
+Gone: the projection hint ("UMAP preserves local neighborhoods…") under the UMAP/PCA toggle, and the standing "Reading across corpora" caution at the bottom of the rail.
+The budget hint was trimmed to one line.
+Both facts are preserved in the docs (README, `IMPLEMENTATION.md`, `REFERENCE.md`); the `.bm-caution` CSS was removed too.
+
+**4. The README map screenshot is now the 3-D UMAP.**
+`docs/bridge-rna-map.png` was a 2-D map framed on a retrieval; it is now the 3-D UMAP of the joint corpus coloured by tissue (3200x1960, captured with `scratchpad/shoot_3d_umap.py`).
+The surrounding README prose was rewritten to match.
+
+**5. Tests and the browser check were updated, not just left green.**
+198 pytest tests pass (was 194): the two tests that pinned whole-corpus legend counts were flipped to the drawn-count contract, four new tests cover the dims-dependent budget tiers, the drawn-count legend, zero-count drop-out, and the 3-D cap, and the test asserting the batch-effect caution lived on the rail was replaced with one pinning its removal.
+`tests/e2e_check.py` gained assertions that 3-D drops the "All" tier and caps near 40k and that 2-D restores it; all live browser checks pass.
+
 ## Current status: 2026-07-22 (later) - one app, and a retrieval 44x faster
 
 Bridge Manifold and Bridge RNA are one repository and one application.
@@ -482,7 +509,8 @@ Full measurement in `REFERENCE.md` section 4.
 - **The cross-corpus batch effect is real and measured exactly (2026-07-21).**
   Controlling for both study and tissue, OSDR samples that share neither still neighbour each other **54x above chance** (11.491% observed against 0.21101% expected).
   Tissue is the dominant axis of bulk expression, so biology cannot explain it - this is the fp32/CPU versus bf16/CUDA precision and preprocessing difference.
-  The caution on the control rail is therefore load-bearing and must stay prominent; cross-corpus distances are not trustworthy at face value.
+  This remains load-bearing: cross-corpus distances are not trustworthy at face value.
+  The standing caution that used to sit on the control rail was removed from the UI on 2026-07-22 at the user's request (over-explaining microcopy), so the fact now lives in the docs (README, `REFERENCE.md` section 4, `CLAUDE.md`) rather than on the rail.
   Full numbers in `REFERENCE.md` section 4.
   Re-check with `/Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing`, which warns above 50x.
 - The mixing check is the only thing left that opens the memmap, and it is opt-in. Everything else in the serving path reads `cache/` and nothing else.

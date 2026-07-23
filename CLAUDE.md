@@ -135,7 +135,8 @@ Four consequences are deliberate and should survive future edits.
 The menu lists whole-map fields first and labels each with its scope ("Tissue · whole map", "Flight vs Ground · OSDR only", "... · unavailable").
 A field with no data at all is shown and disabled with the command that enables it, because hiding it makes the app look like it never had the feature.
 A coverage bar and an exact point count sit directly under the control, amber rather than red, since an OSDR-only field is working correctly and not failing.
-One palette is shared across both corpora: categories are ranked once over the whole covered population, so a liver in GEO and a liver in OSDR get the same color, and legend counts are whole-corpus counts that do not move when the budget or zoom changes.
+One palette is shared across both corpora: categories are ranked once over the whole covered population, so a liver in GEO and a liver in OSDR get the same color and each category keeps its color and its place in the legend across every budget and zoom.
+The legend *count*, by contrast, is the number of points actually on screen: `render._legend_with_drawn_counts` recomputes it per figure from the drawn ARCHS4 sample plus the OSDR overlay, and a category with nothing currently drawn drops out of the key, because a legend count is read as "how many of these am I looking at", not "how many exist".
 
 ARCHS4 traces carry no `customdata`; it existed only to feed the lasso and cost about 600 KB of dead payload per figure.
 The OSDR overlay keeps `[sample_key, category]` for hover.
@@ -210,8 +211,8 @@ The reusable interfaces (OSDR preprocessing, `ExpressionPerformer`/`encode`, dig
 
 `hits-store` lives on the **shell** (`app.py`), not in the retrieval view, because the router destroys a view when you leave it and the map has to be able to draw a retrieval you ran before walking over to it.
 
-The cross-corpus batch effect is a property of the shared space and is disclosed on the control rail (`layout.control_rail`, `.bm-caution`): OSDR pairs sharing neither study nor tissue still neighbour each other 54x above chance, because the two corpora were embedded on different hardware and in different precisions.
-Compare within a corpus, not across.
+The cross-corpus batch effect is a property of the shared space: OSDR pairs sharing neither study nor tissue still neighbour each other 54x above chance, because the two corpora were embedded on different hardware and in different precisions, so compare within a corpus, not across.
+It was once a standing `.bm-caution` paragraph at the bottom of the control rail; that microcopy was removed from the UI as over-explaining, and the fact now lives in the docs (here, `README.md`, and `REFERENCE.md` section 4) rather than on the rail, while `precompute/validate_artifacts.py --mixing` still recomputes the number and warns above 50x.
 
 ## Environment and commands
 
