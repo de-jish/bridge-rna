@@ -26,7 +26,12 @@ biopython>=1.85,<2     # optional GEO / PubMed enrichment of retrieved hits
 # imported by the running app.
 scikit-learn>=1.9.0    # validation only (kNN scoring in validate_artifacts.py)
 umap-learn>=0.5.12     # full-corpus UMAP fit; needs precomputed_knn (0.5.2+)
-pynndescent>=0.6.0     # the shared k-NN graph both UMAP fits are laid out from
+pynndescent>=0.6.0     # the k-NN graph UMAP and t-SNE are both laid out from
+openTSNE>=1.0.4        # full-corpus t-SNE. Not sklearn's: only openTSNE has the
+                       # FIt-SNE interpolation that makes 942,563 points a
+                       # ~20-minute 2-D fit, and only it takes a precomputed
+                       # neighbour graph, which is what lets t-SNE reuse the
+                       # same NN-descent call UMAP uses.
 
 # --- Development -------------------------------------------------------------
 # pytest>=9.0.0

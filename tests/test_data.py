@@ -31,7 +31,7 @@ def test_global_order_is_archs4_then_osdr(corpus):
 def test_every_artifact_shares_the_global_order(corpus):
     """Coordinates, identity table, and the OSDR metadata all agree on length."""
     n_archs4, n_osdr, total = data.counts()
-    for method in ("pca", "umap"):
+    for method in data.METHODS:
         for dims, width in (("2d", 2), ("3d", 3)):
             c = data.coords(method, dims)
             assert c.shape == (total, width), f"{method}/{dims} has shape {c.shape}"
@@ -97,8 +97,8 @@ def test_control_arms_stay_distinct_under_the_raw_field(corpus):
 
 
 def test_method_availability_reflects_disk(corpus):
-    assert data.method_available("pca")
-    assert data.method_available("umap")
+    for method in data.METHODS:
+        assert data.method_available(method), f"{method} coordinates are missing"
 
 
 def test_missing_method_returns_empty_not_error(corpus, monkeypatch, tmp_path):

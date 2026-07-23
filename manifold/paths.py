@@ -52,6 +52,8 @@ COORDS_PCA2 = CACHE_DIR / "coords_pca2.parquet"
 COORDS_PCA3 = CACHE_DIR / "coords_pca3.parquet"
 COORDS_UMAP2 = CACHE_DIR / "coords_umap2.parquet"
 COORDS_UMAP3 = CACHE_DIR / "coords_umap3.parquet"
+COORDS_TSNE2 = CACHE_DIR / "coords_tsne2.parquet"
+COORDS_TSNE3 = CACHE_DIR / "coords_tsne3.parquet"
 
 PROJECTION_STATS_JSON = CACHE_DIR / "projection_stats.json"
 

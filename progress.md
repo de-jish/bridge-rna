@@ -6,6 +6,41 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-07-23 (t-SNE as a third projection, UMAP back to n_neighbors=30, parameter readout on the rail)
+
+Three changes, prompted by an observation rather than a metric: on the real map the species split looked visibly less separated than it had before, and the question was why.
+
+**1. UMAP's `n_neighbors` went back to 30, reversing the 15 shipped on 2026-07-21.**
+The 2026-07-21 experiment was well run and its metric half still stands - cosine on the raw 512-d vectors instead of euclidean on PCA-50 was a real improvement and is untouched.
+But both of its columns, kNN recall at k=15 and 25-NN tissue purity, are *local* measurements, and `n_neighbors` is precisely the knob that trades global structure for local structure.
+A scoreboard made of two local metrics could only ever have favoured the smaller value, so it selected 15 and gave up the large-scale arrangement neither column scores.
+The local cost of reverting was already in that table: recall 0.398 against 0.426, purity 0.642 against 0.646.
+Note that `validate_artifacts.py --quality` measures the same two things, so it cannot gate this decision either and will report 15 as the better setting. It is a floor, not the arbiter.
+Full write-up in `REFERENCE.md`, "n_neighbors back to 30, and why the table above could not have caught it".
+
+**2. t-SNE joined PCA and UMAP as a third projection.**
+Not a new idea: the 2026-07-21 evaluation of ten candidate methods concluded that if a third were ever added it should be openTSNE at perplexity 30 with PCA initialization, and that is what shipped, fit directly on all 942,563 points rather than through the landmark transform that entry anticipated.
+
+- `openTSNE`, not `sklearn.manifold.TSNE`. sklearn has no interpolation accelerator, so a corpus this size is impractical rather than merely slow, and it cannot take a precomputed neighbour graph.
+- t-SNE builds its **own** k=90 graph (3 x perplexity) through the same `build_knn` call UMAP uses, rather than sharing a padded one. A k=90 NN-descent graph sliced to k=30 is not the graph NN-descent would have built at k=30.
+- The self-column slice is load-bearing: pynndescent returns self in column 0 and openTSNE's own index strips it, so the graph is built at 91 and sliced `[:, 1:]`. Leaving it in would give every point a zero-distance neighbour.
+- The 2-D and 3-D fits share one affinity matrix (~2 GB, the build's largest allocation). Safe because exaggeration is applied as `P *= e` and restored with `P /= e` in a finally block; measured round-trip error 1.2e-16, float64 epsilon.
+- **2-D and 3-D are different algorithms.** openTSNE's FIt-SNE interpolation refuses more than two output dimensions ("currently unsupported (and generally a bad idea)"), so 3-D is Barnes-Hut, which is `n log n` with a much larger constant and dominates the build's wall clock.
+
+**3. The control rail now states how the active projection was fit.**
+`n_neighbors=30 · min_dist=0.1 · cosine · PCA init · fit on all 942,563 points`, sitting directly under the Projection pills the way the coverage readout sits under the color-by dropdown.
+It reads `projection_stats.json` through a new `data.projection_stats()` loader and never constants in the serving code, so it cannot stay confident while the cache goes stale.
+It takes the dimensionality as a real input because t-SNE's gradient method genuinely differs: 2-D says FIt-SNE, 3-D says Barnes-Hut.
+A key the record does not carry drops its chip rather than rendering blank, so an older cache shows fewer parameters instead of empty slots.
+
+Supporting changes:
+- `projection_stats.json` is now **merged** rather than rewritten, so rebuilding one method does not erase what the others recorded. The merge is abandoned if the corpus row counts changed.
+- `layout.METHOD_LABELS` drives the pills, their disabled state, and the default, so a fourth projection is one line rather than four edits that can disagree. An unbuilt method is disabled and visible, not hidden.
+- `validate_artifacts.py` walks one `_COORD_PATHS` list (six entries now) instead of two that could drift, gates t-SNE on quality the way it gates UMAP, and prints `SKIP` rather than failing for a stage the build record shows was never run.
+- `.bm-hint` moved from `--text-muted` to `--text-secondary`: `#8a99ac` at 11.5px measures 2.90:1 on the white panel and fails WCAG AA. Unrelated to this work, found while adding the adjacent rule, fixed anyway.
+
+Tests: 198 to 207. The method loops in `test_data.py` and `test_render.py` now iterate `data.METHODS` rather than a literal pair, so a projection cannot ship without having been drawn. The fixture writes t-SNE coordinates and realistic `umap_*`/`tsne_*` stats, without which the parameter formatter's real path was never exercised. Browser checks 29 to 36.
+
 ## 2026-07-23 (doc consolidation into the README)
 
 Folded the standalone explainer docs into `README.md` and removed them, so a new reader meets fewer scattered files.
@@ -505,6 +540,7 @@ The build cost roughly tripled, from 347 s to 950 s, entirely in `.transform()`;
 `validate_artifacts.py` passes, 144 tests pass, and the 27 browser checks pass against the rebuilt cache.
 
 **If a third method is added, it is openTSNE at perplexity 30 with PCA initialization.**
+**Executed 2026-07-23** - see the entry at the top of this file. It shipped exactly as specified here (openTSNE, perplexity 30, PCA init), but fit directly on all 942,563 points rather than through the landmark transform this paragraph anticipated, since the landmark pattern had already been removed from the pipeline by then.
 It is the only candidate that beats UMAP on local fidelity (0.581 against 0.426 for the best UMAP) and on biological fidelity (0.668 against 0.646) at the same time, and its global fidelity is 2.6x UMAP's.
 Its out-of-sample transform works and preserves *more* structure than UMAP's on the same test (recall 0.534 against 0.472), so the landmark fit-and-transform pattern the pipeline already uses would carry it to all 942,563 points.
 Two honest caveats: t-SNE fills the plane as a disc, so whitespace carries no meaning where UMAP's islands at least suggest separation; and it separates the corpora *more* (2.2% shared bins against 8.9%), which cuts against this tool's premise of showing where spaceflight sits relative to Earth biology.
@@ -519,7 +555,7 @@ Perplexity 200 is not an option at 3.5 hours for 60,000 points.
 - **PaCMAP** and **LocalMAP** buy real global fidelity (0.284 and 0.316 against UMAP's 0.113) but PaCMAP is worse than UMAP on both local structure and tissue purity, and LocalMAP destroys density fidelity (0.081). Neither earns a menu slot.
 - **TriMap** collapses. Local fidelity 0.001, tissue purity 0.095 against a 0.073 null, and every point sharing a bin with OSDR - the rendered plot is empty.
 - **PHATE** has *negative* density fidelity and produces the crescent it produces when there is no trajectory. It is a tool for developmental data being pointed at a heterogeneous grab-bag of GEO.
-- **Keeping PCA is validated.** Its global fidelity of 0.849 is 3x the best neighbour embedding, and no nonlinear method comes close. The two shipped methods really do occupy the two ends.
+- **Keeping PCA is validated.** Its global fidelity of 0.849 is 3x the best neighbour embedding, and no nonlinear method comes close. The two shipped methods really do occupy the two ends. (Three since 2026-07-23; PCA still holds the global end.)
 
 **The open question, now answered (2026-07-21).** The premise was wrong.
 The pre-normalization L2 norm is not sequencing depth: the encoder's input is log1p-TPM, which is depth-normalized by construction, and measured against the exact OSDR expression matrix the norm correlates r = +0.987 with the share of expression held by a sample's top 100 genes and r = -0.930 with Shannon entropy.

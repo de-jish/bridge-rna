@@ -56,11 +56,21 @@ That shared key is why a retrieval you run on one page can be redrawn in place o
 ### The map
 
 The map is the same space projected down to two and three dimensions.
-Two reductions are offered: PCA, which is fast and linear, and UMAP, which is slower, nonlinear, and better at keeping local neighbourhoods.
-Both are fit once, offline, on every one of the 942,563 points rather than on a subsample, and the app only ever loads the finished coordinates.
-Fitting UMAP over the whole corpus takes about ten minutes and several gigabytes of memory, which is the reason it never happens inside the running app.
+Three reductions are offered.
+PCA is fast and linear, and honest about global magnitude structure.
+UMAP is nonlinear and keeps local neighbourhoods.
+t-SNE is also nonlinear, separates local structure harder still, and is the slowest to build by a wide margin.
+All three are fit once, offline, on every one of the 942,563 points rather than on a subsample, and the app only ever loads the finished coordinates.
+Fitting the two neighbour embeddings over the whole corpus is a job measured in tens of minutes and gigabytes of memory, which is the reason neither happens inside the running app.
 
-Vectors are L2-normalised before either reduction.
+The control rail states the parameters each one was actually fit with, read back from the build record rather than from constants written into the app.
+That readout is dimension-aware because the fit genuinely is: t-SNE's interpolation accelerator refuses more than two output dimensions, so the 3-D map is a Barnes-Hut layout and the 2-D one is not.
+
+Two cautions specific to t-SNE, both measured on this corpus rather than inherited from folklore.
+It fills the plane as a disc, so whitespace between clusters carries no meaning, where UMAP's islands at least suggest separation.
+And it separates the two corpora more than UMAP does, which makes it the worst of the three for eyeballing whether OSDR and ARCHS4 overlap.
+
+Vectors are L2-normalised before any reduction.
 Without that step the first principal component is really a magnitude axis and holds 57.8% of the variance, swamping the rest; normalised, it drops to 41.3% and the biology comes through.
 
 ### Colouring both collections by tissue

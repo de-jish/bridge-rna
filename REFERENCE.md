@@ -92,7 +92,7 @@ The retune roughly tripled the build, and all of the increase was in `.transform
 
 ### Full-corpus build, actually measured (2026-07-22)
 
-**Both reductions are now fit on all 942,563 points.** No subsample, no landmark set, no `.transform()`.
+**All three reductions are now fit on all 942,563 points.** No subsample, no landmark set, no `.transform()`. (Two until 2026-07-23, when t-SNE joined them.)
 Measured end to end on a 10-core M4 with 16 GB of RAM:
 
 | stage | cost | notes |
@@ -150,7 +150,9 @@ The subsample was an excellent approximation.
 The exact fit is kept because it costs 4.5 seconds, removes an approximation from the pipeline, and yields the full 512-eigenvalue spectrum for free, not because it changed the picture.
 Note the degradation with component index: by PC3 the agreement is already 0.9948, so a build wanting more than three components should not assume the subsample stays adequate.
 
-### UMAP settings, chosen by measurement (2026-07-21)
+### UMAP settings, chosen by measurement (2026-07-21, `n_neighbors` superseded 2026-07-23)
+
+**Read the next subsection before quoting this one.** The metric half of this decision stands and is still shipped; the `n_neighbors=15` half was reversed on 2026-07-23 and the reducer now runs `n_neighbors=30`.
 
 The reducer runs `n_neighbors=15`, `metric="cosine"`, on the **raw 512-d L2-normalized vectors**, not `n_neighbors=30` with euclidean on PCA-50.
 Scored on a 60,000-point sample against the original 512-d space, three seeds per configuration (seed sd was 0.001 to 0.002 on both metrics, so these gaps are 8 to 37 standard deviations):
@@ -166,6 +168,23 @@ The two changes compose. Reducing to PCA-50 first was discarding the 4.9% of var
 
 Confirmed on the **real 942,563-point map**, not just the sample: 25-NN tissue purity over all 853,989 points carrying a real tissue bucket, 30,000 queries, went **0.6448 to 0.6756 (+4.8%)** against a permuted-label null of 0.0761, so the lift over null went 8.5x to 8.9x.
 The OSDR spread ratio also improved, 0.827 to 0.850, meaning the spaceflight corpus occupies more of the map rather than less.
+
+### `n_neighbors` back to 30, and why the table above could not have caught it (2026-07-23)
+
+The shipped reducer is now `n_neighbors=30`, `metric="cosine"`, on the raw 512-d L2-normalized vectors.
+Only the neighbour count reverted; the metric and input-space half of the 2026-07-21 decision is untouched and was never in question.
+
+**What prompted it was a visual observation, not a metric**: on the real map the species split, which is the largest-scale structure the corpus has and the only color-by that clearly clears the arbitrary-projection band at eta-squared 0.985, was visibly less separated at 15 than it had been at 30.
+
+**Why the table above could not have caught that is the useful part.**
+Both of its columns are local measurements: kNN recall at k=15 asks whether a point's fifteen nearest 512-d neighbours are still near it, and 25-NN tissue purity asks about twenty-five. Neither scores large-scale arrangement at all.
+`n_neighbors` is precisely the knob that trades global structure for local structure - it sets how much of the manifold each point is allowed to see while the graph is built - so a scoreboard made of two local metrics can only ever favour the smaller value. The experiment was well run and answered the question it asked; the question was half the problem.
+
+The local cost of going back is small and was already visible in that same table: at `n_neighbors=30` with cosine on raw 512-d, kNN recall is 0.398 against 0.426 and tissue purity 0.642 against 0.646. That is roughly 6.6% of local fidelity and 0.6% of tissue purity, traded for the large-scale arrangement the map is read at first.
+
+**The lesson generalizes past UMAP** and belongs with the methodological note in section 11: a projection has at least two kinds of fidelity, and a decision made on one of them is not a decision about the map. `validate_artifacts.py --quality` still scores only local fidelity and tissue purity, so it cannot gate this either - it will report the 15-setting as the better one. Treat it as a floor, not as the arbiter.
+
+Measured build cost of the change, same machine, same seed: the k=30 neighbour graph takes **127-139 s** against 59 s at k=15, and each UMAP fit takes **325-350 s** against about 251 s.
 
 **PCA after L2 normalization, exact over the whole corpus: PC1 = 41.3%, cumulative over the first 50 of 512 components = 95.0%.**
 (The 60,000-point subsample the earlier build used reported 40.9% and 95.1%.)
@@ -197,7 +216,7 @@ Two consequences.
 
 **Do not try to project it out.** Removing the single best-fitting direction barely moves the probe (R^2 0.977 to 0.975), because the signal is spread across many directions - and it should not be removed anyway, since it is a real biological property rather than a technical covariate. Invariant 2's conclusion stands; only its stated reason was wrong. Normalize because a 3.9x magnitude spread would otherwise make the map about magnitude rather than direction.
 
-Structural facts from the same artifacts, re-verified 2026-07-21 by re-running `validate_artifacts.py`: all four coordinate parquets carry exactly 942,563 finite rows, `points_meta.parquet` marks the first 940,455 as ARCHS4 and the trailing 2,108 as OSDR, and the OSDR block occupies a real region of the map rather than one blob (OSDR umap2 spread / corpus spread = 0.827).
+Structural facts from the same artifacts, re-verified 2026-07-21 by re-running `validate_artifacts.py`: all six coordinate parquets carry exactly 942,563 finite rows, `points_meta.parquet` marks the first 940,455 as ARCHS4 and the trailing 2,108 as OSDR, and the OSDR block occupies a real region of the map rather than one blob (OSDR umap2 spread / corpus spread = 0.827).
 
 ### Cross-corpus separation, measured exactly (re-verified 2026-07-21)
 
@@ -245,10 +264,13 @@ The versions recorded during design had drifted by the time the build ran; these
 
 `requirements.txt` splits the surface deliberately.
 The map view (`manifold/`, served by `app.py`) needs only `dash`, `plotly`, `numpy`, `pandas`, `pyarrow`: it draws a precomputed map, opens no embeddings, and computes no statistics, so it carries no scientific stack at all.
-`torch`, `scikit-learn`, `umap-learn`, `pynndescent`, and `requests` are precompute-only.
+`torch`, `scikit-learn`, `umap-learn`, `openTSNE`, `pynndescent`, and `requests` are precompute-only.
 `scikit-learn` survives in that list only for `validate_artifacts.py --quality`; the build itself stopped importing it when `IncrementalPCA` was replaced by an exact streaming eigendecomposition.
 
-Absent: `datashader`, `archs4py`, `cuml`, `pacmap`, `openTSNE`.
+`openTSNE` was added on 2026-07-23 for the t-SNE stage, and it was chosen over `sklearn.manifold.TSNE` on two grounds that are both disqualifying rather than preferences.
+sklearn has no interpolation accelerator, so a 942,563-point 2-D fit is not merely slower but impractical; and sklearn cannot accept a precomputed neighbour graph, which is what lets t-SNE reuse the same NN-descent call UMAP uses instead of introducing a second, differently-seeded neighbour search into the build.
+
+Absent: `datashader`, `archs4py`, `cuml`, `pacmap`.
 
 Four library behaviours the code actively depends on, each of which caused a real defect during the build:
 
@@ -578,7 +600,9 @@ Judge a candidate against a structure-free null **of the same form**, and check 
 | `coords_pca3.parquet` | 13.17 MB | build_projections | yes |
 | `coords_umap2.parquet` | 8.79 MB | build_projections | yes |
 | `coords_umap3.parquet` | 13.18 MB | build_projections | yes |
-| `projection_stats.json` | 14.4 KB | build_projections | **no** - a build record the validator reads, nothing the app opens |
+| `coords_tsne2.parquet` | 8.79 MB | build_projections | yes |
+| `coords_tsne3.parquet` | 13.18 MB | build_projections | yes |
+| `projection_stats.json` | 14.4 KB | build_projections | **yes**, since 2026-07-23 - the rail's projection-parameter readout reads it through `data.projection_stats()`. The validator still checks it; the app only reads labels off it and runs without it |
 | `archs4_geo.parquet` | 4.63 MB | build_projections | no, join key for the metadata fetch |
 | `archs4_metadata.parquet` | 32.51 MB | fetch_archs4_meta | yes, optional |
 | `osdr_sample_embeddings.float32.npy` | 4.32 MB | embed_osdr | no, input to build_projections |
@@ -658,4 +682,4 @@ The metadata fetch runs third because it joins onto artifacts `build_projections
 `BRIDGE_RNA_ROOT` is needed for the first two steps and for `--mixing` and `--quality`, and not for running the app.
 
 Flags that appear in older prose and no longer exist: `--skip-hnsw`, `--density-only`, `--pca-fit-sample`, `--umap-fit-sample`, `--pca-components`.
-The current `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--densmap`, and `--dens-lambda`.
+The current `build_projections.py` takes `--umap-neighbors`, `--tsne-perplexity`, `--tsne-jobs`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--skip-tsne`, `--densmap`, and `--dens-lambda`.

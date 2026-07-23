@@ -1,16 +1,21 @@
 """Artifact loaders with module-level caches.
 
 The serving app loads only small precomputed artifacts: coordinate parquets, the
-identity table, the OSDR label table, and the ARCHS4 GEO metadata join.
+identity table, the OSDR label table, the ARCHS4 GEO metadata join, and the
+build record that says how the coordinates were fit.
 Nothing here imports torch or umap, and nothing here opens the 963 MB ARCHS4
 embedding memmap - the map draws precomputed coordinates, so it never needs a
 512-d vector at request time. The retrieval half does open that memmap, on
 every cached search; this module is not on that path.
 
-`projection_stats.json` is deliberately not loaded here. The app read it only to
-place the density raster at its recorded extent, and with the raster gone the
-file is a build record that `precompute/validate_artifacts.py` checks, not
-something the app needs open.
+`projection_stats.json` is read here, but only as a build *record* - never for
+coordinates. It was dropped from this module once, when the density raster that
+placed itself at the recorded extent was removed and nothing else needed the
+file. The projection-parameter readout on the control rail brought it back: the
+rail states the settings that produced the coordinates on screen, and that
+answer has to come from what the build actually wrote rather than from constants
+duplicated in the serving code, which is how a rail ends up confidently
+describing a build it is not showing.
 
 Global point order is fixed as [ARCHS4 (0..N_ARCHS4-1), then OSDR
 (N_ARCHS4..N-1)], matching build_projections.py. A point index `i` addresses
@@ -19,6 +24,7 @@ the same sample across every artifact.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 
 import numpy as np
@@ -26,9 +32,14 @@ import pandas as pd
 
 from . import paths, tissue
 
+# Every projection the app can draw, and the parquet each one lives in.
+# `coords()` caches one array per (method, dims) pair, so this dict's length is
+# what sizes that cache; the order the control rail offers them in is
+# `layout.METHOD_LABELS`, not this.
 METHODS = {
     "pca": {"2d": paths.COORDS_PCA2, "3d": paths.COORDS_PCA3},
     "umap": {"2d": paths.COORDS_UMAP2, "3d": paths.COORDS_UMAP3},
+    "tsne": {"2d": paths.COORDS_TSNE2, "3d": paths.COORDS_TSNE3},
 }
 
 
@@ -137,6 +148,26 @@ def coords(method: str, dims: str) -> np.ndarray:
 
 def method_available(method: str) -> bool:
     return METHODS[method]["2d"].exists()
+
+
+@lru_cache(maxsize=1)
+def projection_stats() -> dict:
+    """The build record: how each projection was fit, and with what parameters.
+
+    Returns ``{}`` when the file is absent or unreadable rather than raising.
+    This feeds a label on the control rail, not a correctness gate, so a cache
+    built before a stage existed shows fewer parameters instead of taking the
+    map down - the same degradation `osdr_field_values` chooses for a colour-by
+    the precompute step never populated. `precompute/validate_artifacts.py` is
+    where a missing or malformed record is an error.
+    """
+    if not paths.PROJECTION_STATS_JSON.exists():
+        return {}
+    try:
+        loaded = json.loads(paths.PROJECTION_STATS_JSON.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 # --- Color-by helpers -------------------------------------------------------

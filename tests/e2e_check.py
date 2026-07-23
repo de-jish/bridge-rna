@@ -175,6 +175,18 @@ def main() -> int:
             seg_h = page.evaluate(
                 "() => document.querySelector(\"[id='budget']\").getBoundingClientRect().height")
             c.ok(seg_h < 60, f"the budget control is a single row ({seg_h:.0f}px tall)")
+            # The Projection control went from two pills to three, so it is now
+            # the one most likely to wrap.
+            method_labels = page.locator(
+                ".bm-group:has(.bm-group-label:text-is('Projection')) "
+                ".bm-seg .dash-options-list-option").all_inner_texts()
+            print(f"     projections: {method_labels}")
+            c.ok(len(method_labels) == 3,
+                 f"three projections offered: {method_labels}")
+            method_h = page.evaluate(
+                "() => document.querySelector(\"[id='method']\").getBoundingClientRect().height")
+            c.ok(method_h < 60,
+                 f"the projection control is a single row ({method_h:.0f}px tall)")
 
             print("\n=== 3. an OSDR-only field draws context, not a grey category ===")
             page.locator("#color-by").click()
@@ -266,6 +278,42 @@ def main() -> int:
             c.ok(info["images"] == 0, "PCA has no underlay image")
             page.screenshot(path=str(SHOTS / "04-pca.png"))
 
+            print("\n=== 6b. t-SNE, and the parameter readout on the rail ===")
+
+            def params_text() -> str:
+                return page.locator("#method-params").inner_text().replace("\n", " ")
+
+            pca_params = params_text()
+            print(f"     PCA:       {pca_params}")
+            c.ok("eigendecomposition" in pca_params,
+                 f"the rail names how PCA was fit: {pca_params!r}")
+
+            set_segment(page, "Projection", "t-SNE")
+            page.wait_for_timeout(5000)
+            info = wait_for_points(page)
+            c.ok(info["total"] > 0, f"t-SNE renders ({info['total']:,} glyphs)")
+            tsne_2d = params_text()
+            print(f"     t-SNE 2-D: {tsne_2d}")
+            c.ok("perplexity" in tsne_2d,
+                 f"the rail names the perplexity: {tsne_2d!r}")
+            # The two t-SNE maps are built by different algorithms, because
+            # openTSNE's interpolation accelerator refuses three dimensions.
+            # The rail has to say which one it is showing.
+            c.ok("FIt-SNE" in tsne_2d and "Barnes-Hut" not in tsne_2d,
+                 f"2-D t-SNE is named as the interpolation fit: {tsne_2d!r}")
+            page.screenshot(path=str(SHOTS / "05-tsne.png"))
+
+            set_segment(page, "Dimensions", "3D")
+            page.wait_for_timeout(6000)
+            tsne_3d = params_text()
+            print(f"     t-SNE 3-D: {tsne_3d}")
+            c.ok("Barnes-Hut" in tsne_3d and "FIt-SNE" not in tsne_3d,
+                 f"3-D t-SNE is named as the Barnes-Hut fit: {tsne_3d!r}")
+            page.screenshot(path=str(SHOTS / "06-tsne-3d.png"))
+            set_segment(page, "Dimensions", "2D")
+            page.wait_for_timeout(3000)
+
+            print("\n=== 6c. zoom ===")
             set_segment(page, "Projection", "UMAP")
             page.wait_for_timeout(4000)
             box = page.locator(".js-plotly-plot .nsewdrag").first.bounding_box()
@@ -282,7 +330,7 @@ def main() -> int:
                 info = page.evaluate(COUNT_JS)
                 c.ok(info["total"] > 0, f"the map still has points after zooming "
                                         f"({info['total']:,})")
-                page.screenshot(path=str(SHOTS / "05-zoomed.png"))
+                page.screenshot(path=str(SHOTS / "07-zoomed.png"))
 
             print("\n=== 7. console ===")
             real = [e for e in console_errors

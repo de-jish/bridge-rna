@@ -20,6 +20,120 @@ def color_by_label(value: str) -> str:
     return colorby.get(value).label
 
 
+# The Projection control, in the order it offers them: the two neighbour-graph
+# methods first, then the linear one. Every entry is derived from this - the
+# options, their disabled state, and which one a fresh view opens on - so a
+# fourth projection is one line here rather than four edits that can disagree.
+METHOD_LABELS = (("umap", "UMAP"), ("tsne", "t-SNE"), ("pca", "PCA"))
+
+
+def method_options() -> list[dict]:
+    """The Projection pills, each disabled when its coordinates are not built.
+
+    Disabled-and-visible rather than hidden, for the reason `colorby` gives for
+    an unavailable colour-by: hiding it makes the app look like it never had the
+    feature. t-SNE is the one most likely to be missing, because it is the most
+    expensive stage in the build and the only one that can be skipped without
+    skipping the rest.
+    """
+    return [{"label": label, "value": key,
+             "disabled": not data.method_available(key)}
+            for key, label in METHOD_LABELS]
+
+
+def default_method() -> str:
+    """The first projection that is actually built.
+
+    PCA is the floor rather than a fallback that might also be missing:
+    `preflight.APP_REQUIRED` refuses to start the app without
+    coords_pca2.parquet, so the `next(...)` default can never be reached on a
+    machine that got this far.
+    """
+    return next((k for k, _ in METHOD_LABELS if data.method_available(k)), "pca")
+
+
+def projection_params(method: str, dims: str) -> list[tuple[str, str, str]]:
+    """(prefix, value, suffix) triples stating how the active projection was fit.
+
+    ``value`` is the payload and is the only part set in mono tabular figures;
+    it is empty for chips that are a bare word rather than a measurement, since
+    setting "cosine" in a numeral font is just noise.
+
+    Read off `projection_stats.json`, never from constants duplicated here: the
+    rail describes the coordinates on screen, and a rail that recites what the
+    build *would* have done is worse than one that says nothing, because it
+    stays confident while the cache goes stale. A key the record does not carry
+    drops its pair rather than rendering blank, so an older cache shows fewer
+    parameters instead of a row of empty slots.
+
+    `dims` is a real input, not decoration. t-SNE's negative-gradient method
+    differs between the two: openTSNE's interpolation accelerator refuses more
+    than two output dimensions, so the 3-D map is a Barnes-Hut layout and the
+    2-D one is not. Naming one method for both would be the same class of lie
+    the retrieval banner told when it announced every cached result as
+    subprocess output.
+    """
+    s = data.projection_stats()
+    out: list[tuple[str, str, str]] = []
+
+    def measure(prefix: str, value, suffix: str = "") -> None:
+        """A key=value parameter; skipped entirely when the record lacks it."""
+        if value is not None and value != "":
+            out.append((prefix, str(value), suffix))
+
+    def word(text) -> None:
+        """A bare descriptive chip, with no numeral to set apart."""
+        if text:
+            out.append((str(text), "", ""))
+
+    if method == "umap":
+        measure("n_neighbors=", s.get("umap_neighbors"))
+        measure("min_dist=", s.get("umap_min_dist"))
+        word(s.get("umap_metric"))
+        if s.get("umap_init"):
+            word("PCA init")
+    elif method == "tsne":
+        measure("perplexity=", s.get("tsne_perplexity"))
+        measure("exaggeration=", s.get("tsne_early_exaggeration"))
+        word(s.get("tsne_metric"))
+        if s.get("tsne_init"):
+            word("PCA init")
+        word(s.get(f"tsne{dims[0]}_negative_gradient"))
+    elif method == "pca":
+        if s.get("pca_fit"):
+            word("exact eigendecomposition")
+        pc1 = s.get("pca_pc1_pct")
+        if pc1 is not None:
+            measure("PC1 ", f"{float(pc1):.1f}%")
+
+    # The shared closer. All three are fit on the whole corpus, and that is the
+    # property most worth stating: it is what they stopped approximating, and
+    # the count is the one number that proves it.
+    total = s.get("total")
+    if total:
+        measure("fit on all ", f"{int(total):,}", " points")
+    return out
+
+
+def projection_params_children(method: str, dims: str):
+    """The parameter readout's spans, one per parameter.
+
+    One span each so a 236 px rail wraps *between* parameters: an
+    "n_neighbors=" stranded above its "30" reads as two facts rather than one.
+    The separator between them is drawn by CSS for the same reason - a literal
+    "·" in the text is one more place the line is allowed to break.
+    """
+    children = []
+    for prefix, value, suffix in projection_params(method, dims):
+        parts: list = [prefix] if prefix else []
+        if value:
+            parts.append(html.B(value))
+        if suffix:
+            parts.append(suffix)
+        children.append(html.Span(parts, className="bm-param"))
+    return children
+
+
 def budget_options(dims: str) -> list[dict]:
     """The ARCHS4 point-budget tiers, which depend on the dimensionality.
 
@@ -72,18 +186,19 @@ def _segmented(id_: str, options: list[dict], value: str):
 
 def control_rail() -> html.Div:
     n_archs4, n_osdr, _ = data.counts()
-    umap_ok = data.method_available("umap")
-    method_options = [
-        {"label": "UMAP", "value": "umap", "disabled": not umap_ok},
-        {"label": "PCA", "value": "pca"},
-    ]
 
     return html.Div(
         className="bm-rail",
         children=[
+            # The parameter readout sits directly under the control it
+            # describes, which is the same rule the colour-by coverage readout
+            # below follows: the fact that qualifies a control belongs against
+            # that control, not in a tooltip and not in the plot badges, which
+            # report what is drawn right now and change on every zoom.
             html.Div(className="bm-group", children=[
                 html.Div("Projection", className="bm-group-label"),
-                _segmented("method", method_options, "umap" if umap_ok else "pca"),
+                _segmented("method", method_options(), default_method()),
+                html.Div(id="method-params", className="bm-params"),
             ]),
             html.Div(className="bm-group", children=[
                 html.Div("Dimensions", className="bm-group-label"),

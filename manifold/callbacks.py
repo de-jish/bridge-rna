@@ -214,6 +214,22 @@ def register(app):
         return layout.budget_options(dims), layout.resolve_budget(dims, current)
 
     @app.callback(
+        Output("method-params", "children"),
+        Input("method", "value"),
+        Input("dims", "value"),
+    )
+    def show_projection_params(method, dims):
+        """State how the projection on screen was actually fit.
+
+        Its own callback rather than a ninth Output on `update_figure`, which
+        fires on eight Inputs: these parameters are a build record, so
+        recomputing them on every zoom step would be waste, and worse, the
+        readout would go stale or blank whenever the figure path failed. The
+        two Inputs it does take are the two that can change the answer.
+        """
+        return layout.projection_params_children(method, dims)
+
+    @app.callback(
         Output("picked-group", "style"),
         Output("picked-label", "children"),
         Output("picked-link", "href"),

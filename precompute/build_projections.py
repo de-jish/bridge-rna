@@ -4,6 +4,7 @@
 Produces, for the union of ARCHS4 (940,455) and OSDR (2,108) embeddings:
   - cache/coords_pca2.parquet, coords_pca3.parquet    (exact full-corpus PCA)
   - cache/coords_umap2.parquet, coords_umap3.parquet  (full-corpus UMAP)
+  - cache/coords_tsne2.parquet, coords_tsne3.parquet  (full-corpus t-SNE)
   - cache/points_meta.parquet, cache/archs4_geo.parquet
   - cache/projection_stats.json                       (spectrum, extents, timings)
 
@@ -15,13 +16,20 @@ npy[i - N_ARCHS4].
 Design notes:
   * L2-normalize before any reduction. Raw ARCHS4 norms span 6.7-26.4 and PC1
     would otherwise be a magnitude axis (REFERENCE.md section 4).
-  * Both reductions are fit on **every** point, not on a subsample. PCA gets
-    there by accumulating an exact 512x512 second-moment matrix in one pass;
-    UMAP gets there by fitting the 942,563-point graph directly. Neither is a
-    landmark approximation any more - see fit_exact_pca and run_umap for the
-    measurements that made the direct route affordable.
-  * The k-nearest-neighbour graph is built once and reused for the 2-d and the
-    3-d embedding, because the graph does not depend on the output dimension.
+  * All three reductions are fit on **every** point, not on a subsample. PCA
+    gets there by accumulating an exact 512x512 second-moment matrix in one
+    pass; UMAP and t-SNE get there by fitting the 942,563-point graph directly.
+    None is a landmark approximation - see fit_exact_pca, run_umap and run_tsne
+    for the measurements that made the direct route affordable.
+  * Each neighbour-based method builds its graph once and reuses it for the 2-d
+    and the 3-d embedding, because the graph does not depend on the output
+    dimension. UMAP and t-SNE need *different* graphs (k=n_neighbors against
+    k=3*perplexity), so they get one each rather than sharing a padded one:
+    slicing a k=90 graph down to k=30 is not the graph NN-descent would have
+    built at k=30, and the graph is the artifact every coordinate derives from.
+  * The three methods are independent stages. Each can be skipped, and
+    ``save_stats`` merges into the existing record rather than replacing it, so
+    rebuilding one method does not erase what the others measured.
 """
 
 from __future__ import annotations
@@ -39,6 +47,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from manifold import paths, preflight  # noqa: E402
 
 EMB_DIM = 512
+
+# t-SNE's optimization schedule. These are openTSNE's own defaults, resolved to
+# literals rather than left as its "auto" sentinels so the numbers this build
+# actually ran are recorded in projection_stats.json and shown on the control
+# rail. `early_exaggeration="auto"` resolves to 12 and `learning_rate="auto"`
+# resolves to n_samples/exaggeration per phase, which is 78,547 while the
+# exaggeration is on and 942,563 after it (tsne.py, __check_params). The
+# learning rate is left as "auto" in the call so it tracks the corpus size
+# instead of being pinned to today's row count.
+TSNE_PERPLEXITY = 30
+TSNE_EARLY_EXAGGERATION = 12
+TSNE_EARLY_ITER = 250
+TSNE_ITER = 500
+TSNE_MOMENTUM = 0.8
 
 
 def log(msg: str) -> None:
@@ -314,6 +336,170 @@ def run_umap(x: np.ndarray, knn, n_components: int, seed: int,
     return out
 
 
+# --- t-SNE: fit on every point, from one shared affinity matrix -------------
+
+def build_tsne_affinities(x: np.ndarray, perplexity: int, seed: int,
+                          knn_jobs: int, n_jobs: int):
+    """The perplexity-calibrated joint probabilities, built once for both dims.
+
+    t-SNE's P matrix is the analogue of UMAP's fuzzy simplicial set: it depends
+    on the input space and on the perplexity, never on the output dimension, so
+    the 2-d and the 3-d embedding are layouts of the *same* affinities rather
+    than of two independent approximations of it. That is the same argument
+    ``build_knn`` makes for UMAP, and it matters more here, because P is the
+    single largest allocation in this stage.
+
+    The neighbour graph comes from ``build_knn``, the same NN-descent call UMAP
+    uses, rather than from openTSNE's own index. Two reasons: the determinism
+    story is then identical for both methods (``n_jobs=1``, one seed), and the
+    graph is built by one code path that has already been reasoned about.
+
+    The ``[:, 1:]`` slice is load-bearing and easy to get wrong. pynndescent
+    returns each point's *self* match in column 0; openTSNE's own index strips
+    it before returning (``nearest_neighbors.NNDescent.build`` ends with
+    ``return indices[:, 1:], distances[:, 1:]``), and ``PrecomputedNeighbors``
+    passes whatever it is handed straight through to the perplexity
+    calibration. Leaving self in would hand every point a zero-distance
+    neighbour, which is not what a perplexity of 30 means. So the graph is
+    built at ``3 * perplexity + 1`` and sliced back to ``3 * perplexity``,
+    which is the neighbour count openTSNE would have chosen itself.
+    """
+    from openTSNE import affinity, nearest_neighbors
+
+    k = 3 * perplexity
+    knn_idx, knn_dist = build_knn(x, k + 1, seed, knn_jobs)
+    index = nearest_neighbors.PrecomputedNeighbors(
+        np.ascontiguousarray(knn_idx[:, 1:]), np.ascontiguousarray(knn_dist[:, 1:]))
+    del knn_idx, knn_dist
+
+    t0 = time.time()
+    log(f"calibrating perplexity-{perplexity} affinities over {len(x):,} points")
+    aff = affinity.PerplexityBasedNN(
+        knn_index=index, perplexity=perplexity, n_jobs=n_jobs,
+        random_state=seed, verbose=True,
+    )
+    log(f"affinities done in {time.time()-t0:.0f}s, "
+        f"P {aff.P.shape} with {aff.P.nnz:,} nonzeros "
+        f"({aff.P.data.nbytes/1e9:.2f} GB of values)")
+    return aff
+
+
+def tsne_init_from_pca(pca_coords: np.ndarray, n_components: int,
+                       seed: int) -> np.ndarray:
+    """The initial layout t-SNE starts from, taken from the exact full-corpus PCA.
+
+    Same source as ``umap_init_from_pca`` and for the same reason - the exact
+    PCA is already built, so a second one would be wasted work - but scaled the
+    opposite way, and the difference is not cosmetic. UMAP wants its init
+    spread out (largest coordinate scaled to 10); t-SNE wants it collapsed
+    almost to a point, ``std = 1e-4``, and openTSNE logs a warning above 1e-2
+    because a large initial variance leaves the early-exaggeration phase with
+    nothing to do and converges poorly. ``initialization.rescale`` is openTSNE's
+    own helper for exactly this, and it is what ``initialization="pca"`` applies
+    internally, so handing it our coordinates gives the same treatment the
+    library would have given its own.
+
+    A PCA start rather than a random one is the Kobak-Berens recommendation and
+    is what makes t-SNE's global structure comparable to UMAP's here at all; a
+    random init would make the two maps disagree about large-scale arrangement
+    for reasons that have nothing to do with the data.
+
+    The jitter is the same guard ``umap_init_from_pca`` documents: GEO contains
+    resubmitted samples, so duplicate rows exist, and identical starting
+    positions give a zero gradient between them forever. openTSNE's own
+    ``initialization.pca`` adds jitter for this reason too.
+    """
+    from openTSNE import initialization
+
+    coords = np.array(pca_coords[:, :n_components], dtype=np.float64)
+    coords = initialization.rescale(coords)
+    rng = np.random.RandomState(seed)
+    coords += rng.normal(scale=1e-6, size=coords.shape)
+    return np.ascontiguousarray(coords)
+
+
+def run_tsne(affinities, init: np.ndarray, n_components: int, seed: int,
+             n_jobs: int) -> np.ndarray:
+    """t-SNE over every point in the corpus, from the shared affinity matrix.
+
+    This drives openTSNE's low-level ``TSNEEmbedding`` rather than ``TSNE.fit``,
+    but runs the identical two-phase schedule ``TSNE.fit`` runs - 250 iterations
+    at exaggeration 12 and momentum 0.8, then 500 unexaggerated - because the
+    only thing we need from the low level is the ability to hand *both* output
+    dimensionalities the same precomputed affinities. Sharing them is safe:
+    ``optimize`` applies exaggeration as ``P *= e`` and restores it with
+    ``P /= e`` in a finally block, and the round trip was measured on this
+    corpus's dtype at a relative error of 1.2e-16, which is float64 epsilon.
+    Rebuilding P for the 3-d fit instead would cost about 2 GB for nothing.
+
+    **The negative-gradient method is not a free choice, and it is why the 3-d
+    build costs what it does.** openTSNE's interpolation accelerator (FIt-SNE)
+    refuses more than two output dimensions outright - "Interpolation based
+    t-SNE for >2 dimensions is currently unsupported (and generally a bad
+    idea)" - so 2-d gets ``fft`` and 3-d must fall back to Barnes-Hut. FFT is
+    linear in the point count; Barnes-Hut is n log n with a far larger
+    constant, measured here at roughly 4x the per-iteration cost of FFT on
+    50,000 points before the scaling difference is applied at all.
+
+    ``learning_rate="auto"`` is passed through rather than resolved here so it
+    tracks the corpus size: openTSNE reads it per phase as
+    ``n_samples / exaggeration``, giving 78,547 while the exaggeration is on
+    and 942,563 after it, which is the Belkina et al. scaling that keeps a
+    corpus this size from needing far more iterations to settle.
+    """
+    from openTSNE import TSNEEmbedding
+
+    method = "fft" if n_components <= 2 else "bh"
+    t0 = time.time()
+    log(f"t-SNE-{n_components}d fit on all {len(init):,} points, "
+        f"perplexity={TSNE_PERPLEXITY}, {method}, cosine on 512-d")
+    emb = TSNEEmbedding(
+        init, affinities,
+        negative_gradient_method=method,
+        learning_rate="auto",
+        n_jobs=n_jobs,
+        random_state=seed,
+        verbose=True,
+    )
+    emb.optimize(n_iter=TSNE_EARLY_ITER, exaggeration=TSNE_EARLY_EXAGGERATION,
+                 momentum=TSNE_MOMENTUM, inplace=True)
+    emb.optimize(n_iter=TSNE_ITER, exaggeration=None,
+                 momentum=TSNE_MOMENTUM, inplace=True)
+    out = np.asarray(emb, dtype=np.float32)
+    log(f"t-SNE-{n_components}d done in {time.time()-t0:.0f}s")
+    del emb
+    return out
+
+
+def load_prior_stats(shape: dict) -> dict:
+    """Start from the previous build record, so skipping a stage does not erase it.
+
+    The three methods are independent stages and any of them can be skipped, so
+    a run that rebuilds only t-SNE must not drop the UMAP settings the control
+    rail reads back or the PCA spectrum ``validate_artifacts.py`` checks. Before
+    this the record was rebuilt from scratch every run, which was harmless only
+    while every run built everything.
+
+    The record is carried forward **only when it describes the same corpus**. A
+    different row count means every stage's numbers refer to something else, and
+    a half-stale record that still looks complete is worse than one that is
+    obviously fresh.
+    """
+    if not paths.PROJECTION_STATS_JSON.exists():
+        return dict(shape)
+    try:
+        prior = json.loads(paths.PROJECTION_STATS_JSON.read_text())
+    except (json.JSONDecodeError, OSError):
+        log("previous projection_stats.json is unreadable; starting a fresh record")
+        return dict(shape)
+    if not all(prior.get(k) == v for k, v in shape.items()):
+        log("previous projection_stats.json describes a different corpus; "
+            "starting a fresh record")
+        return dict(shape)
+    prior.update(shape)
+    return prior
+
+
 def write_coords(coords: np.ndarray, path: Path) -> None:
     cols = ["x", "y", "z"][: coords.shape[1]]
     df = pd.DataFrame({c: coords[:, i].astype(np.float32) for i, c in enumerate(cols)})
@@ -341,6 +527,19 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--archs4-limit", type=int, default=0, help="Debug: cap ARCHS4 rows.")
     ap.add_argument("--skip-umap", action="store_true")
+    ap.add_argument("--skip-tsne", action="store_true",
+                    help="Skip the t-SNE stage. It is the most expensive one in "
+                         "the build, because 3-d t-SNE cannot use the "
+                         "interpolation accelerator and falls back to "
+                         "Barnes-Hut; see run_tsne.")
+    ap.add_argument("--tsne-perplexity", type=int, default=TSNE_PERPLEXITY,
+                    help="t-SNE perplexity. The neighbour graph is built at "
+                         "3x this, which is openTSNE's own rule.")
+    ap.add_argument("--tsne-jobs", type=int, default=-1,
+                    help="Threads for the t-SNE optimization. Unlike the "
+                         "neighbour graph this is not a determinism knob - the "
+                         "gradient is summed, not raced - so it defaults to "
+                         "every core.")
     ap.add_argument("--densmap", action="store_true",
                     help="Fit densMAP instead of UMAP, writing to the same "
                          "coords_umap*.parquet names so a candidate cache can be "
@@ -381,8 +580,9 @@ def main() -> None:
             )
 
     total = n_archs4 + len(osdr_norm)
-    stats: dict = {"n_archs4": int(n_archs4), "n_osdr": int(len(osdr_norm)),
-                   "total": int(total)}
+    stats: dict = load_prior_stats({"n_archs4": int(n_archs4),
+                                    "n_osdr": int(len(osdr_norm)),
+                                    "total": int(total)})
 
     def save_stats() -> None:
         """Persist after every stage, so a later failure does not lose the earlier work."""
@@ -423,43 +623,105 @@ def main() -> None:
     save_stats()
     del components
 
-    # --- UMAP: fit on every point ------------------------------------------
-    if not args.skip_umap:
-        t_umap = time.time()
-        stats["umap_fit"] = "full corpus, no landmark subsample"
-        stats["umap_method"] = "densmap" if args.densmap else "umap"
-        stats["umap_neighbors"] = int(args.umap_neighbors)
-        stats["umap_metric"] = "cosine"
-        stats["umap_input"] = "raw 512-d L2-normalized"
-        stats["umap_init"] = "exact full-corpus PCA, scaled (not spectral)"
-        if args.densmap:
-            stats["dens_lambda"] = float(args.dens_lambda)
-
+    # --- The neighbour-based reductions: UMAP, then t-SNE -------------------
+    # Both need random access to every row while they fit, so the 1.93 GB
+    # normalized corpus is materialized once here and shared, rather than each
+    # stage paying for its own copy. It is dropped as soon as the last graph
+    # that needs it has been built, which is what keeps peak RSS during t-SNE's
+    # optimization down to the affinity matrix plus the embedding.
+    if not (args.skip_umap and args.skip_tsne):
         x = load_normalized_corpus(mm, n_archs4, osdr_norm, args.batch)
-        t_knn = time.time()
-        knn = build_knn(x, args.umap_neighbors, args.seed, args.knn_jobs)
-        stats["knn_seconds"] = round(time.time() - t_knn, 1)
-        stats["knn_jobs"] = int(args.knn_jobs)
-        save_stats()
 
-        t = time.time()
-        umap2 = run_umap(x, knn, 2, args.seed, args.umap_neighbors,
-                         umap_init_from_pca(pca3, 2, args.seed),
-                         densmap=args.densmap, dens_lambda=args.dens_lambda)
-        stats["umap2_seconds"] = round(time.time() - t, 1)
-        write_coords(umap2, paths.COORDS_UMAP2)
-        save_stats()
-        del umap2
+        if not args.skip_umap:
+            t_umap = time.time()
+            stats["umap_fit"] = "full corpus, no landmark subsample"
+            stats["umap_method"] = "densmap" if args.densmap else "umap"
+            stats["umap_neighbors"] = int(args.umap_neighbors)
+            stats["umap_min_dist"] = 0.1
+            stats["umap_metric"] = "cosine"
+            stats["umap_input"] = "raw 512-d L2-normalized"
+            stats["umap_init"] = "exact full-corpus PCA, scaled (not spectral)"
+            if args.densmap:
+                stats["dens_lambda"] = float(args.dens_lambda)
 
-        t = time.time()
-        umap3 = run_umap(x, knn, 3, args.seed, args.umap_neighbors,
-                         umap_init_from_pca(pca3, 3, args.seed),
-                         densmap=args.densmap, dens_lambda=args.dens_lambda)
-        stats["umap3_seconds"] = round(time.time() - t, 1)
-        write_coords(umap3, paths.COORDS_UMAP3)
-        save_stats()
-        del umap3, knn, x
-        stats["umap_seconds"] = round(time.time() - t_umap, 1)
+            t_knn = time.time()
+            knn = build_knn(x, args.umap_neighbors, args.seed, args.knn_jobs)
+            stats["knn_seconds"] = round(time.time() - t_knn, 1)
+            stats["knn_jobs"] = int(args.knn_jobs)
+            save_stats()
+
+            t = time.time()
+            umap2 = run_umap(x, knn, 2, args.seed, args.umap_neighbors,
+                             umap_init_from_pca(pca3, 2, args.seed),
+                             densmap=args.densmap, dens_lambda=args.dens_lambda)
+            stats["umap2_seconds"] = round(time.time() - t, 1)
+            write_coords(umap2, paths.COORDS_UMAP2)
+            save_stats()
+            del umap2
+
+            t = time.time()
+            umap3 = run_umap(x, knn, 3, args.seed, args.umap_neighbors,
+                             umap_init_from_pca(pca3, 3, args.seed),
+                             densmap=args.densmap, dens_lambda=args.dens_lambda)
+            stats["umap3_seconds"] = round(time.time() - t, 1)
+            write_coords(umap3, paths.COORDS_UMAP3)
+            save_stats()
+            del umap3, knn
+            stats["umap_seconds"] = round(time.time() - t_umap, 1)
+            save_stats()
+
+        if not args.skip_tsne:
+            t_tsne = time.time()
+            perp = int(args.tsne_perplexity)
+            stats["tsne_fit"] = "full corpus, no landmark subsample"
+            stats["tsne_perplexity"] = perp
+            stats["tsne_knn"] = 3 * perp
+            stats["tsne_metric"] = "cosine"
+            stats["tsne_input"] = "raw 512-d L2-normalized"
+            stats["tsne_init"] = "exact full-corpus PCA, rescaled to std 1e-4"
+            stats["tsne_early_exaggeration"] = TSNE_EARLY_EXAGGERATION
+            stats["tsne_early_iter"] = TSNE_EARLY_ITER
+            stats["tsne_iter"] = TSNE_ITER
+            stats["tsne_momentum"] = TSNE_MOMENTUM
+            stats["tsne_learning_rate"] = "auto (n/exaggeration)"
+            # Recorded per dimensionality because they genuinely differ: the
+            # interpolation accelerator refuses more than two output
+            # dimensions, so the 3-d map is a Barnes-Hut layout and the 2-d one
+            # is not. A reader comparing the two should be told that.
+            stats["tsne2_negative_gradient"] = "FIt-SNE"
+            stats["tsne3_negative_gradient"] = "Barnes-Hut"
+            stats["tsne_jobs"] = int(args.tsne_jobs)
+
+            t = time.time()
+            aff = build_tsne_affinities(x, perp, args.seed, args.knn_jobs,
+                                        args.tsne_jobs)
+            # Includes the neighbour graph, which is the bulk of it.
+            stats["tsne_affinity_seconds"] = round(time.time() - t, 1)
+            save_stats()
+
+            # From here t-SNE needs only P and the PCA init, and P is the
+            # largest allocation in the whole build, so the corpus goes now
+            # rather than at the end of the block.
+            del x
+
+            t = time.time()
+            tsne2 = run_tsne(aff, tsne_init_from_pca(pca3, 2, args.seed), 2,
+                             args.seed, args.tsne_jobs)
+            stats["tsne2_seconds"] = round(time.time() - t, 1)
+            write_coords(tsne2, paths.COORDS_TSNE2)
+            save_stats()
+            del tsne2
+
+            t = time.time()
+            tsne3 = run_tsne(aff, tsne_init_from_pca(pca3, 3, args.seed), 3,
+                             args.seed, args.tsne_jobs)
+            stats["tsne3_seconds"] = round(time.time() - t, 1)
+            write_coords(tsne3, paths.COORDS_TSNE3)
+            save_stats()
+            del tsne3, aff
+            stats["tsne_seconds"] = round(time.time() - t_tsne, 1)
+        else:
+            del x
 
     save_stats()
     log(f"ALL DONE. stats -> {paths.PROJECTION_STATS_JSON.name}")

@@ -163,7 +163,9 @@ def _osdr_traces(fig):
 
 
 def test_figure_builds_for_every_control_combination(corpus):
-    for method in ("pca", "umap"):
+    # Driven off the registry rather than a literal list, so a projection added
+    # to data.METHODS cannot ship without ever having been drawn.
+    for method in data.METHODS:
         for dims in ("2d", "3d"):
             for color_by in ("species", "flight_status", "tissue", "study"):
                 fig, legend, badges = render.build_figure(

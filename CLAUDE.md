@@ -50,8 +50,15 @@ Three features that appear in older prose are **gone and must not be reintroduce
 Where that history is instructive it is recorded as history, clearly marked.
 
 Two approximations that appear in older prose are also gone: PCA is no longer fit on a 60,000-point subsample and UMAP is no longer a landmark fit plus `.transform()`.
-**Both reductions are now fit on every one of the 942,563 points.**
+**All three reductions are now fit on every one of the 942,563 points.**
 The cost that justified the approximations turned out not to exist, and both measurements are in `REFERENCE.md` section 4.
+
+**There are three projections, not two.** t-SNE joined PCA and UMAP on 2026-07-23, built with `openTSNE`, and prose saying "both reductions" or "the two shipped methods" predates it.
+It is not a new idea: `progress.md`'s 2026-07-21 evaluation scored ten candidates and concluded that if a third method were ever added it should be openTSNE at perplexity 30 with PCA initialization, which is exactly what shipped.
+
+**UMAP's `n_neighbors` went back to 30 on 2026-07-23**, reversing the 15 that section "UMAP settings, chosen by measurement" argued for.
+That is a real reversal and the reason is recorded rather than quietly overwritten: 15 was chosen on local metrics alone (kNN recall and tissue purity), and it bought them by giving up the large-scale arrangement those metrics do not score, which showed up as visibly worse species separation on the real map.
+The numbers that favoured 15 were not wrong; they were measuring the wrong half.
 
 ## Read these first
 
@@ -64,13 +71,13 @@ When plans change, update these docs so they reflect what was actually built, no
 ## Architecture: the offline/online split is the load-bearing decision
 
 Everything expensive is precomputed once and cached; the app only ever loads artifacts.
-UMAP over 942,563 points is a job measured in tens of minutes and gigabytes, which is not something to do inside a callback, and it is what keeps the app responsive.
-Do not move model inference or UMAP into the serving app.
+UMAP over 942,563 points is a job measured in tens of minutes and gigabytes, and t-SNE over the same points is measured in hours, which is not something to do inside a callback, and it is what keeps the app responsive.
+Do not move model inference, UMAP, or t-SNE into the serving app.
 
 ```
 OFFLINE (precompute/, run once -> cache/)        ONLINE (app.py /map, loads artifacts only)
 embed_osdr.py        -> osdr embeddings npy       coord parquets + points_meta + osdr_metadata
-build_projections.py -> pca/umap coord parquets   + archs4_metadata                (80.8 MB opened)
+build_projections.py -> pca/umap/tsne coord pqs   + archs4_metadata + projection_stats
                      -> points_meta identity      renders every point as go.Scattergl
                      -> archs4_geo sidecar         colorby.py decides coverage; render.py draws it
 fetch_archs4_meta.py -> archs4_metadata parquet
@@ -91,18 +98,21 @@ bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, 
                          figures, retrieval, panels, layout, callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable
 manifold/preflight.py    PRECOMPUTE_REQUIRED vs APP_REQUIRED, LFS pointer guard
-manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, archs4 tissue
+manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, archs4
+                         tissue, and the projection_stats build record the rail reads
 manifold/tissue.py       the shared tissue vocabulary (canonical_tissue, coalesce_tissue)
 manifold/colorby.py      the coverage-aware color-by registry; the map's honesty layer
 manifold/render.py       layered figure build (ARCHS4 cloud, OSDR overlay)
 manifold/sampling.py     stratified + viewport-aware ARCHS4 subsampling
-manifold/layout.py       two-column shell, control rail, floating legend
+manifold/layout.py       two-column shell, control rail, floating legend, the
+                         METHOD_LABELS registry and the projection-parameter readout
 manifold/callbacks.py    controls -> figure, zoom -> level of detail, coverage readout
 manifold/theme.py        chrome tokens, dark plot canvas, validated categorical palette
 manifold/bridge_rna.py   thin import shim for the reusable Bridge RNA functions
 ```
 
-`umap`, `pynndescent`, and `sklearn` are imported only by `precompute/`, and nothing in the serving path touches them.
+`umap`, `openTSNE`, `pynndescent`, and `sklearn` are imported only by `precompute/`, and nothing in the serving path touches them.
+`tests/test_app.py::test_the_serving_app_does_not_import_the_scientific_stack` pins that by parsing module-scope imports, and `openTSNE` is in its list.
 `PIL` is no longer a dependency of anything, because the density raster was the only thing that used it.
 
 The map's dependency surface is still `dash`, `plotly`, `numpy`, `pandas`, `pyarrow` and nothing scientific - it draws precomputed coordinates and opens no embeddings.
@@ -120,6 +130,28 @@ Violating them produces output that looks fine but is scientifically wrong.
 4. **Verify Git LFS pointers resolve before any run that opens one.** The checkpoint and memmap are LFS objects and can arrive as stub pointers. `manifold/preflight.py` guards `precompute/`; the **map view** opens no LFS object at all, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` there have no overlap. The **retrieval view** does open the memmap on every cached search, and is guarded separately by `bridge_rna.preflight.preflight_retrieval_requirements`, whose LFS-pointer check runs at layout time and raises the setup banner. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
 5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must draw those 940,455 points as a deliberately faint context cloud in a single color that is not in the categorical palette (`theme.ARCHS4_CONTEXT`), at 0.35 opacity, with no legend row. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4". This used to have a second branch, in which the ARCHS4 layer drew nothing at all and a precomputed density raster carried the shape; the raster is gone, so the context cloud is now the only answer and it applies in 2-D and 3-D alike.
 6. **Both corpora share one tissue vocabulary.** `manifold/tissue.canonical_tissue` is the only entry point, used by `precompute/fetch_archs4_meta.py` for ARCHS4 and by `manifold/data.osdr_tissue` for OSDR. Two tissue color-bys wearing one name would each leave the other corpus grey, which is invariant 5 by another route.
+7. **The parameter readout must describe the coordinates on screen, never the code's defaults.** `manifold/layout.projection_params` reads `cache/projection_stats.json` through `data.projection_stats()` and nothing else. Duplicating the constants into the serving app would let the rail stay confident while the cache went stale, which is the same failure as the retrieval banner that announced every cached result as subprocess output. A key the record does not carry drops its chip; it never renders a blank slot or a guess.
+
+## The three projections
+
+`manifold/data.METHODS` is the registry and `manifold/layout.METHOD_LABELS` is the order the rail offers them in.
+Adding a fourth is one line in each, plus a stage in `build_projections.py`; the pills, the disabled state, the default, the validator's coordinate walk, and two test loops are all derived rather than hand-listed, which is the point.
+
+| method | what it is | fit cost on 942,563 points |
+| --- | --- | --- |
+| PCA | exact eigendecomposition, linear, honest about global magnitude | ~6 s |
+| UMAP | `n_neighbors=30`, `min_dist=0.1`, cosine, PCA init | ~14 min |
+| t-SNE | openTSNE, perplexity 30, cosine, PCA init rescaled to std 1e-4 | hours, almost all of it 3-D |
+
+Three things about t-SNE are worth knowing before touching that stage.
+
+**Its neighbour graph is not UMAP's, deliberately.** t-SNE wants `3 * perplexity` neighbours where UMAP wants `n_neighbors`, so each builds its own through the same `build_knn` call rather than sharing a padded one. Slicing a k=90 graph down to k=30 is not the graph NN-descent would have built at k=30, and the graph is the artifact every coordinate derives from.
+
+**The self-column slice is load-bearing.** pynndescent returns each point's own index in column 0; openTSNE's own index strips it before returning, and `PrecomputedNeighbors` passes through whatever it is handed. So the graph is built at `3 * perplexity + 1` and sliced with `[:, 1:]`. Leaving self in would hand every point a zero-distance neighbour, which is not what a perplexity of 30 means.
+
+**2-D and 3-D are built by different algorithms, and the UI says so.** openTSNE's interpolation accelerator refuses more than two output dimensions outright, so 2-D is FIt-SNE and 3-D is Barnes-Hut. That is why `projection_params` takes `dims`, why `projection_stats.json` records `tsne2_negative_gradient` and `tsne3_negative_gradient` separately, and why it is the one chip that differs between the two.
+
+The 2-D and 3-D fits **do** share one affinity matrix, which is the largest allocation in the build at roughly 2 GB. That is safe because `optimize` applies exaggeration as `P *= e` and restores it with `P /= e` in a finally block; the round trip was measured on this dtype at a relative error of 1.2e-16, which is float64 epsilon.
 
 ## The color-by system
 
@@ -224,17 +256,24 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 
 ```bash
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/embed_osdr.py         # OSDR embeddings, gene-digest gated. Hours; resumable.
-/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP coords. ~10.5 min.
+/Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP + t-SNE. See the timing note below.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 194 tests, about two seconds
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 29 browser checks, about a minute
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 207 tests, about three seconds
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 36 browser checks, about a minute
 ```
 
-The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--densmap`, `--dens-lambda`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.
-Three flags that appear in older prose no longer exist: `--skip-hnsw` (there is no index to skip), `--density-only` (there is no raster to re-render), and `--pca-fit-sample` / `--umap-fit-sample` (neither reduction is fit on a subsample any more).
+**The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.
+`--skip-tsne` exists for exactly this reason, and skipping it is not a broken build: the t-SNE pill is shown disabled, the validator prints `SKIP` rather than failing, and everything else works.
+Measured stage timings are in `REFERENCE.md` section 4.
+
+The real flags are worth checking against `--help` before quoting them: `embed_osdr.py` takes `--device`, `--batch-size`, `--limit`, `--no-resume`, `--rebuild-expression`, `--metadata-only`; `build_projections.py` takes `--umap-neighbors`, `--tsne-perplexity`, `--tsne-jobs`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--skip-tsne`, `--densmap`, `--dens-lambda`; `fetch_archs4_meta.py` takes `--limit`; `validate_artifacts.py` takes `--mixing`, `--quality`, `--compare`.
+Three flags that appear in older prose no longer exist: `--skip-hnsw` (there is no index to skip), `--density-only` (there is no raster to re-render), and `--pca-fit-sample` / `--umap-fit-sample` (no reduction is fit on a subsample any more).
+
+Each method is an independent stage and `projection_stats.json` is **merged**, not rewritten, so rebuilding one does not erase what the others recorded.
+The merge is abandoned and the record started fresh if the corpus row counts changed, because a half-stale record that still looks complete is worse than one that is obviously new.
 
 There is no multi-gigabyte download anywhere in this pipeline.
 The metadata step is optional: without `cache/archs4_metadata.parquet` the app still runs, the Tissue option is shown disabled with the command that enables it, and Species remains the whole-map default.
@@ -253,3 +292,10 @@ The eleven-hue categorical palette in `manifold/theme.py` was validated with the
 Two greys sit at the neutral end because "Other" and "Unknown" are different answers, with Unknown the dimmer so absence recedes furthest.
 The full token list is in `REFERENCE.md` section 9.
 Selection tools are removed from the modebar (`select2d` and `lasso2d` both, and `dragmode` is `pan`) because no selection feature exists and a marquee that does nothing is worse than no marquee.
+
+The rail has one rule about where a fact goes, and both readouts follow it: **the fact that qualifies a control sits directly under that control.**
+`.bm-coverage` hangs under the color-by dropdown and `.bm-params` hangs under the Projection pills, at the same 9 px offset so the two line up.
+Neither belongs in `.bm-plot-badges`, which reports what is drawn *right now* and changes on every zoom, while these describe how the coordinates were built.
+Within `.bm-params` only the measured payload is set apart, in mono tabular figures at a half-step down, because "cosine" in a numeral font is noise while `30` and `942,563` want to sit on one grid.
+
+`.bm-hint` was moved from `--text-muted` to `--text-secondary` at the same time: `#8a99ac` on the white panel measures 2.90:1, which fails WCAG AA at the 11.5 px every hint on the rail uses, and `--text-secondary` is 5.47:1 while still receding behind the controls.

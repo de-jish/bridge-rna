@@ -154,7 +154,8 @@ def test_both_halves_register_their_callbacks(app):
 def test_the_required_controls_exist(map_view):
     ids = {getattr(c, "id", None) for c in _walk(map_view)}
     for required in ("manifold-graph", "color-by", "coverage", "color-by-hint",
-                     "method", "dims", "layers", "budget", "plot-badges", "legend"):
+                     "method", "method-params", "dims", "layers", "budget",
+                     "plot-badges", "legend"):
         assert required in ids, f"layout is missing #{required}"
 
 
@@ -202,6 +203,102 @@ def test_switching_dimensionality_clamps_an_out_of_range_budget(corpus):
     assert layout.resolve_budget("3d", cap) == cap
     # Coming back to 2-D, a 3-D-only value resets to the 2-D default.
     assert layout.resolve_budget("2d", cap) == n_archs4
+
+
+# --- The Projection control and its parameter readout ------------------------
+
+def test_every_registered_projection_is_offered(corpus):
+    """The pills are derived from the registry, not hand-listed beside it."""
+    options = layout.method_options()
+    assert [o["value"] for o in options] == [k for k, _ in layout.METHOD_LABELS]
+    assert set(o["value"] for o in options) == set(data.METHODS)
+    assert not any(o["disabled"] for o in options), "the fixture builds all three"
+
+
+def test_an_unbuilt_projection_is_disabled_not_hidden(corpus, monkeypatch,
+                                                      tmp_path):
+    """Hiding it would make the app look like it never had the feature."""
+    missing = tmp_path / "nope.parquet"
+    monkeypatch.setitem(data.METHODS, "tsne", {"2d": missing, "3d": missing})
+    options = layout.method_options()
+    tsne = next(o for o in options if o["value"] == "tsne")
+    assert tsne["disabled"] is True
+    assert "tsne" in {o["value"] for o in options}, "it must still be listed"
+
+
+def test_the_default_projection_skips_past_unbuilt_ones(corpus, monkeypatch,
+                                                        tmp_path):
+    missing = tmp_path / "nope.parquet"
+    assert layout.default_method() == "umap"
+    monkeypatch.setitem(data.METHODS, "umap", {"2d": missing, "3d": missing})
+    assert layout.default_method() == "tsne"
+    monkeypatch.setitem(data.METHODS, "tsne", {"2d": missing, "3d": missing})
+    assert layout.default_method() == "pca"
+
+
+def test_projection_params_report_the_build_record(corpus):
+    """The rail states what the build actually did, read off its record."""
+    stats = data.projection_stats()
+    flat = {p + v + s for p, v, s in layout.projection_params("umap", "2d")}
+    assert any(f"n_neighbors={stats['umap_neighbors']}" == t for t in flat)
+    assert any("cosine" == t for t in flat)
+    assert any(f"{stats['total']:,}" in t for t in flat), "the corpus count"
+
+    pca = {p + v + s for p, v, s in layout.projection_params("pca", "2d")}
+    assert any("eigendecomposition" in t for t in pca)
+    assert any("%" in t for t in pca), "PC1's share"
+
+
+def test_tsne_params_name_the_gradient_method_that_actually_ran(corpus):
+    """openTSNE's interpolation accelerator refuses 3 dimensions, so the two
+    maps are built by different algorithms and the rail must not claim one."""
+    two = {p + v + s for p, v, s in layout.projection_params("tsne", "2d")}
+    three = {p + v + s for p, v, s in layout.projection_params("tsne", "3d")}
+    assert "FIt-SNE" in two and "Barnes-Hut" not in two
+    assert "Barnes-Hut" in three and "FIt-SNE" not in three
+    # Everything else about the fit is shared, so only that one chip differs.
+    assert two - {"FIt-SNE"} == three - {"Barnes-Hut"}
+
+
+def test_projection_params_drop_what_the_record_does_not_carry(corpus,
+                                                               monkeypatch):
+    """An older cache shows fewer parameters, never a blank slot."""
+    monkeypatch.setattr(data, "projection_stats", lambda: {"total": 10})
+    params = layout.projection_params("umap", "2d")
+    assert params == [("fit on all ", "10", " points")]
+    assert all(v for _, v, _ in params), "no chip may render an empty value"
+
+
+def test_projection_params_survive_a_cache_with_no_record(corpus, monkeypatch):
+    """It is a label, not a correctness gate: no record means no chips."""
+    monkeypatch.setattr(data, "projection_stats", lambda: {})
+    for method in data.METHODS:
+        for dims in ("2d", "3d"):
+            assert layout.projection_params(method, dims) == []
+            assert layout.projection_params_children(method, dims) == []
+
+
+def test_projection_stats_returns_empty_for_a_missing_file(tmp_path,
+                                                           monkeypatch):
+    monkeypatch.setattr(paths, "PROJECTION_STATS_JSON", tmp_path / "gone.json")
+    data.projection_stats.cache_clear()
+    try:
+        assert data.projection_stats() == {}
+    finally:
+        data.projection_stats.cache_clear()
+
+
+def test_projection_stats_returns_empty_for_a_corrupt_file(tmp_path,
+                                                           monkeypatch):
+    """A truncated write must not take the map down for the sake of a label."""
+    bad = tmp_path / "projection_stats.json"
+    bad.write_text('{"total": 942563')  # truncated mid-object
+    monkeypatch.setattr(paths, "PROJECTION_STATS_JSON", bad)
+    data.projection_stats.cache_clear()
+    try:
+        assert data.projection_stats() == {}
+    finally:
+        data.projection_stats.cache_clear()
 
 
 def test_every_output_has_exactly_one_writer(app):
@@ -300,7 +397,7 @@ def test_the_serving_app_does_not_import_the_scientific_stack():
     """
     import ast
 
-    heavy = {"torch", "umap", "sklearn", "pynndescent"}
+    heavy = {"torch", "umap", "sklearn", "pynndescent", "openTSNE"}
     offenders = []
     files = (list((paths.REPO_ROOT / "bridge_rna").glob("*.py"))
              + list((paths.REPO_ROOT / "manifold").glob("*.py"))

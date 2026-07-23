@@ -55,6 +55,13 @@ from manifold import paths  # noqa: E402
 PC1_PRENORM_PCT = 57.8
 PC1_CEILING_PCT = 50.0
 
+# Every coordinate set the build can produce, in one place. `validate_structure`
+# and `validate_quality` both walk this, so a new projection is registered once
+# rather than in two lists that can drift apart.
+_COORD_PATHS = [("pca2", paths.COORDS_PCA2), ("pca3", paths.COORDS_PCA3),
+                ("umap2", paths.COORDS_UMAP2), ("umap3", paths.COORDS_UMAP3),
+                ("tsne2", paths.COORDS_TSNE2), ("tsne3", paths.COORDS_TSNE3)]
+
 _failures: list[str] = []
 _warnings: list[str] = []
 
@@ -97,10 +104,18 @@ def validate_structure() -> tuple[int, np.ndarray]:
           f"explained variance sums to 1 ({spectrum.sum():.9f}), so the fit was exact")
 
     print("\n=== 2. coordinate parquets ===")
-    for name, p in [("pca2", paths.COORDS_PCA2), ("pca3", paths.COORDS_PCA3),
-                    ("umap2", paths.COORDS_UMAP2), ("umap3", paths.COORDS_UMAP3)]:
+    for name, p in _COORD_PATHS:
+        method = name[:-1]  # "umap2" -> "umap"
+        # A stage that was skipped never wrote its `<method>_fit` marker, so its
+        # coordinates are legitimately absent and saying so is not a failure. A
+        # stage that *ran* and left no parquet is a real one. PCA has no skip
+        # flag, so it is always expected.
+        expected = method == "pca" or f"{method}_fit" in stats
         if not p.exists():
-            check(False, f"{name}: {p.name} exists")
+            if expected:
+                check(False, f"{name}: {p.name} exists")
+            else:
+                print(f"  SKIP {name}: not built (no {method}_fit in the record)")
             continue
         a = pd.read_parquet(p).to_numpy(dtype=np.float64)
         check(len(a) == total, f"{name}: {len(a)} rows == {total}")
@@ -426,14 +441,16 @@ def validate_quality(total: int, compare: Path | None) -> None:
              "against on this corpus")
         return
 
-    # Only UMAP is gated. PCA-2D is knowingly a weak view - PC1 alone is 41% of
-    # the variance, so it is mostly one axis plus noise - and it is kept as a
-    # fast linear sanity layer, not as the map. Failing a build because the
-    # crudest projection is crude would be a gate nobody could act on.
+    # The two neighbour embeddings are gated; PCA is not. PCA-2D is knowingly a
+    # weak view - PC1 alone is 41% of the variance, so it is mostly one axis
+    # plus noise - and it is kept as a fast linear sanity layer, not as the map.
+    # Failing a build because the crudest projection is crude would be a gate
+    # nobody could act on. UMAP and t-SNE are both offered as *the* map, so a
+    # build where either stopped standing for the 512-d space is a real failure.
     for (set_name, name), (recall, purity, share) in sorted(results.items()):
         if set_name != "cache":
             continue
-        gated = name.startswith("umap")
+        gated = name.startswith(("umap", "tsne"))
         report = check if gated else (
             lambda cond, msg: None if cond else warn(msg + " (not gated: PCA is "
                                                      "a linear sanity layer)"))
@@ -444,10 +461,6 @@ def validate_quality(total: int, compare: Path | None) -> None:
         report(recall > null_recall * 20,
                f"{name}: {QUALITY_K}-NN recall {recall:.4f} is well above the "
                f"random-neighbour rate ({null_recall:.6f})")
-
-
-_COORD_PATHS = [("pca2", paths.COORDS_PCA2), ("pca3", paths.COORDS_PCA3),
-                ("umap2", paths.COORDS_UMAP2), ("umap3", paths.COORDS_UMAP3)]
 
 
 def main() -> None:

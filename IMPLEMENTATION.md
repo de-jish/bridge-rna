@@ -22,7 +22,7 @@ The living status log and the open questions live in `progress.md`.
 ### Goals
 
 The tool must reduce and plot both corpora in a single shared 2D and 3D coordinate space so OSDR and ARCHS4 points are directly comparable.
-It must offer both a fast linear method (PCA) and a structure-preserving nonlinear method (UMAP), and be explicit about when each one lies.
+It must offer a fast linear method (PCA) and structure-preserving nonlinear ones (UMAP, and t-SNE since 2026-07-23), and be explicit about when each one lies.
 
 It must color **both** corpora by real biology, not one corpus by biology and the other by nothing.
 This is a hard requirement and it is the goal that shaped the current design.
@@ -81,13 +81,13 @@ This split is the single most important architectural decision, and it is forced
 OFFLINE (precompute/, run once -> cache/)      ONLINE (app.py /map, loads artifacts only)
 ---------------------------------------        ----------------------------------------------
 embed_osdr.py                                  app.py
-  OSDR counts -> 2,108 x 512 embeddings          coords_{pca,umap}{2,3}.parquet
+  OSDR counts -> 2,108 x 512 embeddings          coords_{pca,umap,tsne}{2,3}.parquet
   cache/osdr_sample_embeddings.float32.npy       points_meta.parquet   (identity table)
   cache/osdr_metadata.parquet                    osdr_metadata.parquet (OSDR labels)
                                                  archs4_metadata.parquet (GEO join)
 build_projections.py
-  L2-normalize, then two full-corpus fits       renders every point as go.Scattergl
-  -> {pca2, pca3, umap2, umap3} parquets        colorby registry -> one label array
+  L2-normalize, then three full-corpus fits     renders every point as go.Scattergl
+  -> {pca,umap,tsne}{2,3} parquets              colorby registry -> one label array
   -> points_meta.parquet, archs4_geo.parquet    stratified sample + viewport LOD
 
 fetch_archs4_meta.py
@@ -147,7 +147,7 @@ ARCHS4 embeddings are consumed directly from the existing memmap; nothing is reg
 
 OSDR and ARCHS4 are reduced together so their coordinates are comparable.
 Global point order is fixed as `[all ARCHS4 in global_index order, then all OSDR in row order]`, and every artifact shares it, so a point index addresses the same sample in every table.
-The reducers are fit on a stratified subsample of the union, with all OSDR points always included in the fit, and then used to transform the full corpus.
+(Superseded 2026-07-22: every reducer is now fit on all 942,563 points directly. This paragraph describes the first build's landmark pattern, which no longer exists; see section 5.)
 
 ### 4.4 Comparability across the two corpora
 
@@ -232,7 +232,7 @@ Neither assumption survived being measured, and both are recorded in section 5.2
 
 An intermediate PCA-50 step also used to sit between normalization and UMAP.
 It was removed earlier, on the measurement in `run_umap`: reducing to 50 components first discarded the 4.9% of variance those components do not carry, and cost 12% of local fidelity against feeding UMAP the raw 512-d vectors under cosine.
-So the spine is now two independent reductions of the same normalized 512-d corpus rather than a chain.
+So the spine is now three independent reductions of the same normalized 512-d corpus rather than a chain.
 
 ### 5.2 PCA, exact over every point
 
@@ -267,7 +267,7 @@ Measured on the real corpus, on a 10-core M4 with 16 GB of RAM:
 | stage | cost |
 | --- | --- |
 | materialize the normalized 942,563 x 512 corpus | 2 s, 1.93 GB resident |
-| k=15 cosine neighbour graph, `n_jobs=1` | 115 s |
+| k=30 cosine neighbour graph, `n_jobs=1` | 127-139 s (it was 115 s at the k=15 the build used until 2026-07-23) |
 | UMAP 2-d layout | see `REFERENCE.md` section 4 |
 | UMAP 3-d layout | see `REFERENCE.md` section 4 |
 
@@ -278,11 +278,40 @@ UMAP itself forces `n_jobs=1` whenever `random_state` is set (`umap_.py:1952`), 
 
 The app loads these coordinates and never invokes UMAP.
 
+`n_neighbors` is 30 as of 2026-07-23, reverting the 15 that section 5.3 shipped for two days.
+The reversal and, more importantly, why the measurement that chose 15 could not have caught the problem, are in `REFERENCE.md` under "n_neighbors back to 30".
+The short version: both metrics in that experiment were local, `n_neighbors` is the knob that trades global structure for local structure, and so the experiment could only ever have favoured the smaller value.
+
+### 5.3b t-SNE, the third reduction
+
+Added 2026-07-23, and not a new idea: the 2026-07-21 evaluation in `progress.md` scored ten candidate methods on a 60,000-point subsample and concluded that *if* a third were ever added it should be openTSNE at perplexity 30 with PCA initialization.
+On that evaluation it was the only candidate to beat UMAP on local fidelity (0.581 against 0.426) and on biological fidelity (0.668 against 0.646) at the same time, with global fidelity 2.6x UMAP's.
+This is that recommendation executed at full corpus scale rather than a fresh guess.
+
+Four design points, each of which had a wrong-looking alternative.
+
+**openTSNE, not `sklearn.manifold.TSNE`.** Two disqualifications rather than preferences. sklearn has no interpolation accelerator, so a 942,563-point 2-D fit is impractical rather than merely slow; and it cannot accept a precomputed neighbour graph, which is the thing that lets t-SNE reuse the build's existing NN-descent call instead of introducing a second, differently-seeded neighbour search.
+
+**Its own graph, at k = 3 x perplexity.** t-SNE wants 90 neighbours where this UMAP wants 30, so each method builds its own through the same `build_knn` function. The tempting alternative - build k=90 once and slice it down to 30 for UMAP - is wrong: a k=90 NN-descent graph sliced to 30 is not the graph NN-descent would have built at k=30, and the graph is the artifact every downstream coordinate derives from.
+
+**One affinity matrix for both output dimensionalities.** P is the largest allocation in the whole build at roughly 2 GB, and it depends on the input space and the perplexity but never on `n_components` - the same argument `precomputed_knn` makes for UMAP. Sharing it is safe because `optimize` applies exaggeration as `P *= e` and restores it with `P /= e` in a finally block; that round trip was measured on this dtype at a relative error of 1.2e-16, which is float64 epsilon.
+
+**2-D and 3-D are genuinely different algorithms.** openTSNE's FIt-SNE interpolation refuses more than two output dimensions outright, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant. This is not a detail to bury: it is why the 3-D fit dominates the build's wall clock, why `projection_stats.json` records `tsne2_negative_gradient` and `tsne3_negative_gradient` separately, and why the rail's parameter readout takes the dimensionality as an input.
+
+The initialization mirrors UMAP's - the exact full-corpus PCA, already built - but scaled the opposite way, and the difference is not cosmetic. UMAP wants its init spread out, largest coordinate at 10; t-SNE wants it collapsed to `std = 1e-4`, and openTSNE warns above 1e-2 because a large initial variance leaves early exaggeration with nothing to do. Using PCA rather than a random start is the Kobak-Berens recommendation, and it is also what makes t-SNE's global arrangement comparable to UMAP's here at all.
+
 ### 5.4 Honesty about UMAP distances
 
 UMAP preserves local neighborhoods, not global distances.
 Cluster separation and cluster sizes in a UMAP plot are not quantitatively meaningful, and the gap between two blobs does not measure how different they are.
 The control rail used to say so, in those words, directly under the projection toggle; that microcopy was removed - a user who reaches a UMAP/PCA toggle is assumed to know what UMAP is - and the caveat now lives here and in the README rather than on the rail.
+
+t-SNE carries the same caveat and one more of its own, both measured on this corpus in the 2026-07-21 evaluation rather than inherited from folklore.
+It fills the plane as a disc, so whitespace between clusters carries even less meaning than UMAP's, where islands at least suggest separation.
+And it separates the two corpora *more* than UMAP does - 2.2% shared bins against 8.9% - which makes it the worst of the three for the one question this app exists to ask, whether an OSDR sample sits among ARCHS4 ones. Those caveats are in the README; the rail states parameters, not warnings.
+
+What the rail does state, since 2026-07-23, is how the projection on screen was actually fit: `n_neighbors=30 · min_dist=0.1 · cosine · PCA init · fit on all 942,563 points`, read back from `projection_stats.json` rather than from constants in the serving code.
+That direction of dependency is the whole point. A rail reciting what the build *would* have done stays confident while the cache goes stale, which is the same failure as the retrieval banner that announced every cached result as subprocess output.
 
 That honesty is now a constraint on what the tool is willing to *do*, not only on what it says.
 The map is a picture, so the tool draws pictures: coordinates, colors, and density.
@@ -517,7 +546,7 @@ Every expensive step (model inference, PCA, UMAP) is precomputed and cached, and
 This is forced by the measured cost and is what makes the app responsive.
 The tradeoff is a build step and cache management, which is the right trade for a 943k-point tool.
 
-**Fit both reductions on the whole corpus, having checked what that actually costs.**
+**Fit every reduction on the whole corpus, having checked what that actually costs.**
 The first build subsampled both: `IncrementalPCA` on 60,000 points, UMAP on a 122,563-point landmark set with the remaining 819,999 pushed through `.transform()`.
 Both approximations were adopted from estimates rather than measurements, and both estimates were wrong.
 Exact full-corpus PCA is a single streaming pass that costs 6 s, and a direct UMAP fit on all 942,563 points is a job measured in tens of minutes, not the "hours" this document asserted for its entire first life.
@@ -597,7 +626,7 @@ Bridge-RNA/
     callbacks.py             # color-by, coverage readout, layers, method, zoom LOD, legend filter
   precompute/
     embed_osdr.py            # OSDR counts -> 2,108 x 512 embeddings (loads torch), resumable
-    build_projections.py     # L2 -> exact full-corpus PCA + full-corpus UMAP -> 4 coord parquets
+    build_projections.py     # L2 -> exact PCA + full-corpus UMAP + t-SNE -> 6 coord parquets
     fetch_archs4_meta.py     # sigpy API -> per-GSM series/title/source/characteristics + tissue
     validate_artifacts.py    # objective build gate: structure, invariant 2, mixing, projection quality
   tests/

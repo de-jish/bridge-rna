@@ -137,7 +137,7 @@ def build_bridge_rna_stub(root: Path, n_archs4: int,
 
 
 def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
-                  with_umap) -> dict:
+                  with_umap, with_tsne) -> dict:
     """Write the coordinate and identity artifacts.
 
     Coordinates are a genuine PCA of the L2-normalized joint corpus rather than
@@ -179,6 +179,7 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
     stats: dict = {"n_archs4": n_archs4, "n_osdr": n_osdr, "total": total}
     pca = PCA(n_components=3, random_state=0).fit(joint)
     coords3 = pca.transform(joint).astype(np.float32)
+    stats["pca_fit"] = "exact, full corpus (streaming second moment)"
     stats["pca_explained_variance_ratio"] = pca.explained_variance_ratio_.tolist()
     stats["pca_pc1_pct"] = float(pca.explained_variance_ratio_[0] * 100)
     stats["pca_cum_pct"] = float(pca.explained_variance_ratio_.sum() * 100)
@@ -195,6 +196,41 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
         u3 = np.column_stack([u2, coords3[:, 2]]).astype(np.float32)
         _write_coords(u2, cache_dir / "coords_umap2.parquet")
         _write_coords(u3, cache_dir / "coords_umap3.parquet")
+        # The parameter readout on the rail reads these back, so the fixture
+        # records the same keys the real build writes. Without them the rail
+        # renders empty here and the formatter's real path is never tested.
+        stats.update({
+            "umap_fit": "full corpus, no landmark subsample",
+            "umap_method": "umap",
+            "umap_neighbors": 30,
+            "umap_min_dist": 0.1,
+            "umap_metric": "cosine",
+            "umap_input": "raw 512-d L2-normalized",
+            "umap_init": "exact full-corpus PCA, scaled (not spectral)",
+        })
+
+    if with_tsne:
+        # A third coordinate set, sheared rather than rotated so it is
+        # distinguishable from the UMAP stand-in: a test that mixed the two up
+        # would still pass against two rotations of the same thing.
+        shear = np.array([[1.0, 0.35], [-0.2, 0.9]], dtype=np.float32)
+        t2 = coords3[:, :2] @ shear
+        t3 = np.column_stack([t2, -coords3[:, 2]]).astype(np.float32)
+        _write_coords(t2, cache_dir / "coords_tsne2.parquet")
+        _write_coords(t3, cache_dir / "coords_tsne3.parquet")
+        # Both negative-gradient methods are recorded because they genuinely
+        # differ by output dimensionality; the rail names whichever one applies.
+        stats.update({
+            "tsne_fit": "full corpus, no landmark subsample",
+            "tsne_perplexity": 30,
+            "tsne_knn": 90,
+            "tsne_metric": "cosine",
+            "tsne_input": "raw 512-d L2-normalized",
+            "tsne_init": "exact full-corpus PCA, rescaled to std 1e-4",
+            "tsne_early_exaggeration": 12,
+            "tsne2_negative_gradient": "FIt-SNE",
+            "tsne3_negative_gradient": "Barnes-Hut",
+        })
 
     (cache_dir / "projection_stats.json").write_text(json.dumps(stats, indent=2))
     return {"n_archs4": n_archs4, "n_osdr": n_osdr, "total": total,
@@ -238,7 +274,7 @@ def _write_archs4_metadata(cache_dir: Path, cluster_id: np.ndarray) -> None:
 
 
 def build_all(root: Path, n_archs4: int = 4000, n_osdr: int = 300,
-              seed: int = 7, with_umap: bool = True,
+              seed: int = 7, with_umap: bool = True, with_tsne: bool = True,
               with_archs4_meta: bool = True) -> dict:
     """Build both halves of the fixture under ``root`` and return a descriptor.
 
@@ -278,7 +314,7 @@ def build_all(root: Path, n_archs4: int = 4000, n_osdr: int = 300,
     meta.to_parquet(cache_dir / "osdr_metadata.parquet", index=False)
 
     desc = _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
-                         with_umap)
+                         with_umap, with_tsne)
     (cache_dir / "_archs4_species.npy").unlink(missing_ok=True)
     desc["bridge_rna_root"] = rna_root
     desc["cache_dir"] = cache_dir
