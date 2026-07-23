@@ -27,6 +27,80 @@ You can rotate it, switch between 2-D and 3-D, recolour it, and overlay a retrie
 
 ![The Bridge RNA map: the joint corpus as a 3-D projection, coloured by tissue](docs/bridge-rna-map.png)
 
+## How it works
+
+Both views run on one idea.
+A trained neural network reads a sample's whole transcriptome and turns it into a single point in a 512-dimensional space, placed so that samples with similar expression land near each other.
+Retrieval searches that space for one query; the map draws all of it.
+
+### The model and the shared space
+
+The network is an `ExpressionPerformer`, a transformer whose tokens are genes and whose values are expression levels.
+It reads 15,165 genes in a fixed canonical order and produces 512 numbers per sample by averaging its per-gene internal states.
+Two samples are compared by the cosine between their vectors, and that one number is the only measure of similarity anywhere in the app.
+
+Both collections pass through identical preprocessing before the model sees them.
+Mouse genes are mapped to their human orthologs, counts are TPM-normalised and log-scaled, and the genes are put in one canonical order.
+A SHA-256 digest of that order is checked on every build, and the build aborts if it does not match, because a gene list in the wrong order pairs each gene's learned identity with another gene's expression value and produces results that look fine and mean nothing.
+
+### Retrieving Earth analogs
+
+A query is one OSDR sample.
+The app embeds it, or looks up its precomputed vector, then scans all 940,455 Earth vectors once and keeps the closest by cosine.
+There is no approximate index; the scan is exact.
+It takes about half a second when the vector is already cached, and about 22 seconds when the sample has to be embedded from its raw counts, and the status line always says which path ran.
+
+Every Earth hit's row in the embedding index is also its point on the map, and every OSDR sample is keyed by the same `accession|sample name` string in both halves.
+That shared key is why a retrieval you run on one page can be redrawn in place on the other, with no lookup table between them.
+
+### The map
+
+The map is the same space projected down to two and three dimensions.
+Two reductions are offered: PCA, which is fast and linear, and UMAP, which is slower, nonlinear, and better at keeping local neighbourhoods.
+Both are fit once, offline, on every one of the 942,563 points rather than on a subsample, and the app only ever loads the finished coordinates.
+Fitting UMAP over the whole corpus takes about ten minutes and several gigabytes of memory, which is the reason it never happens inside the running app.
+
+Vectors are L2-normalised before either reduction.
+Without that step the first principal component is really a magnitude axis and holds 57.8% of the variance, swamping the rest; normalised, it drops to 41.3% and the biology comes through.
+
+### Colouring both collections by tissue
+
+OSDR and ARCHS4 describe tissue in completely different ways.
+OSDR is curated but hyper-specific ("Right extensor digitorum longus", 48 values in all).
+ARCHS4 has no tissue column at all, only 42,754 distinct free-text GEO strings.
+`manifold/tissue.py` folds both onto one list of 37 anatomical buckets plus "Other" and "Unknown", using ordered keyword rules where the first match wins.
+The order is what keeps "bone marrow" from being read as "bone" and "adrenal" from being read as "renal".
+Because both collections go through the same function, a liver in GEO and a NASA liver get the same colour and the same legend row.
+All 48 OSDR values and 90.6% of the Earth samples land in a named bucket.
+
+The map will not paint a collection it cannot describe as though it were data.
+Pick an OSDR-only field like Flight vs Ground and the 940,455 Earth points have no value for it, so rather than a flat grey cloud that reads as "measured and empty", they are drawn as faint context with no legend entry.
+The colour-by menu says up front what each field covers, and a field whose data has not been built is shown disabled with the command that builds it.
+
+### Hovering and inspecting
+
+On the map, hovering an OSDR point shows its name and what it is under the current colouring.
+The Earth cloud carries no hover data on purpose, both for speed at a million points and because a click that returns nothing is how the app knows you clicked the background rather than a sample.
+In the retrieval view, the network graph draws the query, each matched sample, and the studies they belong to; clicking any node opens its full metadata in the inspector and fetches the study abstract from NCBI on demand.
+
+### The AI reading
+
+The AI summary is a reading aid, not part of the retrieval.
+When you ask for it, the app builds a prompt from your query's metadata, the table of hits, and the studies' abstracts, and sends it to a language model.
+By default that model is a local Ollama server, so nothing leaves your machine; an AWS Bedrock endpoint is the alternative and does send the prompt to a remote service.
+The model only ever sees the metadata and abstracts, never the expression values, so read what it writes as a starting point to check against the linked records, not as a result.
+
+### What the results mean, and what they do not
+
+A retrieval is a statement about whole-transcriptome similarity as this one model encodes it: these are the Earth samples whose expression looks most like your NASA sample's.
+It is a good way to find candidate reference studies and to form a hypothesis worth testing.
+It is not a differential-expression result and not a causal claim.
+Similarity in bulk RNA-seq is dominated by tissue and cell composition, so a top hit often confirms which tissue you are looking at more than any spaceflight signature, and the scores usually sit in a narrow band, so read the top hits as a set rather than a ranked podium.
+
+On the map, read neighbourhoods, not exact distances.
+UMAP keeps track of which points are close but deliberately does not preserve how far apart distant points are.
+That is why no line is drawn between a query and its matches, and why each hit's hover shows both its rank by true 512-dimensional similarity and its rank by position on screen, which often disagree.
+
 ## Quickstart
 
 You need **Python 3.11** (64-bit), **Git**, and **Git LFS**.
@@ -86,7 +160,7 @@ Other optional settings (NCBI enrichment, an AWS Bedrock backend) are in `.env.e
 
 The map is drawn from precomputed coordinates, so it needs a one-time build.
 Retrieval works without it; only `/map` depends on it.
-Run the steps in order - the metadata fetch joins onto the table the projection build writes.
+Run the steps in order, because the metadata fetch joins onto the table the projection build writes.
 
 ```bash
 PY=.venv/bin/python
@@ -96,14 +170,33 @@ $PY precompute/fetch_archs4_meta.py                      # Earth metadata. ~35 s
 $PY precompute/validate_artifacts.py --mixing --quality  # gates the build
 ```
 
-See [`docs/manifold.md`](docs/manifold.md) for how the map is built and validated.
+`embed_osdr.py` records its progress and resumes where it stopped, so an interrupted run does not start over.
+The validator is the check a structural pass cannot give you: row counts and finite coordinates are satisfied by any set of numbers, so `--quality` scores each projection on how well it preserves the 512-dimensional space it came from, against a null that says what the number would be if the map carried no information.
+
+To try the map before building the real cache, which takes hours, build a synthetic corpus of the same shape and point the app at it:
+
+```bash
+$PY tests/build_dev_corpus.py --out /tmp/bm-dev --archs4 60000 --osdr 2000 --clean
+BRIDGE_RNA_ROOT=/tmp/bm-dev/bridge_rna MANIFOLD_CACHE_DIR=/tmp/bm-dev/cache $PY app.py
+```
+
+The numbers are meaningless biologically; the corpus exists to exercise the interface, not to be read.
 
 ## Known limitations
 
 - 788 of the listed NASA samples cannot be retrieved (no spaceflight condition recorded, or the name matches no column in their counts matrix). They are disabled in the picker with the reason rather than hidden.
-- Distances on the map are not quantitative: cluster sizes and the gaps between them do not carry a magnitude. This is why no line is drawn between a query and its matches.
-- The two collections were embedded on different hardware, so compare within a collection rather than across it.
+- The two collections were embedded on different hardware and in different precisions, which leaves a technical signature in the shared space: NASA samples that share neither study nor tissue still neighbour each other far above chance. Compare within a collection rather than across it.
 - The AI reading is generated by a small local model and is a starting point for interpretation, not a result.
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q     # runs in about two seconds
+.venv/bin/python tests/e2e_check.py      # drives a real browser; needs the built cache
+```
+
+The suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.
+`e2e_check.py` boots the real app against the real `cache/` and asserts on what the page reports about itself, down to each budget tier drawing exactly the point count it advertises.
 
 ## Project layout
 
@@ -118,7 +211,7 @@ See [`docs/manifold.md`](docs/manifold.md) for how the map is built and validate
 | `archs4_sample_embeddings_full/` | Precomputed Earth embedding index (Git LFS). |
 | `cache/` | The map's precomputed artifacts (built locally). |
 
-For the design in depth, see [`IMPLEMENTATION.md`](IMPLEMENTATION.md) and [`REFERENCE.md`](REFERENCE.md).
+For the design and the verified facts in depth, see [`IMPLEMENTATION.md`](IMPLEMENTATION.md) and [`REFERENCE.md`](REFERENCE.md).
 
 ## Licensing
 

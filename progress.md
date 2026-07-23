@@ -6,6 +6,31 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-07-23 (doc consolidation into the README)
+
+Folded the standalone explainer docs into `README.md` and removed them, so a new reader meets fewer scattered files.
+
+What changed:
+- Added a "How it works" section to the README covering the model and the shared space, retrieval, the map build, the shared tissue vocabulary, hover and inspect, the AI reading, and a "what the results mean" note on interpretation. It is condensed to what a new reader needs, not the exhaustive version.
+- Deleted `docs/how-it-works.md` (a longer FAQ built earlier this session) and `docs/manifold.md`. Their necessary content is now in the README; the map-specific build notes and the synthetic dev-corpus command moved into the README's build and tests sections.
+- Kept `IMPLEMENTATION.md`, `REFERENCE.md`, `CLAUDE.md`, and `progress.md`. The README still points to `IMPLEMENTATION.md` and `REFERENCE.md` for the design and the verified facts.
+- The two screenshots (`docs/bridge-rna-interface.png`, `docs/bridge-rna-map.png`) stay in `docs/`.
+
+Note on the entry below: it references `docs/manifold.md` as a live pointer, which no longer holds. That file's content is in the README as of this entry; the deeper facts it summarized were already duplicated in `IMPLEMENTATION.md` and `REFERENCE.md`.
+
+## 2026-07-22 (README rewrite for new users)
+
+Rewrote `README.md` to be readable for a first-time user: 400 lines down to 197.
+The old README carried the full body of caveats, exact measurements, and honesty disclaimers inline, which buried the "what is this / how do I run it" a newcomer actually needs.
+
+What changed:
+- Kept: the one-line pitch, the two-view explanation with both screenshots, the quickstart (clone / install / run), optional AI setup, optional map build, tests, a trimmed project-layout table, and licensing/citing.
+- Cut from the body and replaced with a short "Learn more" section pointing at `docs/manifold.md`, `IMPLEMENTATION.md`, and `REFERENCE.md`: the deep canonical-gene-list section, the "Implementation notes" (species mapping, normalization, index facts), the full "Reading the map honestly" section, the detailed "Known limitations" list, and the `demo_osdr_top5.py` CLI usage.
+- The three map-reading caveats (non-quantitative distance, cross-corpus batch effect, coverage-aware colouring) are now three compressed clauses in "Learn more" rather than three full subsections; the full versions still live in the docs and the interface still discloses them.
+- Simplified vocabulary throughout ("Earth studies" / "Earth corpus" instead of "ARCHS4/GEO", fewer precise counts inline).
+
+No prose facts were lost from the repo; everything cut is still in `IMPLEMENTATION.md` / `REFERENCE.md` / `docs/manifold.md`.
+
 ## Current status: 2026-07-22 (map UI refinements)
 
 Five changes to the map view, driven by user feedback that the interface over-explained and that some readouts were misleading below full budget.
