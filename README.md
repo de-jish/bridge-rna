@@ -5,11 +5,6 @@ It then shows where that sample and its matches sit in the whole space, as a map
 
 Developed by the **Space Biosciences Research Branch at NASA Ames Research Center**.
 
-NASA flies rare biology.
-A rodent mission returns tens of tissues, not the tens of thousands that terrestrial studies accumulate, and every one of them is expensive, irreplaceable, and hard to interpret in isolation.
-The published transcriptome, meanwhile, keeps growing.
-Bridge RNA treats a NASA spaceflight sample as a query into that entire corpus, so a tissue flown aboard the International Space Station lands next to the ground studies that look most like it, with no manual literature search and no prior guess about what it should resemble.
-
 ## The two views
 
 **Retrieve** (`/`) is the query.
