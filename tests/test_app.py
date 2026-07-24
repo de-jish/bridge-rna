@@ -269,6 +269,30 @@ def test_projection_params_drop_what_the_record_does_not_carry(corpus,
     assert all(v for _, v, _ in params), "no chip may render an empty value"
 
 
+def test_projection_params_say_nothing_about_coordinates_that_are_missing(
+        corpus, monkeypatch, tmp_path):
+    """An interrupted build leaves a complete record beside a missing parquet.
+
+    Every stage saves its stats before the next one runs, and the 3-D t-SNE fit
+    is 81% of the build's wall clock, so a run interrupted there leaves
+    coords_tsne2.parquet plus a full tsne_* record and no coords_tsne3.parquet.
+    The 2-D pill should stay enabled - that map is real - but the rail must not
+    describe a 3-D fit that never finished, or it asserts a Barnes-Hut layout
+    over 942,563 points beside a plot reading "coordinates not built yet".
+    """
+    missing = tmp_path / "nope.parquet"
+    built = data.METHODS["tsne"]["2d"]
+    monkeypatch.setitem(data.METHODS, "tsne", {"2d": built, "3d": missing})
+
+    assert data.method_available("tsne"), "the 2-D map is built and still offered"
+    assert data.coords_available("tsne", "2d")
+    assert not data.coords_available("tsne", "3d")
+
+    assert layout.projection_params("tsne", "2d"), "2-D still describes itself"
+    assert layout.projection_params("tsne", "3d") == []
+    assert layout.projection_params_children("tsne", "3d") == []
+
+
 def test_projection_params_survive_a_cache_with_no_record(corpus, monkeypatch):
     """It is a label, not a correctness gate: no record means no chips."""
     monkeypatch.setattr(data, "projection_stats", lambda: {})

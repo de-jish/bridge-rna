@@ -147,7 +147,29 @@ def coords(method: str, dims: str) -> np.ndarray:
 
 
 def method_available(method: str) -> bool:
+    """True if this projection can be drawn at all, i.e. its 2-D coords exist.
+
+    Deliberately 2-D only, because that is what the Projection pill gates and a
+    build that produced a 2-D map should offer it. Whether a *particular*
+    dimensionality exists is `coords_available`.
+    """
     return METHODS[method]["2d"].exists()
+
+
+def coords_available(method: str, dims: str) -> bool:
+    """True if this exact (method, dims) coordinate set is on disk.
+
+    The two are not the same question, and the gap between them is reachable
+    rather than theoretical: the 3-D t-SNE fit is 81% of the build's wall clock,
+    and every stage writes its parquet and saves the stats record before the
+    next one starts. An interrupt anywhere in those two hours leaves
+    coords_tsne2.parquet and a *complete* tsne_* record on disk with no
+    coords_tsne3.parquet. The pill should stay enabled, since the 2-D map is
+    real; the parameter readout must not describe the 3-D fit that never
+    finished.
+    """
+    path = METHODS.get(method, {}).get(dims)
+    return bool(path and path.exists())
 
 
 @lru_cache(maxsize=1)

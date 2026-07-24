@@ -73,6 +73,15 @@ def projection_params(method: str, dims: str) -> list[tuple[str, str, str]]:
     the retrieval banner told when it announced every cached result as
     subprocess output.
     """
+    # Say nothing about coordinates that are not there. The build record is
+    # written before the fit it describes finishes, so an interrupted run leaves
+    # a complete `tsne_*` record beside a missing coords_tsne3.parquet - and the
+    # rail would then assert a Barnes-Hut layout over all 942,563 points next to
+    # a plot reading "coordinates not built yet". Reading the record instead of
+    # the code's constants does not help if the record outlives the artifact.
+    if not data.coords_available(method, dims):
+        return []
+
     s = data.projection_stats()
     out: list[tuple[str, str, str]] = []
 

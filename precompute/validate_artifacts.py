@@ -138,7 +138,23 @@ def validate_structure() -> tuple[int, np.ndarray]:
     )
 
     print("\n=== 4. OSDR is not collapsed to a single blob ===")
+    # Guarded the same way section 2 is. Section 2 declares a stage that never
+    # ran a legitimate SKIP rather than a failure, so reading its parquet
+    # unconditionally here contradicted that one section later: a
+    # `--skip-umap` build printed SKIP and then died on FileNotFoundError,
+    # before --mixing, --quality, and the pass/fail summary the script exists
+    # to produce. A length check as well as an existence one, because a stale
+    # parquet left behind by a corpus-shape change would otherwise index-error
+    # against a mask sized for the current corpus.
+    if not paths.COORDS_UMAP2.exists():
+        print("  SKIP: coords_umap2.parquet is not built, so there is no "
+              "layout to measure OSDR's spread in")
+        return total, is_osdr
     u2 = pd.read_parquet(paths.COORDS_UMAP2).to_numpy(dtype=np.float64)
+    if len(u2) != total:
+        check(False, f"umap2 has {len(u2)} rows against {total}; refusing to "
+                     "measure OSDR spread against a mismatched layout")
+        return total, is_osdr
     ratio = float(np.linalg.norm(u2[is_osdr].std(axis=0)) / np.linalg.norm(u2.std(axis=0)))
     print(f"  OSDR umap2 spread / corpus spread = {ratio:.3f}")
     check(ratio > 0.05, f"OSDR occupies a real region of the map (ratio {ratio:.3f})")

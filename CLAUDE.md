@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 207 tests pass in about three seconds, plus 40 browser checks in `tests/e2e_check.py`.
+**Current state: built, run on the real corpus, and tested.** 208 tests pass in about three seconds, plus 40 browser checks in `tests/e2e_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -132,7 +132,7 @@ Violating them produces output that looks fine but is scientifically wrong.
 4. **Verify Git LFS pointers resolve before any run that opens one.** The checkpoint and memmap are LFS objects and can arrive as stub pointers. `manifold/preflight.py` guards `precompute/`; the **map view** opens no LFS object at all, which is why `PRECOMPUTE_REQUIRED` and `APP_REQUIRED` there have no overlap. The **retrieval view** does open the memmap on every cached search, and is guarded separately by `bridge_rna.preflight.preflight_retrieval_requirements`, whose LFS-pointer check runs at layout time and raises the setup banner. Keep `APP_REQUIRED` to what the app genuinely opens, in the order it opens it - `points_meta.parquet` is first because `layout.control_rail()` reads it through `data.counts()` while the layout is still being built.
 5. **A color-by must never render a corpus it does not describe as though it were a category.** Coverage is declared in `manifold/colorby.py`, stated in the UI, and enforced in `manifold/render.py`. A field that does not describe ARCHS4 must draw those 940,455 points as a deliberately faint context cloud in a single color that is not in the categorical palette (`theme.ARCHS4_CONTEXT`), at 0.35 opacity, with no legend row. The failure this prevents is a uniform grey glyph cloud over 99.8% of the map, which reads as "ARCHS4 was measured and has no structure here" rather than "this field says nothing about ARCHS4". This used to have a second branch, in which the ARCHS4 layer drew nothing at all and a precomputed density raster carried the shape; the raster is gone, so the context cloud is now the only answer and it applies in 2-D and 3-D alike.
 6. **Both corpora share one tissue vocabulary.** `manifold/tissue.canonical_tissue` is the only entry point, used by `precompute/fetch_archs4_meta.py` for ARCHS4 and by `manifold/data.osdr_tissue` for OSDR. Two tissue color-bys wearing one name would each leave the other corpus grey, which is invariant 5 by another route.
-7. **The parameter readout must describe the coordinates on screen, never the code's defaults.** `manifold/layout.projection_params` reads `cache/projection_stats.json` through `data.projection_stats()` and nothing else. Duplicating the constants into the serving app would let the rail stay confident while the cache went stale, which is the same failure as the retrieval banner that announced every cached result as subprocess output. A key the record does not carry drops its chip; it never renders a blank slot or a guess.
+7. **The parameter readout must describe the coordinates on screen, never the code's defaults and never a record that outlived its artifact.** `manifold/layout.projection_params` reads `cache/projection_stats.json` through `data.projection_stats()` and nothing else, because duplicating the constants into the serving app would let the rail stay confident while the cache went stale - the same failure as the retrieval banner that announced every cached result as subprocess output. A key the record does not carry drops its chip; it never renders a blank slot or a guess. **Reading the record is necessary and not sufficient**, because every build stage saves its stats *before* the next stage runs: an interrupt inside the 3-D t-SNE fit, which is 81% of the wall clock, leaves a complete `tsne_*` record beside a missing `coords_tsne3.parquet`. So the readout is also gated on `data.coords_available(method, dims)` and says nothing when that exact coordinate set is absent. Note the deliberate asymmetry with `data.method_available`, which stays 2-D-only: a build that produced a 2-D map should still offer its pill.
 
 ## The three projections
 
@@ -263,7 +263,7 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 207 tests, about three seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 208 tests, about three seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 40 browser checks, about two minutes
 ```
 
