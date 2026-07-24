@@ -95,18 +95,29 @@ def projection_params(method: str, dims: str) -> list[tuple[str, str, str]]:
         if text:
             out.append((str(text), "", ""))
 
+    def init_chip(record_value) -> None:
+        """Name the starting layout from the record, not from a constant.
+
+        The build can start UMAP from a spectral layout or a PCA one, and which
+        it was is the difference between the map separating the corpora and not,
+        so the chip has to follow the record rather than assume. The stored
+        string is verbose ("spectral (normalized Laplacian, ...)"); the chip
+        wants its first word.
+        """
+        if record_value:
+            head = str(record_value).split()[0].lower()
+            word("spectral init" if head.startswith("spectral") else "PCA init")
+
     if method == "umap":
         measure("n_neighbors=", s.get("umap_neighbors"))
         measure("min_dist=", s.get("umap_min_dist"))
         word(s.get("umap_metric"))
-        if s.get("umap_init"):
-            word("PCA init")
+        init_chip(s.get("umap_init"))
     elif method == "tsne":
         measure("perplexity=", s.get("tsne_perplexity"))
         measure("exaggeration=", s.get("tsne_early_exaggeration"))
         word(s.get("tsne_metric"))
-        if s.get("tsne_init"):
-            word("PCA init")
+        init_chip(s.get("tsne_init"))
         word(s.get(f"tsne{dims[0]}_negative_gradient"))
     elif method == "pca":
         if s.get("pca_fit"):

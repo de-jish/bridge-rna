@@ -6,6 +6,27 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-07-23 (spectral init restores the species separation)
+
+Josh reported that even at `n_neighbors=30` the map looked less segmented than the version he remembered, specifically the human/mouse split. He was right, and it was not `n_neighbors`.
+
+**The cause was the initialization, and it had been hiding in a commit from 2026-07-22.** The original build and the 07-21 retune both used UMAP's default `init="spectral"`. The full-corpus rewrite (43f3af1) switched to a PCA init in the same commit that removed the landmark transform, because spectral through UMAP's own path wants a 942,563 x 970 float64 Lanczos basis (7.31 GB) and drove the machine into swap. That switch was never separately measured against the thing it cost.
+
+Measured now, on a 120,000-point sample with everything else held fixed:
+
+| init | 25-NN species purity | species silhouette |
+| --- | --- | --- |
+| PCA (was shipped) | ~0.999 | 0.026-0.052 |
+| spectral (now) | ~0.999 | 0.356-0.461 |
+
+Species is ~100% pure locally under either - it was never *mixed* - but the global arrangement is completely different: PCA init scatters the two species as many small interleaved islands, spectral consolidates them into two territories. Local metrics cannot see that, which is why `--quality` scored the PCA build as fine and why the regression shipped. On the real full corpus the shipped 2-D map went from species silhouette 0.027 to **0.356, 13x**.
+
+**The 7.31 GB was an artifact of one default, not of the mathematics.** `_spectral_layout` sizes its Lanczos basis as `max(2k+1, sqrt(n))`, and the `sqrt(n)` term is 970 at this corpus size when only 3-4 eigenvectors are wanted. Computing the eigenvectors directly with a small basis (`ncv=32`) and a shifted operator (largest eigenvalues of `2I - L` are the smallest of `L`, and Lanczos converges on largest far faster) costs **20-22 s and 241 MB** at full scale. `umap_init_from_spectral` in `build_projections.py`; `--umap-init pca` reproduces the old build.
+
+The rail's init chip is now derived from the record (`spectral init` / `PCA init`) rather than hardcoded, so it cannot say PCA after a spectral build. OSDR spread ratio dropped 0.921 to 0.759, which is expected and not a regression: the all-mouse OSDR corpus now sits in the mouse territory rather than being spread across a map where the species were interleaved.
+
+Tests 210, plus two in `test_projections.py` pinning that the spectral init is cheap/deterministic/scaled and that it separates a graph-community the PCA init interleaves. 40 browser checks pass. UMAP rebuilt in ~14 min; t-SNE preserved via the stats merge, not re-run.
+
 ## 2026-07-23 (t-SNE as a third projection, UMAP back to n_neighbors=30, parameter readout on the rail)
 
 Three changes, opened by an observation: on the real map the species split looked visibly less separated than it had before, and the question was why.

@@ -141,12 +141,11 @@ Three settings make that possible, and two of them are non-obvious.
   The graph depends on the input space and `n_neighbors`, never on `n_components`, so it is built once with `pynndescent` and handed to both.
   That halves the neighbour search and guarantees the 2-d and 3-d maps are layouts of the *same* graph.
   UMAP assigns the arrays through without copying and then writes into them in place to disconnect far neighbours (`umap_.py:2647-2654`), so each fit gets its own copy.
-- **`init` is the exact PCA, not spectral.**
-  This one is not an optimization, it is the difference between finishing and not.
-  `_spectral_layout` sizes its Lanczos basis as `max(2k+1, sqrt(n))` (`spectral.py:489`), which at n = 942,563 is 970 vectors, so `eigsh` allocates a **942,563 x 970 float64 basis: 7.31 GB**.
-  Measured, that drove the build into 7.6 GB of swap and produced no progress in 25 minutes.
-  `init="tswspectral"` uses the same formula and does not help.
-  `init="pca"` is the documented alternative but would run a second PCA over the same matrix and copy it to centre it, so the exact PCA coordinates from the previous stage are passed directly, scaled the way `noisy_scale_coords` (`umap_.py:930`) scales UMAP's own.
+- **`init` is a spectral layout, computed cheaply (2026-07-23).**
+  This is the choice that separates the two species on the map rather than interleaving them, and it was a PCA init for one day that cost exactly that separation - see "The species separation and the init" below.
+  UMAP's own `init="spectral"` is genuinely unusable at this scale, but for a reason that is fixable rather than fundamental: `_spectral_layout` sizes its Lanczos basis as `max(2k+1, sqrt(n))` (`spectral.py:489`), which at n = 942,563 is 970 vectors, so `eigsh` allocates a **942,563 x 970 float64 basis: 7.31 GB**, which drove the build into 7.6 GB of swap and made no progress in 25 minutes. `init="tswspectral"` uses the same formula and does not help.
+  `umap_init_from_spectral` computes the same layout without that basis: it asks `eigsh` for only the 3-4 eigenvectors actually wanted, with `ncv=32`, and shifts the operator so Lanczos converges on the largest eigenvalues of `2I - L` (the smallest of the Laplacian `L`) instead of the smallest, which is what lets a basis that small converge. Measured at full corpus scale: the fuzzy graph in 3-4 s and `eigsh` in **20-22 s**, against the 25-minutes-no-progress of UMAP's own path.
+  `--umap-init pca` restores the old PCA start, which is kept for reproducing the 2026-07-22 cache and as a fallback if the eigensolver ever fails to converge; `umap_init_from_pca` documents that path.
 - **`random_state=42`, and what it costs.**
   Seeding forces single-threaded execution three separate ways: `_validate_parameters` overwrites `n_jobs` to 1 (`umap_.py:1950-1954`, and its warning is printed after the assignment so it always reads the confusing "n_jobs value 1 overridden to 1"), `fit()` calls `numba.set_num_threads(1)` for the whole fit (`:2413-2415`, restored at `:2855`) which serializes the `njit(parallel=True)` kernels inside `fuzzy_simplicial_set`, and `_fit_embed_data` passes `random_state is None` as the `parallel` flag (`:2891`), selecting the serial layout kernel at `layouts.py:222-224`.
   Measured on this machine against a real UMAP graph, the serial layout costs **4.3x to 7.5x** the parallel one.
@@ -224,7 +223,36 @@ That is a sharper and more useful lesson than "the metrics were too local", whic
 It also means `validate_artifacts.py --quality` *can* gate this after all, and now does: run against the real cache it prefers 30 on every measure, so it would have caught the regression if it had been run with `--compare` at the time. It was not; the retune was accepted on the subsample scores alone.
 
 Measured build cost of the change, same machine, same seed: the k=30 neighbour graph takes **130 s** against 59 s at k=15, and the UMAP fits take **326 s** and **347 s** against about 251 s each.
-The OSDR spread ratio also improved again, **0.850 to 0.921**, so the spaceflight corpus occupies more of the map at 30 than at 15.
+
+### The species separation and the init (2026-07-23)
+
+`n_neighbors` was not the whole story, and this is the part that actually fixed the map's separation.
+The species split - human against mouse, the one colour-by that clearly clears the arbitrary-projection band at eta-squared 0.985 - looked interleaved rather than cleanly split, and `n_neighbors=30` alone did not restore it.
+The cause was the **initialization**, changed from spectral to PCA on 2026-07-22 in the same commit that removed the landmark transform, and never separately measured.
+
+Isolated on a 120,000-point sample with the graph, `n_neighbors`, metric and seed all held fixed, varying only the init:
+
+| init | 25-NN species purity | species silhouette (2-D) |
+| --- | --- | --- |
+| PCA | ~0.999 | 0.026-0.052 |
+| **spectral** | ~0.999 | **0.356-0.461** |
+
+Species is ~100% pure locally under both - it is never *mixed* - so every local metric is blind to the difference.
+What changes is global: a PCA start scatters the two species into many small interleaved islands, a spectral start consolidates them into two territories.
+That is the entire visible difference, and it is invisible to `--quality`, whose two metrics are both local. It is why the regression shipped and passed validation.
+
+Confirmed on the shipped full-corpus 2-D map, 120,000-point sample:
+
+| 2-D UMAP build | 25-NN species purity | species silhouette |
+| --- | --- | --- |
+| PCA init, n_neighbors 15 (two days) | 0.9714 | 0.0187 |
+| PCA init, n_neighbors 30 (one day) | 0.9906 | 0.0267 |
+| **spectral init, n_neighbors 30 (shipped)** | 0.9970 | **0.3557** |
+
+**13x** the species silhouette of the build it replaced, at ~14 minutes, the spectral solve adding 20-22 s.
+The OSDR spread ratio dropped **0.921 to 0.759**, and that is correct rather than a regression: OSDR is entirely mouse, so once the species are pulled to opposite sides of the map the all-mouse corpus concentrates in the mouse territory instead of spreading across a map where the species were interleaved. It stays far above the 0.05 collapse floor.
+
+The lesson matches the `n_neighbors` one and belongs beside it: **a change that only moves global structure cannot be accepted on local metrics.** Both the init switch and the `n_neighbors` retune were regressions in global arrangement that every local score rated as fine or better. Judge global structure by the species silhouette, not by kNN recall or tissue purity.
 
 ### All three projections scored against the 512-d space (2026-07-23)
 

@@ -206,7 +206,7 @@ def _finish_cache(cache_dir, archs4_vecs, osdr_vecs, osdr_cluster, meta,
             "umap_min_dist": 0.1,
             "umap_metric": "cosine",
             "umap_input": "raw 512-d L2-normalized",
-            "umap_init": "exact full-corpus PCA, scaled (not spectral)",
+            "umap_init": "spectral (normalized Laplacian, shifted Lanczos, ncv=32)",
         })
 
     if with_tsne:

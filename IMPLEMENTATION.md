@@ -310,7 +310,7 @@ t-SNE carries the same caveat and one more of its own, both measured on this cor
 It fills the plane as a disc, so whitespace between clusters carries even less meaning than UMAP's, where islands at least suggest separation.
 And it separates the two corpora *more* than UMAP does - 2.2% shared bins against 8.9% - which makes it the worst of the three for the one question this app exists to ask, whether an OSDR sample sits among ARCHS4 ones. Those caveats are in the README; the rail states parameters, not warnings.
 
-What the rail does state, since 2026-07-23, is how the projection on screen was actually fit: `n_neighbors=30 · min_dist=0.1 · cosine · PCA init · fit on all 942,563 points`, read back from `projection_stats.json` rather than from constants in the serving code.
+What the rail does state, since 2026-07-23, is how the projection on screen was actually fit: `n_neighbors=30 · min_dist=0.1 · cosine · spectral init · fit on all 942,563 points`, read back from `projection_stats.json` rather than from constants in the serving code.
 That direction of dependency is the whole point. A rail reciting what the build *would* have done stays confident while the cache goes stale, which is the same failure as the retrieval banner that announced every cached result as subprocess output.
 
 That honesty is now a constraint on what the tool is willing to *do*, not only on what it says.

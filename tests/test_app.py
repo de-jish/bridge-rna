@@ -260,6 +260,25 @@ def test_tsne_params_name_the_gradient_method_that_actually_ran(corpus):
     assert two - {"FIt-SNE"} == three - {"Barnes-Hut"}
 
 
+def test_the_init_chip_follows_the_record_not_a_constant(corpus, monkeypatch):
+    """The starting layout is the difference between the corpora separating or
+    not, so the rail must name the one the build actually used.
+
+    It was hardcoded "PCA init" for a while, which would have kept saying PCA
+    after the build switched to a spectral start - the exact kind of stale
+    confidence the readout exists to avoid.
+    """
+    def with_init(value):
+        base = dict(data.projection_stats())
+        base["umap_init"] = value
+        monkeypatch.setattr(data, "projection_stats", lambda: base)
+        return {p + v + s for p, v, s in layout.projection_params("umap", "2d")}
+
+    assert "spectral init" in with_init(
+        "spectral (normalized Laplacian, shifted Lanczos, ncv=32)")
+    assert "PCA init" in with_init("exact full-corpus PCA, scaled (not spectral)")
+
+
 def test_projection_params_drop_what_the_record_does_not_carry(corpus,
                                                                monkeypatch):
     """An older cache shows fewer parameters, never a blank slot."""

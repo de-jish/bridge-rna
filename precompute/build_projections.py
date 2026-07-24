@@ -234,14 +234,26 @@ def build_knn(x: np.ndarray, n_neighbors: int, seed: int, n_jobs: int):
 
 def umap_init_from_pca(pca_coords: np.ndarray, n_components: int,
                        seed: int) -> np.ndarray:
-    """The initial layout the UMAP optimization starts from, taken from the PCA.
+    """A PCA starting layout. **No longer the default; see umap_init_from_spectral.**
 
-    UMAP's default ``init="spectral"`` is not merely slow at this scale, it is
-    unusable. ``_spectral_layout`` sizes its Lanczos basis as
+    Kept as `--umap-init pca`, because it is what the 2026-07-22 build shipped
+    and reproducing that cache needs it, and because it is the fallback if the
+    eigensolver ever fails to converge on a future corpus.
+
+    Everything below is why the build used it for a day, and it is left standing
+    because the measurement is real and only the *conclusion* was wrong.
+    ``init="spectral"`` via UMAP's own path is not merely slow at this scale, it
+    is unusable: ``_spectral_layout`` sizes its Lanczos basis as
     ``max(2k+1, sqrt(n))`` (spectral.py:489), which at n=942,563 is 970 vectors,
     so ``eigsh`` allocates a 942,563 x 970 float64 basis: **7.31 GB**, on top of
     the 1.93 GB corpus and the graph. Measured on this 16 GB machine, that drove
     the build into 7.6 GB of swap and produced no progress in 25 minutes.
+
+    What that reasoning missed is that the 970 comes from a *default*, not from
+    the problem: only 3 or 4 eigenvectors are wanted, and asking for them with a
+    small basis and a shifted operator costs seconds and 241 MB. The cost was
+    real; treating it as the price of spectral initialization was the error, and
+    it cost the map its species separation for a day.
     ``init="tswspectral"`` uses the same formula and does not help.
 
     ``init="pca"`` is the documented alternative, but it would run a *second*
@@ -259,6 +271,87 @@ def umap_init_from_pca(pca_coords: np.ndarray, n_components: int,
     ``validate_artifacts.py --quality``.
     """
     coords = np.asarray(pca_coords[:, :n_components], dtype=np.float64)
+    coords = coords * (10.0 / np.abs(coords).max())
+    rng = np.random.RandomState(seed)
+    return (coords + rng.normal(scale=1e-4, size=coords.shape)).astype(np.float32)
+
+
+def umap_init_from_spectral(knn, n_neighbors: int, n_components: int,
+                            seed: int, ncv: int = 32) -> np.ndarray:
+    """A spectral layout of the fuzzy graph, computed cheaply enough to use.
+
+    **This is what puts the species split back.** Measured on a 120,000-point
+    sample of the real corpus with everything else held fixed, 25-NN species
+    purity is ~0.999 under either initialization - locally, species is never
+    mixed - but the *global* arrangement is completely different:
+
+        PCA init      species silhouette 0.052
+        spectral init species silhouette 0.461      (9x)
+
+    Under a PCA start the two species end up as many small, pure, interleaved
+    islands; under a spectral start they consolidate into two separated masses.
+    Local metrics cannot see that difference, which is why `--quality` scored
+    the PCA-init build as fine, and it is the shape of the map a reader
+    actually reads first.
+
+    ``umap_init_from_pca`` documented spectral as unusable at this scale, and
+    that was true of the route it measured, but the cost is an artifact of one
+    conservative default rather than of the mathematics. ``_spectral_layout``
+    sizes its Lanczos basis as ``max(2k+1, sqrt(n))`` (spectral.py:489), and at
+    n=942,563 the ``sqrt(n)`` term gives **970** basis vectors when only 3 or 4
+    eigenvectors are wanted, which is the 942,563 x 970 float64 allocation
+    (7.31 GB) that drove the machine into swap.
+
+    Two changes make it affordable, and neither is an approximation of the
+    result:
+
+    1. ``ncv`` is set to a small constant. At 120,000 points ncv=32 reproduced
+       UMAP's own spectral layout's separation (silhouette 0.469 against
+       0.461). At the full corpus it is a 241 MB basis instead of 7.31 GB.
+    2. The eigenproblem is shifted. The smallest eigenvalues of the normalized
+       Laplacian ``L`` are the largest of ``2I - L``, and Lanczos converges on
+       *largest* eigenvalues far faster than on smallest. This is what makes a
+       basis that small converge at all; asking ``eigsh`` for ``which="SM"``
+       directly is why UMAP needs a big one.
+
+    Determinism is preserved: ``v0`` is the constant vector, so there is no
+    random start, and the same graph gives the same layout every run.
+    """
+    import scipy.sparse as sps
+    from scipy.sparse.linalg import eigsh
+    from umap.umap_ import fuzzy_simplicial_set
+
+    t0 = time.time()
+    n = knn[0].shape[0]
+    graph, _, _ = fuzzy_simplicial_set(
+        np.empty((n, 1), dtype=np.float32), n_neighbors,
+        np.random.RandomState(seed), "cosine",
+        knn_indices=knn[0], knn_dists=knn[1],
+    )
+    log(f"fuzzy graph for the spectral init: {graph.shape}, {graph.nnz:,} nonzeros "
+        f"({time.time()-t0:.0f}s)")
+
+    deg = np.asarray(graph.sum(axis=0)).squeeze()
+    d_inv_sqrt = sps.spdiags(1.0 / np.sqrt(np.maximum(deg, 1e-12)), 0, n, n)
+    ident = sps.identity(n, dtype=np.float64, format="csr")
+    lap = (ident - d_inv_sqrt @ graph @ d_inv_sqrt).tocsr()
+    del graph, d_inv_sqrt
+
+    k = n_components + 1
+    t = time.time()
+    vals, vecs = eigsh((2.0 * ident - lap).tocsr(), k=k, which="LM", ncv=ncv,
+                       tol=1e-4, v0=np.ones(n), maxiter=n * 5)
+    del lap, ident
+    lam = 2.0 - vals
+    order = np.argsort(lam)
+    log(f"spectral init: eigsh k={k} ncv={ncv} in {time.time()-t:.0f}s, "
+        f"eigenvalues {np.round(lam[order][:k], 6)}")
+
+    # Drop the trivial constant eigenvector, then give the result the same
+    # treatment UMAP gives its own spectral layout: scale the largest absolute
+    # coordinate to 10, then jitter so duplicate rows do not start on top of
+    # each other and freeze at zero gradient.
+    coords = np.asarray(vecs[:, order[1:k]], dtype=np.float64)
     coords = coords * (10.0 / np.abs(coords).max())
     rng = np.random.RandomState(seed)
     return (coords + rng.normal(scale=1e-4, size=coords.shape)).astype(np.float32)
@@ -562,6 +655,15 @@ def main() -> None:
                          "slightly different graph run to run.")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--archs4-limit", type=int, default=0, help="Debug: cap ARCHS4 rows.")
+    ap.add_argument("--umap-init", choices=("spectral", "pca"), default="spectral",
+                    help="UMAP's starting layout. spectral since 2026-07-23: it "
+                         "is worth 9x the species separation of a PCA start "
+                         "(silhouette 0.461 against 0.052) at no cost in local "
+                         "fidelity; see umap_init_from_spectral.")
+    ap.add_argument("--umap-init-ncv", type=int, default=32,
+                    help="Lanczos basis size for the spectral init. UMAP's own "
+                         "default is sqrt(n), which is 970 and 7.31 GB at this "
+                         "corpus size; 32 reproduces it for 241 MB.")
     ap.add_argument("--skip-umap", action="store_true")
     ap.add_argument("--skip-tsne", action="store_true",
                     help="Skip the t-SNE stage. It is the most expensive one in "
@@ -676,7 +778,10 @@ def main() -> None:
             stats["umap_min_dist"] = 0.1
             stats["umap_metric"] = "cosine"
             stats["umap_input"] = "raw 512-d L2-normalized"
-            stats["umap_init"] = "exact full-corpus PCA, scaled (not spectral)"
+            stats["umap_init"] = (
+                f"spectral (normalized Laplacian, shifted Lanczos, ncv={args.umap_init_ncv})"
+                if args.umap_init == "spectral"
+                else "exact full-corpus PCA, scaled (not spectral)")
             if args.densmap:
                 stats["dens_lambda"] = float(args.dens_lambda)
 
@@ -686,9 +791,24 @@ def main() -> None:
             stats["knn_jobs"] = int(args.knn_jobs)
             save_stats()
 
+            def umap_init(n_components: int) -> np.ndarray:
+                """The starting layout, from whichever source was asked for.
+
+                The spectral one is recomputed per dimensionality rather than
+                sliced from a 3-column layout: the eigenvectors are ordered, so
+                the leading 2 of a 3-d solve are the same vectors, but solving
+                for exactly what is needed keeps the two calls independent and
+                costs seconds.
+                """
+                if args.umap_init == "spectral":
+                    return umap_init_from_spectral(
+                        knn, args.umap_neighbors, n_components, args.seed,
+                        ncv=args.umap_init_ncv)
+                return umap_init_from_pca(pca3, n_components, args.seed)
+
             t = time.time()
             umap2 = run_umap(x, knn, 2, args.seed, args.umap_neighbors,
-                             umap_init_from_pca(pca3, 2, args.seed),
+                             umap_init(2),
                              densmap=args.densmap, dens_lambda=args.dens_lambda)
             stats["umap2_seconds"] = round(time.time() - t, 1)
             write_coords(umap2, paths.COORDS_UMAP2)
@@ -697,7 +817,7 @@ def main() -> None:
 
             t = time.time()
             umap3 = run_umap(x, knn, 3, args.seed, args.umap_neighbors,
-                             umap_init_from_pca(pca3, 3, args.seed),
+                             umap_init(3),
                              densmap=args.densmap, dens_lambda=args.dens_lambda)
             stats["umap3_seconds"] = round(time.time() - t, 1)
             write_coords(umap3, paths.COORDS_UMAP3)

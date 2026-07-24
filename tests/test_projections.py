@@ -264,3 +264,89 @@ def test_purity_of_a_perfectly_clustered_labelling_is_one():
     labels = np.array(["A", "A", "B", "B"], dtype=object)
     neighbours = np.array([[1], [0], [3], [2]])
     assert va._purity(neighbours, labels, np.ones(4, bool)) == pytest.approx(1.0)
+
+
+# --- The spectral init and the global separation it restores ----------------
+
+def _two_species_corpus(n: int = 3000, d: int = bp.EMB_DIM, seed: int = 1):
+    """A corpus with the real corpus's awkward shape, not a convenient one.
+
+    The point of the spectral init is global structure that PCA's leading axes
+    miss, so a test corpus where PCA already separates the classes would prove
+    nothing. This reproduces the situation that actually bit the map: the class
+    label (standing in for species) is a *small-variance* offset that the
+    neighbour graph can see, while the loudest direction in the data is an
+    orthogonal gradient unrelated to the class.
+
+    PCA's first axes are captured by the loud gradient and interleave the two
+    classes along it; the graph Laplacian is not fooled by variance and its low
+    eigenvectors respect the class boundary, so the spectral init separates what
+    the PCA init overlaps. Returns (vectors, labels).
+    """
+    rng = np.random.default_rng(seed)
+    half = n // 2
+    labels = np.concatenate([np.zeros(half, np.int8), np.ones(n - half, np.int8)])
+
+    x = rng.normal(scale=0.4, size=(n, d)).astype(np.float32)
+    # The class: a tight low-variance offset on one axis. Small, but the kNN
+    # graph resolves it because within a class the points really are closer.
+    x[labels == 0, 0] += 1.0
+    x[labels == 1, 0] -= 1.0
+    # The loud decoy: a high-variance gradient on another axis, unrelated to the
+    # class, that PCA's leading component will lock onto instead.
+    x[:, 1] += rng.normal(scale=6.0, size=n).astype(np.float32)
+    return bp.l2_normalize(x), labels
+
+
+def _graph(x, k=30, seed=42):
+    import pynndescent
+    idx = pynndescent.NNDescent(x, n_neighbors=k, metric="cosine",
+                                random_state=seed, n_jobs=1, compressed=False)
+    gi, gd = idx.neighbor_graph
+    return np.ascontiguousarray(gi), np.ascontiguousarray(gd)
+
+
+def test_spectral_init_is_cheap_deterministic_and_scaled():
+    """The three properties the build depends on, none of them about biology.
+
+    Cheap: a small ncv converges. Deterministic: the constant v0 means the same
+    graph gives the same layout, which every downstream coordinate needs.
+    Scaled: the largest absolute coordinate is 10, the range UMAP's optimizer
+    expects, so the init is a drop-in for UMAP's own spectral layout.
+    """
+    x, _ = _two_species_corpus()
+    knn = _graph(x)
+    a = bp.umap_init_from_spectral(knn, 30, 2, seed=42, ncv=32)
+    b = bp.umap_init_from_spectral(knn, 30, 2, seed=42, ncv=32)
+    assert a.shape == (len(x), 2)
+    assert np.isfinite(a).all()
+    assert np.array_equal(a, b), "constant v0 must make the solve reproducible"
+    assert abs(np.abs(a).max() - 10.0) < 0.5, "scaled to UMAP's expected range"
+
+
+def test_spectral_init_separates_what_a_pca_init_interleaves():
+    """The finding, reduced to a unit test: on a graph with two genuine masses,
+    the spectral init lays them out further apart than the PCA init does.
+
+    This is the property the map lost for a day and got back. It is asserted on
+    the *init itself*, before any UMAP optimization, because that is where the
+    difference originates - the optimizer preserves the global arrangement it is
+    handed, it does not create one.
+    """
+    from sklearn.metrics import silhouette_score
+
+    x, labels = _two_species_corpus()
+    knn = _graph(x)
+
+    # PCA init needs 3-column PCA coordinates, the same source the build uses.
+    comps, _, mean = bp.fit_exact_pca(_stream(x), len(x))
+    pca3 = bp.transform_pca(_stream(x), len(x), comps[:3], mean)
+
+    spec = bp.umap_init_from_spectral(knn, 30, 2, seed=42, ncv=32)
+    pca = bp.umap_init_from_pca(pca3, 2, seed=42)
+
+    sil_spec = silhouette_score(spec, labels)
+    sil_pca = silhouette_score(pca, labels)
+    assert sil_spec > sil_pca + 0.15, (
+        f"spectral init should separate the masses more than PCA "
+        f"(spectral {sil_spec:.3f} vs pca {sil_pca:.3f})")

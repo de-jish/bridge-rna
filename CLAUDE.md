@@ -142,8 +142,10 @@ Adding a fourth is one line in each, plus a stage in `build_projections.py`; the
 | method | what it is | fit cost on 942,563 points |
 | --- | --- | --- |
 | PCA | exact eigendecomposition, linear, honest about global magnitude | ~6 s |
-| UMAP | `n_neighbors=30`, `min_dist=0.1`, cosine, PCA init | ~14 min |
+| UMAP | `n_neighbors=30`, `min_dist=0.1`, cosine, spectral init | ~14 min |
 | t-SNE | openTSNE, perplexity 30, cosine, PCA init rescaled to std 1e-4 | hours, almost all of it 3-D |
+
+**UMAP starts from a spectral layout, and this is load-bearing for the species split.** A PCA start (shipped 2026-07-22 to 07-23) scatters the two species into many interleaved islands; a spectral start consolidates them into two territories, worth 13x the species silhouette on the real corpus at no cost in local fidelity. The reason spectral was ever abandoned - a 7.31 GB Lanczos basis - was an artifact of UMAP's `sqrt(n)` default `ncv`, not of the eigenproblem: `umap_init_from_spectral` solves for the 3-4 eigenvectors actually wanted with `ncv=32` and a shifted operator in 20 s and 241 MB. `--umap-init pca` reproduces the old build. This is the kind of global-structure choice `validate_artifacts.py --quality` cannot see, since both its metrics are local, so it is judged by the species silhouette in `REFERENCE.md` instead.
 
 Three things about t-SNE are worth knowing before touching that stage.
 
