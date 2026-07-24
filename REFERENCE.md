@@ -150,7 +150,7 @@ Three settings make that possible, and two of them are non-obvious.
 - **`random_state=42`, and what it costs.**
   Seeding forces single-threaded execution three separate ways: `_validate_parameters` overwrites `n_jobs` to 1 (`umap_.py:1950-1954`, and its warning is printed after the assignment so it always reads the confusing "n_jobs value 1 overridden to 1"), `fit()` calls `numba.set_num_threads(1)` for the whole fit (`:2413-2415`, restored at `:2855`) which serializes the `njit(parallel=True)` kernels inside `fuzzy_simplicial_set`, and `_fit_embed_data` passes `random_state is None` as the `parallel` flag (`:2891`), selecting the serial layout kernel at `layouts.py:222-224`.
   Measured on this machine against a real UMAP graph, the serial layout costs **4.3x to 7.5x** the parallel one.
-  Determinism is kept anyway: this is a once-per-corpus offline artifact, and the whole build is 10.5 minutes.
+  Determinism is kept anyway: this is a once-per-corpus offline artifact, and the build is run once and cached.
 
 `--knn-jobs` defaults to 1 for the same reason and is a separate knob: NN-descent's heap updates race under threads, so the same seed gives a slightly different graph run to run at `n_jobs=-1`.
 That is roughly 10x faster on that one 59-second stage and gives up graph reproducibility.
@@ -181,7 +181,8 @@ Note the degradation with component index: by PC3 the agreement is already 0.994
 
 **Read the next subsection before quoting this one.** The metric half of this decision stands and is still shipped; the `n_neighbors=15` half was reversed on 2026-07-23 and the reducer now runs `n_neighbors=30`.
 
-The reducer runs `n_neighbors=15`, `metric="cosine"`, on the **raw 512-d L2-normalized vectors**, not `n_neighbors=30` with euclidean on PCA-50.
+As written on 2026-07-21: the reducer runs `n_neighbors=15`, `metric="cosine"`, on the **raw 512-d L2-normalized vectors**, not `n_neighbors=30` with euclidean on PCA-50.
+The metric and input space are still that. The neighbour count is not; it is 30.
 Scored on a 60,000-point sample against the original 512-d space, three seeds per configuration (seed sd was 0.001 to 0.002 on both metrics, so these gaps are 8 to 37 standard deviations):
 
 | configuration | kNN recall @15 | 25-NN tissue purity |
@@ -189,7 +190,7 @@ Scored on a 60,000-point sample against the original 512-d space, three seeds pe
 | n_neighbors 30, euclidean on PCA-50 (previous) | 0.380 | 0.630 |
 | n_neighbors 15, euclidean on PCA-50 | 0.417 | 0.638 |
 | n_neighbors 30, cosine on raw 512-d | 0.398 | 0.642 |
-| **n_neighbors 15, cosine on raw 512-d (shipped)** | **0.426** | **0.646** |
+| **n_neighbors 15, cosine on raw 512-d (shipped 2026-07-21 to 07-23)** | **0.426** | **0.646** |
 
 The two changes compose. Reducing to PCA-50 first was discarding the 4.9% of variance those components do not carry, and `n_neighbors=30` was over-smoothing local structure.
 
