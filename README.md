@@ -175,12 +175,16 @@ Run the steps in order, because the metadata fetch joins onto the table the proj
 ```bash
 PY=.venv/bin/python
 $PY precompute/embed_osdr.py                              # NASA embeddings. Hours; resumable.
-$PY precompute/build_projections.py                      # full-corpus projection. ~10.5 min.
+$PY precompute/build_projections.py                      # full-corpus projections. Hours, mostly 3-D t-SNE.
 $PY precompute/fetch_archs4_meta.py                      # Earth metadata. ~35 s, needs network.
 $PY precompute/validate_artifacts.py --mixing --quality  # gates the build
 ```
 
 `embed_osdr.py` records its progress and resumes where it stopped, so an interrupted run does not start over.
+
+The projection build is dominated by one stage. PCA takes seconds and UMAP about fourteen minutes, but 3-D t-SNE takes hours on its own, because the fast interpolation method only works for two output dimensions and three dimensions falls back to a much slower algorithm.
+`--skip-tsne` leaves it out and is not a broken build: the t-SNE option is shown disabled, the validator reports it as skipped rather than failing, and everything else works.
+Each projection is a separate stage, so you can rebuild one without redoing the others.
 The validator is the check a structural pass cannot give you: row counts and finite coordinates are satisfied by any set of numbers, so `--quality` scores each projection on how well it preserves the 512-dimensional space it came from, against a null that says what the number would be if the map carried no information.
 
 To try the map before building the real cache, which takes hours, build a synthetic corpus of the same shape and point the app at it:

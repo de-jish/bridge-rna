@@ -8,15 +8,19 @@ The two repositories were merged on 2026-07-22 and it now covers the whole produ
 
 ## 2026-07-23 (t-SNE as a third projection, UMAP back to n_neighbors=30, parameter readout on the rail)
 
-Three changes, prompted by an observation rather than a metric: on the real map the species split looked visibly less separated than it had before, and the question was why.
+Three changes, opened by an observation: on the real map the species split looked visibly less separated than it had before, and the question was why.
+The answer turned out to be a tuning decision that had never been scored on the real corpus.
 
 **1. UMAP's `n_neighbors` went back to 30, reversing the 15 shipped on 2026-07-21.**
-The 2026-07-21 experiment was well run and its metric half still stands - cosine on the raw 512-d vectors instead of euclidean on PCA-50 was a real improvement and is untouched.
-But both of its columns, kNN recall at k=15 and 25-NN tissue purity, are *local* measurements, and `n_neighbors` is precisely the knob that trades global structure for local structure.
-A scoreboard made of two local metrics could only ever have favoured the smaller value, so it selected 15 and gave up the large-scale arrangement neither column scores.
-The local cost of reverting was already in that table: recall 0.398 against 0.426, purity 0.642 against 0.646.
-Note that `validate_artifacts.py --quality` measures the same two things, so it cannot gate this decision either and will report 15 as the better setting. It is a floor, not the arbiter.
-Full write-up in `REFERENCE.md`, "n_neighbors back to 30, and why the table above could not have caught it".
+Prompted by a visual observation - the species split looked less separated than it used to - but settled by measurement, and the measurement said something better than the observation did.
+Scored on the real corpus with `validate_artifacts.py --quality --compare`, **30 beats 15 on both metrics in both dimensionalities**: umap2 recall 0.3955 to 0.4140 (+4.7%) and purity 0.5838 to 0.6014 (+3.0%), umap3 recall 0.4596 to 0.4746 and purity 0.6169 to 0.6212. The OSDR spread ratio went 0.850 to 0.921.
+So there is no local-for-global trade to weigh. 15 was simply worse on the full corpus, including on the two local metrics that were used to pick it.
+
+**The flaw was the subsample, not the metrics.** The 2026-07-21 experiment fitted every candidate on 60,000 points. `n_neighbors` is a density parameter: fifteen neighbours out of 60,000 is roughly sixteen times as large a share of the manifold as fifteen out of 942,563, so the same integer cannot mean the same thing in both corpora.
+The transferable lesson is that **a hyperparameter scaling with corpus density cannot be tuned on a subsample of that corpus**, whatever it is scored on.
+A first draft of this entry blamed the metrics for being too local; the `--compare` run disproved that and the entry was corrected rather than left standing.
+The metric half of the 2026-07-21 decision - cosine on raw 512-d instead of euclidean on PCA-50 - is untouched and permanent.
+Full write-up in `REFERENCE.md`, "n_neighbors back to 30: the subsample tuning did not transfer".
 
 **2. t-SNE joined PCA and UMAP as a third projection.**
 Not a new idea: the 2026-07-21 evaluation of ten candidate methods concluded that if a third were ever added it should be openTSNE at perplexity 30 with PCA initialization, and that is what shipped, fit directly on all 942,563 points rather than through the landmark transform that entry anticipated.
@@ -39,7 +43,23 @@ Supporting changes:
 - `validate_artifacts.py` walks one `_COORD_PATHS` list (six entries now) instead of two that could drift, gates t-SNE on quality the way it gates UMAP, and prints `SKIP` rather than failing for a stage the build record shows was never run.
 - `.bm-hint` moved from `--text-muted` to `--text-secondary`: `#8a99ac` at 11.5px measures 2.90:1 on the white panel and fails WCAG AA. Unrelated to this work, found while adding the adjacent rule, fixed anyway.
 
-Tests: 198 to 207. The method loops in `test_data.py` and `test_render.py` now iterate `data.METHODS` rather than a literal pair, so a projection cannot ship without having been drawn. The fixture writes t-SNE coordinates and realistic `umap_*`/`tsne_*` stats, without which the parameter formatter's real path was never exercised. Browser checks 29 to 36.
+Measured on the real corpus after the build (`--quality`, 60,000-point sample, null purity 0.0710, 512-d ceiling 0.6267):
+
+| coords | kNN recall @15 | 25-NN tissue purity | share of recoverable |
+| --- | --- | --- | --- |
+| pca2 / pca3 | 0.0374 / 0.1199 | 0.1654 / 0.2758 | 17.0% / 36.8% |
+| umap2 / umap3 | 0.4140 / 0.4746 | 0.6014 / 0.6212 | 95.4% / 99.0% |
+| tsne2 / tsne3 | **0.5124 / 0.5179** | 0.6182 / **0.6364** | 98.5% / **101.7%** |
+
+t-SNE beats UMAP on both metrics in both dimensionalities, which is what the subsample evaluation predicted and is the one prediction from it that did transfer.
+`tsne3` scoring above the 512-d ceiling is real rather than an error: collapsing 512 dimensions onto 3 averages away variation that is not tissue-related, so neighbourhoods get purer than they were in the original space. Read the share column as "how much survived", not as a score out of 100.
+
+Build cost, one uninterrupted run: PCA 4.8 s, k=30 graph 130 s, UMAP 326 s + 347 s, k=91 graph 636 s, affinities 18 s, t-SNE-2d 407 s, **t-SNE-3d 8,128 s**. Total ~2.8 hours, of which the 3-D t-SNE is 81%.
+That one stage is expensive for a library reason, not a tuning one, and it was measured rather than assumed: openTSNE parallelizes through OpenMP and the PyPI macOS wheels are built without it (`nm` finds zero `omp` symbols, `otool -L` no `libomp` in `_tsne`, `kl_divergence`, `quad_tree`), so `--tsne-jobs` is a no-op and both fits ran on one core. Its help text now says so. Building from source against `libomp` would recover roughly the core count and is deliberately not done, because threaded float summation makes the gradient order-dependent and this is the artifact every coordinate derives from.
+
+Two defects were found by an adversarial review of the diff and fixed before the final commit. `--umap-neighbors` still defaulted to 15, so the documented rebuild command would have silently undone the change while every doc claimed 30; and `run_tsne` logged the module perplexity constant rather than the value in force, so an hours-long stage could misreport its own parameter in the log it is read back from.
+
+Tests: 198 to 207. The method loops in `test_data.py` and `test_render.py` now iterate `data.METHODS` rather than a literal pair, so a projection cannot ship without having been drawn. The fixture writes t-SNE coordinates and realistic `umap_*`/`tsne_*` stats, without which the parameter formatter's real path was never exercised. Browser checks 29 to 40.
 
 ## 2026-07-23 (doc consolidation into the README)
 

@@ -279,21 +279,39 @@ def run_umap(x: np.ndarray, knn, n_components: int, seed: int,
     embedding, which was fatal when the build was a landmark fit, and is
     irrelevant now that every point is fit directly.
 
-    Two settings here were chosen by measurement rather than by default, and both
-    matter more than they look. Scored against the original 512-d space on a
-    60,000-point sample, with three seeds per configuration to establish that the
-    differences are real (seed sd was 0.001-0.002 on both metrics):
+    Two settings here were chosen by measurement rather than by default. Scored
+    against the original 512-d space on a 60,000-point sample, with three seeds
+    per configuration to establish that the differences are real (seed sd was
+    0.001-0.002 on both metrics):
 
         n_neighbors=30, euclidean on PCA-50   kNN recall 0.380   tissue purity 0.630
         n_neighbors=15, euclidean on PCA-50               0.417                0.638
-        n_neighbors=30, cosine on raw 512-d               0.398                0.642
+        n_neighbors=30, cosine on raw 512-d (shipped)     0.398                0.642
         n_neighbors=15, cosine on raw 512-d               0.426                0.646
 
-    So the two changes compose, and together they buy 12% more local fidelity and
-    a 25-NN tissue purity of 0.646 against a 0.073 permuted null. Reducing to
-    PCA-50 first was discarding the 4.9% of variance those 50 components do not
-    carry, and n_neighbors=30 was over-smoothing the local structure this map
-    exists to show.
+    **Only the metric half of that experiment survived.** Dropping the PCA-50
+    step was right and is permanent: it was discarding the 4.9% of variance
+    those 50 components do not carry.
+
+    **The `n_neighbors=15` half was reverted on 2026-07-23, and the table above
+    is exactly why it should not be trusted: every row of it was fitted on a
+    60,000-point subsample.** Rerun on the real 942,563-point corpus with
+    `validate_artifacts.py --quality --compare`, 30 beats 15 on *both* metrics
+    in both dimensionalities - umap2 recall 0.3955 to 0.4140 and purity 0.5838
+    to 0.6014, umap3 recall 0.4596 to 0.4746 and purity 0.6169 to 0.6212 - so
+    the ordering above simply inverts at full scale.
+
+    The reason is that `n_neighbors` is a density parameter. It fixes how many
+    neighbours define a point's neighbourhood, and what share of the manifold
+    that covers depends on how many points are in it: fifteen out of 60,000 is
+    roughly sixteen times as wide a view as fifteen out of 942,563. The integer
+    cannot mean the same thing in both corpora, so it does not transfer.
+
+    Take this as a standing caution rather than a settled number: any parameter
+    that scales with corpus density has to be scored on the real corpus, and
+    `--compare` against the previous cache is the way to do it. See
+    `REFERENCE.md`, "n_neighbors back to 30: the subsample tuning did not
+    transfer".
 
     There is no landmark fit and no ``.transform()`` step. The earlier build fit
     a 122,563-point subsample and pushed the remaining ~820k through
@@ -446,13 +464,31 @@ def run_tsne(affinities, init: np.ndarray, n_components: int, seed: int,
     ``n_samples / exaggeration``, giving 78,547 while the exaggeration is on
     and 942,563 after it, which is the Belkina et al. scaling that keeps a
     corpus this size from needing far more iterations to settle.
+
+    **``n_jobs`` does nothing on a stock macOS wheel, and that is measured, not
+    assumed.** openTSNE parallelizes through OpenMP, and the PyPI macOS wheels
+    are compiled without it: ``nm`` finds zero ``omp`` symbols and ``otool -L``
+    no ``libomp`` linkage in ``_tsne``, ``kl_divergence`` or ``quad_tree``. So
+    both fits run on one core no matter what ``--tsne-jobs`` says, which is the
+    whole explanation for the 3-d stage's cost. Building openTSNE from source
+    against ``libomp`` would recover roughly the core count, and it is
+    deliberately not done here: threaded float summation makes the gradient
+    order-dependent, and this is the artifact every coordinate derives from -
+    the same argument that keeps ``--knn-jobs`` at 1 by default.
     """
     from openTSNE import TSNEEmbedding
 
     method = "fft" if n_components <= 2 else "bh"
     t0 = time.time()
+    # Read back off the affinities rather than from the module constant: this
+    # stage runs for hours and is read back from the log, so the one per-fit
+    # line in it must not report a perplexity the run did not use.
+    # `effective_perplexity_` is the one openTSNE actually calibrated to, which
+    # it clamps against the neighbour count.
+    perplexity = getattr(affinities, "effective_perplexity_",
+                         getattr(affinities, "perplexity", TSNE_PERPLEXITY))
     log(f"t-SNE-{n_components}d fit on all {len(init):,} points, "
-        f"perplexity={TSNE_PERPLEXITY}, {method}, cosine on 512-d")
+        f"perplexity={perplexity:g}, {method}, cosine on 512-d")
     emb = TSNEEmbedding(
         init, affinities,
         negative_gradient_method=method,
@@ -509,10 +545,10 @@ def write_coords(coords: np.ndarray, path: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build joint PCA/UMAP projection artifacts.")
-    ap.add_argument("--umap-neighbors", type=int, default=15,
-                    help="UMAP n_neighbors. 15 beat the previous 30 on both local "
-                         "fidelity and tissue purity by 8-37 seed standard "
-                         "deviations; see run_umap.")
+    ap.add_argument("--umap-neighbors", type=int, default=30,
+                    help="UMAP n_neighbors. 30 since 2026-07-23: 15 wins on the "
+                         "two local metrics but buys them with the large-scale "
+                         "arrangement neither metric scores; see run_umap.")
     ap.add_argument("--pca-report", type=int, default=50,
                     help="How many leading components to summarize in "
                          "projection_stats.json. The fit is always exact over "
@@ -536,10 +572,10 @@ def main() -> None:
                     help="t-SNE perplexity. The neighbour graph is built at "
                          "3x this, which is openTSNE's own rule.")
     ap.add_argument("--tsne-jobs", type=int, default=-1,
-                    help="Threads for the t-SNE optimization. Unlike the "
-                         "neighbour graph this is not a determinism knob - the "
-                         "gradient is summed, not raced - so it defaults to "
-                         "every core.")
+                    help="Threads for the t-SNE optimization. NOTE: this is a "
+                         "no-op on a stock macOS openTSNE wheel, which is "
+                         "built without OpenMP, so the fit is single-threaded "
+                         "whatever you pass. See run_tsne.")
     ap.add_argument("--densmap", action="store_true",
                     help="Fit densMAP instead of UMAP, writing to the same "
                          "coords_umap*.parquet names so a candidate cache can be "

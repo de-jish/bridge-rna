@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 193 tests pass in about two seconds, plus 29 browser checks in `tests/e2e_check.py`.
+**Current state: built, run on the real corpus, and tested.** 207 tests pass in about three seconds, plus 40 browser checks in `tests/e2e_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -57,8 +57,10 @@ The cost that justified the approximations turned out not to exist, and both mea
 It is not a new idea: `progress.md`'s 2026-07-21 evaluation scored ten candidates and concluded that if a third method were ever added it should be openTSNE at perplexity 30 with PCA initialization, which is exactly what shipped.
 
 **UMAP's `n_neighbors` went back to 30 on 2026-07-23**, reversing the 15 that section "UMAP settings, chosen by measurement" argued for.
-That is a real reversal and the reason is recorded rather than quietly overwritten: 15 was chosen on local metrics alone (kNN recall and tissue purity), and it bought them by giving up the large-scale arrangement those metrics do not score, which showed up as visibly worse species separation on the real map.
-The numbers that favoured 15 were not wrong; they were measuring the wrong half.
+The reason is recorded rather than quietly overwritten, and it is not the one it first looked like.
+Scored on the real corpus with `--quality --compare`, **30 beats 15 on both metrics in both dimensionalities** (umap2 recall 0.3955 to 0.4140, purity 0.5838 to 0.6014), so there was no local-for-global trade to weigh; 15 was simply worse.
+The flaw was that 15 was chosen by fitting candidates on a **60,000-point subsample**. `n_neighbors` is a density parameter, so fifteen neighbours out of 60,000 covers roughly sixteen times as much of the manifold as fifteen out of 942,563, and the number could not mean the same thing in both places.
+**A hyperparameter that scales with corpus density cannot be tuned on a subsample of that corpus.** That is the transferable lesson, and it is why `--compare` against the previous cache is now the thing to run before accepting a projection change.
 
 ## Read these first
 
@@ -262,7 +264,7 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
 /Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 207 tests, about three seconds
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 36 browser checks, about a minute
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 40 browser checks, about two minutes
 ```
 
 **The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.

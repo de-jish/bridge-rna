@@ -108,6 +108,33 @@ Measured end to end on a 10-core M4 with 16 GB of RAM:
 So fitting everything is not merely affordable, it is **faster than the landmark build was**, because the 404 s and 467 s `.transform()` passes are gone.
 The "a direct 940k fit is hours" claim that shaped the entire first design was never measured.
 
+### The three-projection build, measured end to end (2026-07-23)
+
+The table above is the `n_neighbors=15`, PCA-plus-UMAP build. This is the shipped one: `n_neighbors=30` and a t-SNE stage.
+Same machine, one uninterrupted run, from `cache/projection_stats.json`:
+
+| stage | cost | notes |
+| --- | --- | --- |
+| exact PCA over all 942,563 points | **4.8 s** | unchanged; one streaming second-moment pass |
+| materialize the normalized corpus | 1 s | 1.93 GB resident |
+| k=30 cosine neighbour graph, `n_jobs=1` | **130 s** | was 59 s at k=15 |
+| UMAP-2d layout | **326 s** | was 251 s at k=15 |
+| UMAP-3d layout | **347 s** | was 251 s at k=15 |
+| k=91 cosine neighbour graph, `n_jobs=1` | **635 s** | t-SNE's own graph, k = 3 x perplexity, +1 for the self column |
+| perplexity-30 affinity calibration | **18 s** | P has 117,905,236 nonzeros, 0.94 GB of float64 values |
+| t-SNE-2d layout, FIt-SNE | **407 s** | |
+| t-SNE-3d layout, Barnes-Hut | **8,128 s** | **2.26 hours, 81% of the whole build** |
+| **total** | **~2.8 hours** | against ~10.5 min for the two-projection build |
+
+**One stage is 81% of the build, and the reason is a hard library limit rather than a tuning choice.**
+openTSNE's FIt-SNE interpolation refuses more than two output dimensions ("Interpolation based t-SNE for >2 dimensions is currently unsupported (and generally a bad idea)"), so the 3-D fit falls back to Barnes-Hut, which is `n log n` against FFT's linear and carries a much larger constant. Measured here, 3-D costs **20x** its own 2-D fit for one extra dimension.
+
+**`--tsne-jobs` does nothing on a stock macOS wheel, and this was checked rather than assumed.**
+openTSNE parallelizes through OpenMP, and the PyPI macOS wheels are built without it: `nm -gU` finds **zero** `omp` symbols and `otool -L` shows no `libomp` linkage in `_tsne`, `kl_divergence` or `quad_tree`. Both fits ran on one core regardless of the flag, which is the whole explanation for the 8,128 s.
+Building openTSNE from source against `libomp` would recover roughly the core count. It is deliberately not done: threaded float summation makes the gradient order-dependent, and this is the artifact every coordinate derives from, which is the same argument that keeps `--knn-jobs` at 1.
+
+Peak RSS stays under 4 GB despite P being roughly 2 GB, because the 1.93 GB normalized corpus is freed as soon as the affinities are built and before the layouts start. Observed: 3.68 GB during the graph build, 1.99 GB during the t-SNE optimizations.
+
 Three settings make that possible, and two of them are non-obvious.
 
 - **`precomputed_knn`, one graph for both fits.**
@@ -169,22 +196,57 @@ The two changes compose. Reducing to PCA-50 first was discarding the 4.9% of var
 Confirmed on the **real 942,563-point map**, not just the sample: 25-NN tissue purity over all 853,989 points carrying a real tissue bucket, 30,000 queries, went **0.6448 to 0.6756 (+4.8%)** against a permuted-label null of 0.0761, so the lift over null went 8.5x to 8.9x.
 The OSDR spread ratio also improved, 0.827 to 0.850, meaning the spaceflight corpus occupies more of the map rather than less.
 
-### `n_neighbors` back to 30, and why the table above could not have caught it (2026-07-23)
+### `n_neighbors` back to 30: the subsample tuning did not transfer (2026-07-23)
 
 The shipped reducer is now `n_neighbors=30`, `metric="cosine"`, on the raw 512-d L2-normalized vectors.
-Only the neighbour count reverted; the metric and input-space half of the 2026-07-21 decision is untouched and was never in question.
+Only the neighbour count reverted; the metric and input-space half of the 2026-07-21 decision is untouched, was never in question, and is permanent.
 
-**What prompted it was a visual observation, not a metric**: on the real map the species split, which is the largest-scale structure the corpus has and the only color-by that clearly clears the arbitrary-projection band at eta-squared 0.985, was visibly less separated at 15 than it had been at 30.
+**What prompted it was a visual observation**: on the real map the species split, which is the largest-scale structure the corpus has and the only field that clearly clears the arbitrary-projection band at eta-squared 0.985, was visibly less separated at 15 than it had been at 30.
 
-**Why the table above could not have caught that is the useful part.**
-Both of its columns are local measurements: kNN recall at k=15 asks whether a point's fifteen nearest 512-d neighbours are still near it, and 25-NN tissue purity asks about twenty-five. Neither scores large-scale arrangement at all.
-`n_neighbors` is precisely the knob that trades global structure for local structure - it sets how much of the manifold each point is allowed to see while the graph is built - so a scoreboard made of two local metrics can only ever favour the smaller value. The experiment was well run and answered the question it asked; the question was half the problem.
+**What the measurement then showed is stronger than the observation, and it is not the story anyone expected.**
+Both builds were scored against the same 60,000-point sample of the real 942,563-point corpus with `validate_artifacts.py --quality --compare`:
 
-The local cost of going back is small and was already visible in that same table: at `n_neighbors=30` with cosine on raw 512-d, kNN recall is 0.398 against 0.426 and tissue purity 0.642 against 0.646. That is roughly 6.6% of local fidelity and 0.6% of tissue purity, traded for the large-scale arrangement the map is read at first.
+| coords | kNN recall @15 | 25-NN tissue purity | share of recoverable structure |
+| --- | --- | --- | --- |
+| umap2, `n_neighbors=15` | 0.3955 | 0.5838 | 92.3% |
+| **umap2, `n_neighbors=30` (shipped)** | **0.4140 (+4.7%)** | **0.6014 (+3.0%)** | **95.4%** |
+| umap3, `n_neighbors=15` | 0.4596 | 0.6169 | 98.2% |
+| **umap3, `n_neighbors=30` (shipped)** | **0.4746 (+3.3%)** | **0.6212 (+0.7%)** | **99.0%** |
 
-**The lesson generalizes past UMAP** and belongs with the methodological note in section 11: a projection has at least two kinds of fidelity, and a decision made on one of them is not a decision about the map. `validate_artifacts.py --quality` still scores only local fidelity and tissue purity, so it cannot gate this either - it will report the 15-setting as the better one. Treat it as a floor, not as the arbiter.
+**30 is better on both metrics, in both dimensionalities.** There is no local-for-global trade here to weigh: 15 was simply worse on the full corpus, including on the two local metrics that were used to choose it.
 
-Measured build cost of the change, same machine, same seed: the k=30 neighbour graph takes **127-139 s** against 59 s at k=15, and each UMAP fit takes **325-350 s** against about 251 s.
+**So the flaw was the 60,000-point subsample, not the choice of metrics.**
+The 2026-07-21 experiment fitted every configuration on 60,000 points and picked the winner there. `n_neighbors` is a *density* parameter - it fixes how many neighbours define each point's local neighbourhood, and what fraction of the manifold that covers depends entirely on how many points are in it. Fifteen neighbours out of 60,000 is a far wider view of the manifold than fifteen out of 942,563, roughly sixteen times as large a share. Tuning it on a subsample and transplanting the number to a corpus 15.7x larger asks the same integer to mean something it cannot mean in both places.
+
+That is a sharper and more useful lesson than "the metrics were too local", which is what this section said when it was first written and before the comparison had been run. **A hyperparameter that scales with corpus density cannot be tuned on a subsample of that corpus, whatever it is scored on.** The metrics were fine. The corpus was not the corpus.
+
+It also means `validate_artifacts.py --quality` *can* gate this after all, and now does: run against the real cache it prefers 30 on every measure, so it would have caught the regression if it had been run with `--compare` at the time. It was not; the retune was accepted on the subsample scores alone.
+
+Measured build cost of the change, same machine, same seed: the k=30 neighbour graph takes **130 s** against 59 s at k=15, and the UMAP fits take **326 s** and **347 s** against about 251 s each.
+The OSDR spread ratio also improved again, **0.850 to 0.921**, so the spaceflight corpus occupies more of the map at 30 than at 15.
+
+### All three projections scored against the 512-d space (2026-07-23)
+
+`validate_artifacts.py --quality`, 60,000-point sample of the real corpus, 54,264 of them carrying a named tissue bucket.
+Anchors: permuted-label purity **0.0710** (the null), 512-d reference purity **0.6267** (the ceiling a projection is chasing), random-neighbour recall 0.000250.
+
+| coords | kNN recall @15 | 25-NN tissue purity | share of recoverable structure |
+| --- | --- | --- | --- |
+| pca2 | 0.0374 | 0.1654 | 17.0% |
+| pca3 | 0.1199 | 0.2758 | 36.8% |
+| umap2 | 0.4140 | 0.6014 | 95.4% |
+| umap3 | 0.4746 | 0.6212 | 99.0% |
+| **tsne2** | **0.5124** | 0.6182 | 98.5% |
+| **tsne3** | **0.5179** | **0.6364** | **101.7%** |
+
+**t-SNE beats UMAP on both metrics in both dimensionalities**, which is what the 2026-07-21 subsample evaluation predicted (it forecast 0.581 local against 0.426, and 0.668 purity against 0.646) and is the one prediction from that experiment that *did* transfer to the full corpus.
+The margin on local fidelity is large: `tsne2` recovers 24% more of a point's true 512-d neighbours than `umap2` does.
+
+**`tsne3` scores 101.7%, above the 512-d ceiling, and that is not an error.**
+Neighbourhoods in the 3-D t-SNE are *more* tissue-pure than neighbourhoods in the original 512-d space. A projection can do that: collapsing 512 dimensions onto 3 averages away variation that is real but not tissue-related, and where that variation was what put an off-tissue sample among a point's 512-d neighbours, removing it raises agreement with the label. It means the reduction is smoothing in a direction that happens to align with tissue, not that t-SNE recovered information the embedding did not contain.
+It is a reason to read the share figure as "how much of the recoverable structure survived", not as a score out of 100.
+
+**PCA remains the weak view and is still not gated**, exactly as section 6 of the validator says: 17.0% in 2-D, because PC1 alone is 41.3% of the variance so a PCA-2D plot is mostly one axis plus noise. It is kept as a fast linear sanity layer, and its global fidelity (0.849 on the 2026-07-21 evaluation, 3x the best neighbour embedding) is the thing it is actually good at, which neither column here scores.
 
 **PCA after L2 normalization, exact over the whole corpus: PC1 = 41.3%, cumulative over the first 50 of 512 components = 95.0%.**
 (The 60,000-point subsample the earlier build used reported 40.9% and 95.1%.)
