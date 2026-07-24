@@ -6,6 +6,18 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-07-23 (file ingestion: embed an uploaded OSDR sample live)
+
+The Retrieve view can now take an OSDR sample the corpus has never seen: upload its counts, embed it live, and get the identical output (network graph + inspector + optional LLM summary) the picker produces, scored against the same 940,455-sample ARCHS4 index.
+
+**It is a fourth query-vector source, not a new pipeline.** `bridge_rna/retrieval.py` was already built around one fact - the cosine scan (`_topk_cosine_from_memmap`) is shared, and the cached/precomputed/demo paths differ only in where the 512-d query vector comes from. Uploading is that fourth source. Everything downstream - the scan, the offline annotation (`_annotate_from_cache`), the `archs4_index` map join - is reused unchanged, so an uploaded sample's hits carry the same schema (gse / title / tissue / species + a map position) as a cached OSDR sample's. `run_uploaded_retrieval` returns mode `"uploaded"`, and the status banner names it via the shared `_retrieval_phrase`.
+
+**The embedding is a subprocess, by the same rule the demo path follows.** The serving app never imports torch (pinned by a test), so `precompute/embed_upload.py` loads the checkpoint, embeds one counts file, writes a 512-d npy, and exits; `bridge_rna.retrieval.embed_uploaded_counts` shells out to it. The preprocessing is not re-implemented - it reuses the exact symbols funnelled through `manifold/bridge_rna.py`, so an uploaded sample is embedded in the same gene order, ortholog mapping, TPM/log1p pipeline, and encode call as the corpus. **Invariant 1 (the gene-digest gate) is enforced before any vector is produced.**
+
+**Validated end to end on the real model and corpus.** Embedding OSD-100's own counts file through the upload path reproduces its precomputed cached vector at **cosine 1.00000000, max abs diff 0.0** - the definitive check that scores are comparable. A full uploaded search of the eye sample `Mmus_C57-6J_EYE_FLT_Rep1_M23` against all 940,455 ARCHS4 samples returns eye-tissue analogs (GSM6204794, GSM4256053) in its top 5, annotated and locatable on the map. Input contract: mouse Ensembl-indexed counts CSV/TSV (OSDR is Mus musculus); a file that maps zero orthologs, or a digest mismatch, is refused with a clean one-line reason, never embedded into a meaningless vector.
+
+UI: a `dcc.Upload` dropzone and a sample-column picker in the Retrieve rail, a separate Embed-&-search callback writing the shared outputs with `allow_duplicate=True`. Downstream callbacks (details, AI summary, See-on-map) resolve the query row from a `query` dict now carried in the hits-store payload, so they work for a sample that is not in `samples_df`. Flask `MAX_CONTENT_LENGTH` capped at 200 MB. Tests 219 (8 new in `test_upload_ingestion.py`, including the live-vs-cached parity gate and the gene-digest abort). Design doc: `docs/file_ingestion.md`.
+
 ## 2026-07-23 (spectral init restores the species separation)
 
 Josh reported that even at `n_neighbors=30` the map looked less segmented than the version he remembered, specifically the human/mouse split. He was right, and it was not `n_neighbors`.
