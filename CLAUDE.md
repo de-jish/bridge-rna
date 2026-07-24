@@ -27,6 +27,16 @@ So a query needs no subprocess and no network: **0.8 s against 22.1 s**, with `g
 
 `search_hits` returns `(hits, mode)` where mode is `cached`, `precomputed`, or `demo`, and **the interface must always say which ran**.
 It did not, once: the status banner special-cased only `precomputed`, so every cached result was announced as "real demo script output".
+The banner label now comes from one shared `_retrieval_phrase(mode)` in `bridge_rna/callbacks.py`, so a new path names itself there rather than in a callback body.
+
+**A fourth path exists for a sample the corpus never embedded: file ingestion (mode `"uploaded"`).**
+A user can upload an OSDR counts file, have it embedded live, and get the identical output scored against the same ARCHS4 index.
+It is a fourth *query-vector source*, not a new pipeline - the cosine scan, `_annotate_from_cache`, and the `archs4_index` map join are the cached path's, reused unchanged, so an uploaded hit carries the same schema as a cached one.
+`bridge_rna.retrieval.run_uploaded_retrieval` is the entry point; it embeds via `bridge_rna.retrieval.embed_uploaded_counts`, which shells out to `precompute/embed_upload.py` because **the serving app never imports torch** - the same reason the `demo` path is a subprocess.
+`embed_upload.py` reuses the exact preprocessing symbols from `manifold/bridge_rna.py` and enforces **invariant 1 (the gene-digest gate)** before producing any vector, so an uploaded sample is embedded in the same gene order as the corpus or the embed is refused.
+Verified: embedding an OSDR sample's own counts through this path reproduces its precomputed cached vector at cosine 1.0, max abs diff 0.0 (`tests/test_upload_ingestion.py`).
+Input is mouse Ensembl-indexed counts (OSDR is Mus musculus); a file mapping zero orthologs is rejected, never embedded into a meaningless vector.
+Design doc: `docs/file_ingestion.md`.
 
 ### Two retrieval tiers, not three
 

@@ -217,6 +217,12 @@ def build_app() -> Dash:
         route = _route_for(pathname)
         return view_for(route), header(route["key"])
 
+    # Cap the request body so an oversized counts upload fails at the server with
+    # a 413 rather than being silently truncated into a malformed matrix.
+    from bridge_rna.config import MAX_UPLOAD_BYTES
+
+    app.server.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+
     rna_callbacks.register(app)
     if _manifold_available():
         from manifold import callbacks as manifold_callbacks
