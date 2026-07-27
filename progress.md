@@ -9,10 +9,12 @@ The two repositories were merged on 2026-07-22 and it now covers the whole produ
 ## 2026-07-26 (screenshot set, and the layout bug it exposed)
 
 Captured `screenshots/`, fourteen retina-scale PNGs (1680x1010 at 2x) of the real app driven end to end by Playwright against the real `cache/`: four of the retrieval view, ten of the map.
+The driver is `tests/screenshots.py`, a sibling of `e2e_check.py` - same harness, opposite purpose, one asserts and the other composes - named so pytest does not collect it, and it takes about ten minutes.
 The driver waits on facts the page reports about itself - glyph counts, banner text, a populated inspector - rather than on fixed sleeps, so a slow render produces a late screenshot instead of a blank one.
 The set is deliberately a walkthrough rather than a gallery: pick a study and sample, search, open a hit, widen to top-20, then the whole corpus under all three projections, the OSDR-only coverage case, a zoom that re-samples 942,563 points down to 337,542, a hover card, 3-D, and finally the same retrieval drawn and framed on the map.
 The query throughout is `OSD-137|Mmus_BAL-TAL_LVR_FLT_Rep1_F1`, a 39-day spaceflight mouse liver, whose nearest Earth analog is a GEO mouse liver at cosine 0.9996.
-The folder is untracked - 22 MB of PNGs is a lot to put in git history for something reproducible in ten minutes.
+The folder itself is untracked - 22 MB of PNGs is a lot to put in git history when the driver is committed and regenerates them.
+Re-running it from the committed copy reproduced eleven of the fourteen byte-for-byte; the three that differ are the wheel-zoom detail view, the hover inside it, and the 3-D camera drag, which are the only shots whose framing comes from mouse gestures.
 
 **Reviewing the shots found a real layout bug, now fixed.**
 `.app-shell` declared `min-height: 100%` where it needed `height: 100%`.
