@@ -18,9 +18,18 @@
   overflow: hidden;
 }
 
+/* The row track has to be `minmax(0, 1fr)`, not the implicit `auto`. An auto
+   row is sized by its tallest item's content, so a hit with a long GEO record
+   made the inspector grow to fit rather than scroll: the page gained 410 px
+   below the fold, the "Generate AI summary" button went off screen, and the
+   network canvas - which is `height: 100%` of a column that had just got
+   taller - was cut off at the bottom of the window. Bounding the track lets
+   `.details-panel`'s own `overflow-y: auto` do the scrolling, which is what
+   every `min-height: 0` and `overflow: hidden` in this file already assumed. */
 .app-grid {
   display: grid;
   grid-template-columns: 288px minmax(0, 1fr) 384px;
+  grid-template-rows: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;

@@ -6,9 +6,17 @@
    knows there are two views at all.
    ========================================================================== */
 
+/* `height`, not just `min-height`. Both views are fixed-height instruments
+   that scroll internally - every `overflow: hidden` and `min-height: 0` below
+   assumes the shell is exactly the viewport. With only a floor, a tall child
+   raised the shell instead: inspecting a hit with a long GEO record grew the
+   page 410 px past the fold, taking the AI panel off screen and stretching the
+   network canvas out of the window with it. The floor stays for the map's
+   percentage-height chain. */
 .app-shell {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 100%;
 }
 

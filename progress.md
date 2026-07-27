@@ -6,6 +6,41 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-07-26 (screenshot set, and the layout bug it exposed)
+
+Captured `screenshots/`, fourteen retina-scale PNGs (1680x1010 at 2x) of the real app driven end to end by Playwright against the real `cache/`: four of the retrieval view, ten of the map.
+The driver waits on facts the page reports about itself - glyph counts, banner text, a populated inspector - rather than on fixed sleeps, so a slow render produces a late screenshot instead of a blank one.
+The set is deliberately a walkthrough rather than a gallery: pick a study and sample, search, open a hit, widen to top-20, then the whole corpus under all three projections, the OSDR-only coverage case, a zoom that re-samples 942,563 points down to 337,542, a hover card, 3-D, and finally the same retrieval drawn and framed on the map.
+The query throughout is `OSD-137|Mmus_BAL-TAL_LVR_FLT_Rep1_F1`, a 39-day spaceflight mouse liver, whose nearest Earth analog is a GEO mouse liver at cosine 0.9996.
+The folder is untracked - 22 MB of PNGs is a lot to put in git history for something reproducible in ten minutes.
+
+**Reviewing the shots found a real layout bug, now fixed.**
+`.app-shell` declared `min-height: 100%` where it needed `height: 100%`.
+A floor is not a ceiling, so the shell grew to fit its tallest child: opening a hit whose GEO record ran long took the page from 1010 px to **1420 px**, pushing 410 px below the fold.
+The "Generate AI summary" button went off screen, and the network canvas - `height: 100%` of a column that had just got taller - was cut off at the bottom of the window, which is what made the top-20 network look clipped.
+Every `overflow: hidden` and `min-height: 0` in `retrieve.css` already assumed a fixed-height shell; only the shell itself did not.
+`.app-grid` also needed an explicit `grid-template-rows: minmax(0, 1fr)`, because an implicit `auto` row is sized by its tallest item's content and would have re-created the same growth one level down.
+With both, the page stays at exactly the viewport height and `.details-panel` scrolls its own overflow, which is what its `overflow-y: auto` was there for all along.
+Verified at 1010 px and 800 px viewport heights; the map view is unaffected at both.
+
+Five new checks in `tests/e2e_check.py` section 7 pin it, because no Python test can see a CSS layout: the page must not grow when the inspector opens, the inspector must scroll instead, and the AI panel must stay on screen.
+211 tests pass, 45 browser checks pass (was 40).
+
+**One thing observed and deliberately not changed.** The map's hover card takes Plotly's default background, which is the trace's own colour, so hovering a Liver point gives an orange card and an "Other" point a grey one.
+The retrieval half fixed exactly this in `figures.py` by pinning `hoverlabel` to a white card with an explicit font colour.
+Doing the same on the dark plot canvas is a defensible change but a design one, and the palette there was validated as a set, so it is left for Josh to call rather than made unilaterally.
+
+## 2026-07-26 (slide deck source doc)
+
+Added `docs/slide-deck-source.md`, a talk-ready source document: motivation (2,108 spaceflight samples against 940,455 Earth samples, 446 to 1), the end-to-end method, the evidence, the honesty section (the three rejected candidates and the arbitrary-projection null), the model, the visualization, the generalization argument beyond space biology, a 21-slide proposed order with speaker notes, and a number sheet for the appendix.
+
+Every figure in it was pulled from `REFERENCE.md`, `README.md`, or read directly off the artifacts.
+Two facts were read off the checkpoint for this doc and were not previously recorded anywhere: `ckpt['config']` carries **`mask_ratio` 0.15**, lr 1e-4, 20 epochs with early stopping (patience 5), balanced shard sampling; `ckpt['run_metadata']['dataset']` carries **640,000 train / 160,000 validation samples**; and the checkpoint's top level carries `epoch` 20, `train_loss` 0.1481, `val_loss` 0.1499, `total_params` 45,593,601.
+Worth folding into `REFERENCE.md` section 1, which currently records the architecture half of `ckpt['config']` but not the training half.
+
+One naming point the doc settles, since Josh's framing was "BERT": the model is a **BERT-style masked-value transformer encoder**, and that is the phrase to use.
+It masks 15% of genes exactly as BERT masks 15% of tokens, but the head is `nn.Linear(hidden, 1)`, so the objective is regression of a masked expression value rather than classification over a vocabulary, and the shipped checkpoint's `feature_type: flash` means it runs exact scaled-dot-product attention, not the FAVOR+ linear attention the "Performer" in `ExpressionPerformer` refers to.
+
 ## 2026-07-23 (spectral init restores the species separation)
 
 Josh reported that even at `n_neighbors=30` the map looked less segmented than the version he remembered, specifically the human/mouse split. He was right, and it was not `n_neighbors`.

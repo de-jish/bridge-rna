@@ -62,6 +62,35 @@ COUNT_JS = """() => {
 }"""
 
 
+# The retrieval network is drawn as one node trace after the edge traces, and
+# its customdata carries [kind, node_id, hover] per node - so the last trace
+# having several nodes is the signal that a search has landed.
+NETWORK_READY_JS = """() => {
+  const gd = document.querySelector('#network-graph .js-plotly-plot');
+  if (!gd || !gd._fullData || !gd._fullData.length) return false;
+  const t = gd._fullData[gd._fullData.length - 1];
+  return !!(t && t.customdata && t.customdata.length > 3);
+}"""
+
+# Pixel centre of the first GSM node, via Plotly's own data->pixel transform,
+# so the check clicks the node a user would click.
+GSM_NODE_JS = """() => {
+  const gd = document.querySelector('#network-graph .js-plotly-plot');
+  if (!gd || !gd._fullData) return null;
+  const t = gd._fullData[gd._fullData.length - 1];
+  if (!t || !t.customdata) return null;
+  for (let i = 0; i < t.customdata.length; i++) {
+    if (t.customdata[i][0] !== 'gsm') continue;
+    const xa = gd._fullLayout.xaxis, ya = gd._fullLayout.yaxis;
+    const r = gd.getBoundingClientRect();
+    return {x: r.left + xa._offset + xa.l2p(t.x[i]),
+            y: r.top + ya._offset + ya.l2p(t.y[i]),
+            id: t.customdata[i][1]};
+  }
+  return null;
+}"""
+
+
 class Checks:
     def __init__(self):
         self.failures: list[str] = []
@@ -332,7 +361,61 @@ def main() -> int:
                                         f"({info['total']:,})")
                 page.screenshot(path=str(SHOTS / "07-zoomed.png"))
 
-            print("\n=== 7. console ===")
+            print("\n=== 7. the retrieval view fits its window ===")
+            # Both views are fixed-height instruments that scroll internally,
+            # and nothing in the Python can tell you whether they still do.
+            # This caught the shell growing to fit its tallest child: opening a
+            # hit whose GEO record ran long pushed the page 410 px below the
+            # fold, took the AI panel off screen, and stretched the network
+            # canvas out of the window with it. The page height is the check,
+            # because that is the thing that must not move.
+            rp = browser.new_page(viewport={"width": 1680, "height": 1010})
+            rp.on("console", lambda m: console_errors.append(m.text)
+                  if m.type == "error" else None)
+            rp.on("pageerror", lambda e: console_errors.append(str(e)))
+            rp.goto(f"http://127.0.0.1:{args.port}/", wait_until="load")
+            rp.wait_for_selector(".sample-preview", timeout=60_000)
+            rp.wait_for_timeout(1500)
+            fits = "() => document.scrollingElement.scrollHeight" \
+                   " <= document.scrollingElement.clientHeight"
+            c.ok(rp.evaluate(fits), "the view fits the window before a search")
+
+            rp.locator("#search-button").click()
+            rp.wait_for_function(NETWORK_READY_JS, timeout=180_000)
+            rp.wait_for_timeout(1500)
+            c.ok(rp.evaluate(fits), "the view still fits once the network is drawn")
+
+            # Open the hit whose record is longest, since the bug only showed
+            # up on a hit with enough metadata to overflow the inspector.
+            pos = rp.evaluate(GSM_NODE_JS)
+            if pos:
+                rp.mouse.click(pos["x"], pos["y"])
+                rp.wait_for_function(
+                    "() => { const d = document.querySelector('#details-panel');"
+                    " return d && d.innerText.includes('GSM'); }", timeout=90_000)
+                rp.wait_for_timeout(3000)
+                geom = rp.evaluate(
+                    """() => {
+                      const d = document.querySelector('.details-panel');
+                      const ai = document.querySelector('.ai-panel');
+                      return {sh: document.scrollingElement.scrollHeight,
+                              ch: document.scrollingElement.clientHeight,
+                              scrolls: d.scrollHeight > d.clientHeight,
+                              aiBottom: Math.round(ai.getBoundingClientRect().bottom)};
+                    }""")
+                print(f"     {geom}")
+                c.ok(geom["sh"] <= geom["ch"],
+                     f"an open inspector does not grow the page ({geom['sh']} "
+                     f"vs {geom['ch']})")
+                c.ok(geom["scrolls"],
+                     "the inspector scrolls its own overflow instead")
+                c.ok(geom["aiBottom"] <= geom["ch"],
+                     f"the AI panel stays on screen (bottom at {geom['aiBottom']})")
+            else:
+                c.ok(False, "no GSM node to open in the inspector")
+            rp.close()
+
+            print("\n=== 8. console ===")
             real = [e for e in console_errors
                     if "favicon" not in e.lower() and "_dash-component-suites" not in e]
             for e in real[:10]:
