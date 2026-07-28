@@ -7,7 +7,10 @@ one indent level deeper, inside a `register(app)` the shell calls once.
 
 from __future__ import annotations
 
+import base64
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -21,7 +24,7 @@ from .ai import (
     _format_osdr_query_text,
     _load_ai_prompt_template,
 )
-from .config import GENERIC_ENTREZ_EMAIL
+from .config import GENERIC_ENTREZ_EMAIL, MAX_UPLOAD_BYTES
 from .figures import _empty_network_figure, build_network_figure
 from .geo import _enrich_hits_from_ncbi_eutils
 from .layout import ARCHS4_SAMPLE_COUNT, samples_df
@@ -30,10 +33,79 @@ from .retrieval import (
     TIER_CACHED,
     TIER_SUBPROCESS,
     TIER_UNAVAILABLE,
+    UPLOAD_MODE,
+    run_uploaded_retrieval,
     sample_tier,
     search_hits,
 )
 from .util import _format_count, _last_nonempty_line, _safe_str
+
+
+def _retrieval_phrase(mode: str) -> str:
+    """The clause the status banner uses to name the path that answered.
+
+    Kept in one place so the dropdown path and the uploaded path describe
+    themselves consistently, and so a new path names itself here rather than in a
+    callback body. The invariant is that the interface always says which ran.
+    """
+    return {
+        "cached": "from the precomputed OSDR embedding, scored against all "
+                  f"{_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
+        "precomputed": "from a supplied query-embedding table",
+        "demo": "by embedding the counts matrix from scratch",
+        UPLOAD_MODE: "by embedding the uploaded counts matrix live, scored against "
+                     f"all {_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
+    }.get(mode, mode)
+
+
+def _uploaded_query_series(filename: str, column: str) -> pd.Series:
+    """A minimal query row standing in for an uploaded sample.
+
+    An uploaded sample is not in `samples_df`, so the figure and inspector need a
+    query identity synthesized from the file. OSDR spaceflight data is Mus
+    musculus - which `_build_query_details` already hardcodes - and the finer
+    biology fields are genuinely unknown, so they are left blank rather than
+    guessed.
+    """
+    return pd.Series({
+        "sample_id": f"UPLOAD|{filename}::{column}",
+        "sample_name": column or filename,
+        "study_id": "Uploaded file",
+        "tissue": "",
+        "condition": "",
+        "strain": "",
+        "sex": "",
+        "duration": "",
+    })
+
+
+def _query_series(hits_payload: dict[str, Any] | None) -> pd.Series | None:
+    """Resolve the query row for a stored retrieval, uploaded or catalog.
+
+    Prefers the `query` dict carried in the payload (the only source an uploaded
+    sample has) and falls back to the OSDR catalog by `sample_id` so retrievals
+    stored before this field existed still resolve.
+    """
+    q = (hits_payload or {}).get("query")
+    if isinstance(q, dict) and q:
+        return pd.Series(q)
+    sid = _safe_str((hits_payload or {}).get("sample_id"))
+    match = samples_df.loc[samples_df["sample_id"] == sid]
+    return match.iloc[0] if not match.empty else None
+
+
+def _query_dict(query: pd.Series) -> dict[str, str]:
+    """A JSON-safe, NaN-free view of a query row for the hits-store payload."""
+    return {str(k): _safe_str(v) for k, v in query.to_dict().items()}
+
+
+def _format_bytes(n: int) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{n} B"
 
 
 def _requested_sample(search: str | None) -> str:
@@ -256,12 +328,7 @@ def register(app) -> None:
         # "precomputed", so when the cached path was added every one of its
         # results was announced as "real demo script output" - the interface
         # asserting something that was not true about how the answer was made.
-        how = {
-            "cached": "from the precomputed OSDR embedding, scored against all "
-                      f"{_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
-            "precomputed": "from a supplied query-embedding table",
-            "demo": "by embedding the counts matrix from scratch",
-        }.get(mode, mode)
+        how = _retrieval_phrase(mode)
         # The precomputed path (a supplied query-embedding table) does not
         # enrich even when the box is ticked, so it must not claim to. Only the
         # cached and demo paths run the NCBI fetch.
@@ -278,9 +345,149 @@ def register(app) -> None:
             "biopython_enabled": bool(enable_biopython),
             "mode": mode,
             "hits": hits_df.to_dict(orient="records"),
+            "query": _query_dict(q_row),
         }
         return network, payload, status
 
+
+    @app.callback(
+        Output("upload-store", "data"),
+        Output("upload-preview", "children"),
+        Output("upload-sample-column", "options"),
+        Output("upload-sample-column", "value"),
+        Output("upload-column-control", "style"),
+        Output("upload-search-button", "disabled"),
+        Input("upload-counts", "contents"),
+        State("upload-counts", "filename"),
+        prevent_initial_call=True,
+    )
+    def handle_upload(contents: str | None, filename: str | None):
+        """Decode an uploaded counts file, cache it, and expose its sample columns.
+
+        The file is decoded once, written to a temp file, and only its *header*
+        is read here so the column picker fills without parsing the whole matrix.
+        The embedding itself happens later, on the Embed & search click.
+        """
+        hidden = {"display": "none"}
+        if not contents:
+            return None, "", [], None, hidden, True
+
+        try:
+            _, b64 = contents.split(",", 1)
+            raw = base64.b64decode(b64)
+        except Exception:
+            return (None, build_status_banner("Could not decode the uploaded file.", kind="error"),
+                    [], None, hidden, True)
+
+        if len(raw) > MAX_UPLOAD_BYTES:
+            msg = (f"That file is {_format_bytes(len(raw))}; the limit is "
+                   f"{_format_bytes(MAX_UPLOAD_BYTES)}.")
+            return None, build_status_banner(msg, kind="error"), [], None, hidden, True
+
+        name = _safe_str(filename) or "uploaded_counts.csv"
+        suffix = Path(name).suffix or ".csv"
+        tmp = tempfile.NamedTemporaryFile(prefix="bridge_upload_", suffix=suffix, delete=False)
+        try:
+            tmp.write(raw)
+        finally:
+            tmp.close()
+
+        sep = "\t" if suffix.lower() in (".tsv", ".txt") else ","
+        try:
+            cols = list(map(str, pd.read_csv(tmp.name, sep=sep, index_col=0, nrows=0).columns))
+        except Exception as exc:
+            return (None, build_status_banner(f"Could not read the counts file: {exc}", kind="error"),
+                    [], None, hidden, True)
+        if not cols:
+            return (None, build_status_banner(
+                "No sample columns found. Expected mouse Ensembl gene IDs in the "
+                "first column and one or more sample columns.", kind="error"),
+                [], None, hidden, True)
+
+        options = [{"label": c, "value": c} for c in cols]
+        preview = html.Div(className="upload-loaded", children=[
+            html.Div(name, className="upload-filename"),
+            html.Div(
+                f"{len(cols)} sample column{'s' if len(cols) != 1 else ''} detected.",
+                className="upload-meta"),
+        ])
+        store = {"path": tmp.name, "filename": name, "columns": cols}
+        # Show the column picker only when there is a choice to make.
+        col_style = {} if len(cols) > 1 else hidden
+        return store, preview, options, cols[0], col_style, False
+
+    @app.callback(
+        Output("network-graph", "figure", allow_duplicate=True),
+        Output("hits-store", "data", allow_duplicate=True),
+        Output("search-status", "children", allow_duplicate=True),
+        Input("upload-search-button", "n_clicks"),
+        State("upload-store", "data"),
+        State("upload-sample-column", "value"),
+        State("topk-slider", "value"),
+        State("entrez-email-input", "value"),
+        State("biopython-toggle", "value"),
+        running=[
+            (Output("upload-search-button", "disabled"), True, False),
+            (Output("upload-running-indicator", "children"),
+             "Embedding the uploaded sample and retrieving neighbors...", ""),
+        ],
+        prevent_initial_call=True,
+    )
+    def run_uploaded_search(
+        _: int,
+        upload_store: dict[str, Any] | None,
+        sample_column: str | None,
+        topk: int,
+        entrez_email: str | None,
+        biopython_toggle: list[str] | None,
+    ):
+        if not upload_store or not upload_store.get("path"):
+            return no_update, no_update, build_status_banner(
+                "Upload a counts file first.", kind="info")
+
+        filename = _safe_str(upload_store.get("filename")) or "uploaded file"
+        columns = upload_store.get("columns") or [""]
+        column = _safe_str(sample_column) or _safe_str(columns[0])
+        enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
+        email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
+
+        try:
+            hits_df = run_uploaded_retrieval(
+                counts_path=upload_store["path"],
+                sample_column=column,
+                topk=int(topk),
+                entrez_email=email_value,
+                enable_biopython_metadata=enable_biopython,
+            )
+        except Exception as exc:
+            detail = getattr(exc, "detail", "") or _safe_str(exc)
+            return (
+                _empty_network_figure("Embedding failed - see status for details."),
+                no_update,
+                build_status_banner(
+                    _last_nonempty_line(_safe_str(exc))
+                    or "Embedding the uploaded sample failed.",
+                    kind="error", detail=detail,
+                ),
+            )
+
+        query = _uploaded_query_series(filename, column)
+        network = build_network_figure(query=query, hits_df=hits_df)
+        enriched = bool(enable_biopython and _safe_str(entrez_email))
+        status_message = (
+            f"Retrieved {len(hits_df)} hits {_retrieval_phrase(UPLOAD_MODE)}"
+            + (", plus GEO and PubMed enrichment." if enriched else ".")
+        )
+        status = build_status_banner(status_message, kind="good")
+        payload = {
+            "sample_id": _safe_str(query["sample_id"]),
+            "entrez_email": email_value,
+            "biopython_enabled": bool(enable_biopython),
+            "mode": UPLOAD_MODE,
+            "hits": hits_df.to_dict(orient="records"),
+            "query": _query_dict(query),
+        }
+        return network, payload, status
 
     @app.callback(
         Output("ai-summary-output", "children"),
@@ -298,12 +505,10 @@ def register(app) -> None:
         if not hits_payload:
             return "", "Run a retrieval first so metadata is available."
 
-        sample_id = _safe_str(hits_payload.get("sample_id"))
-        q_match = samples_df.loc[samples_df["sample_id"] == sample_id]
-        if q_match.empty:
+        query_row = _query_series(hits_payload)
+        if query_row is None:
             return "", "Selected query sample is missing from local metadata."
 
-        query_row = q_match.iloc[0]
         hits_df = pd.DataFrame(hits_payload.get("hits", []))
         email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
 
@@ -379,9 +584,10 @@ def register(app) -> None:
                 html.P("Then click any node - the query, a GSM hit, or a GSE study - to inspect its metadata here.", className="details-empty-hint"),
             ]
 
-        sample_id = _safe_str(hits_payload.get("sample_id"))
         entrez_email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
-        q_row = samples_df.loc[samples_df["sample_id"] == sample_id].iloc[0]
+        q_row = _query_series(hits_payload)
+        if q_row is None:
+            q_row = pd.Series({"sample_id": _safe_str(hits_payload.get("sample_id"))})
         hits_df = pd.DataFrame(hits_payload.get("hits", []))
 
         # Open a GSM whose study context was never fetched, and fetch it now -

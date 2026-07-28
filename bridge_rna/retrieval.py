@@ -43,6 +43,7 @@ from .config import (
     OSDR_METADATA_PATH,
     PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES,
     ROOT,
+    UPLOAD_EMBED_SCRIPT_PATH,
 )
 from .geo import _enrich_hits_from_ncbi_eutils
 from .preflight import preflight_retrieval_requirements
@@ -583,6 +584,103 @@ def run_real_retrieval(
 
         normalized = normalized.sort_values("score", ascending=False).reset_index(drop=True)
         return normalized
+
+
+# --- The fourth query-vector source: a file the corpus has never seen --------
+
+UPLOAD_MODE = "uploaded"
+
+
+def embed_uploaded_counts(
+    counts_path: str | Path,
+    sample_column: str | None = None,
+) -> np.ndarray:
+    """Embed one uploaded OSDR counts file to its 512-d vector, live.
+
+    The serving app never imports torch, so this shells out to
+    `precompute/embed_upload.py`, exactly as the `demo` path shells out to
+    `demo_osdr_top5.py`. The subprocess enforces invariant 1 (the gene-digest
+    gate) before it produces anything, so a sample can never be embedded in a
+    gene order the ARCHS4 index was not built in.
+
+    Raises RetrievalError with a clean one-line message on any failure (missing
+    model prerequisites, an unreadable file, no ortholog-mappable genes, a digest
+    mismatch); the full detail is logged server-side.
+    """
+    missing, resolved = preflight_retrieval_requirements()
+    needed = ("checkpoint", "orthologs", "canonical_genes", "mouse_exon_lengths")
+    unresolved = [k for k in needed if resolved.get(k) is None]
+    if unresolved:
+        raise RetrievalError(
+            "Cannot embed an uploaded sample: missing model prerequisites "
+            f"({', '.join(unresolved)}). " + ("; ".join(missing) if missing else ""),
+            detail="; ".join(missing),
+        )
+
+    counts_path = Path(counts_path)
+    if not counts_path.exists():
+        raise RetrievalError(f"Uploaded counts file not found: {counts_path}")
+
+    with tempfile.TemporaryDirectory(prefix="osdr_upload_") as td:
+        out_path = Path(td) / "query_vector.npy"
+        cmd = [
+            sys.executable,
+            str(UPLOAD_EMBED_SCRIPT_PATH),
+            "--counts", str(counts_path),
+            "--out", str(out_path),
+            "--sample", _safe_str(sample_column),
+            "--checkpoint", str(resolved["checkpoint"]),
+            "--orthologs", str(resolved["orthologs"]),
+            "--canonical-genes", str(resolved["canonical_genes"]),
+            "--mouse-exon-lengths", str(resolved["mouse_exon_lengths"]),
+            "--device", "cpu",
+        ]
+        proc = subprocess.run(
+            cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=600
+        )
+        if proc.returncode != 0 or not out_path.exists():
+            msg = _safe_str(proc.stderr) or _safe_str(proc.stdout)
+            print(
+                "[embed_uploaded_counts] embed subprocess failed (returncode "
+                f"{proc.returncode}). Full output below:\n{msg}",
+                file=sys.stderr, flush=True,
+            )
+            # The script raises SystemExit("ABORT: ...") for the expected failures,
+            # so the last non-empty line is the actionable reason, not a stack trace.
+            reason = _last_nonempty_line(msg) or "Embedding the uploaded sample failed."
+            reason = reason.replace("ABORT: ", "")
+            raise RetrievalError(reason, detail=msg)
+
+        vec = np.load(out_path).astype(np.float32).reshape(-1)
+    if vec.size == 0:
+        raise RetrievalError("The uploaded sample produced an empty embedding.")
+    return vec
+
+
+def run_uploaded_retrieval(
+    counts_path: str | Path,
+    sample_column: str | None,
+    topk: int,
+    entrez_email: str | None = None,
+    enable_biopython_metadata: bool = True,
+) -> pd.DataFrame:
+    """Embed an uploaded sample live, then run the identical scan the cached path runs.
+
+    The query vector is the only thing new here. The cosine scan, the offline
+    annotation from `archs4_metadata.parquet`, and the `archs4_index` column are
+    the same code the cached path uses, so an uploaded sample's hits carry the
+    same schema - gse / title / tissue / species and a map position - as a
+    precomputed OSDR sample's.
+    """
+    q_vec = embed_uploaded_counts(counts_path, sample_column)
+    index_vecs, _, _ = _load_archs4_index()
+    idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk)
+    hits = _annotate_from_cache(idx, score)
+    hits["archs4_index"] = idx.astype(int)
+    hits = hits.sort_values("score", ascending=False).reset_index(drop=True)
+    if enable_biopython_metadata and _safe_str(entrez_email):
+        hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
+    return hits
 
 
 def search_hits(

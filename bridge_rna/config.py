@@ -19,6 +19,14 @@ OSDR_METADATA_PATH = (
     else (ROOT / "osdr" / "metadata" / "selected_sample_metadata.tsv")
 )
 DEMO_SCRIPT_PATH = ROOT / "demo_osdr_top5.py"
+# The live-embedding subprocess for uploaded OSDR counts files. It lives under
+# precompute/ so that all torch-touching code stays behind that boundary and the
+# serving app never imports the scientific stack (pinned by a test).
+UPLOAD_EMBED_SCRIPT_PATH = ROOT / "precompute" / "embed_upload.py"
+# Cap for an uploaded counts matrix. A whole-transcriptome counts file for a
+# handful of samples is a few MB; 200 MB is generous headroom and also the
+# Flask MAX_CONTENT_LENGTH the app sets so an oversized upload fails cleanly.
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(200 * 1024 * 1024)))
 EMBEDDING_DIR = ROOT / "archs4_sample_embeddings_full"
 GENERIC_ENTREZ_EMAIL = os.environ.get("GENERIC_ENTREZ_EMAIL", "noreply@example.com")
 DEFAULT_ENTREZ_EMAIL = os.environ.get("ENTREZ_EMAIL", GENERIC_ENTREZ_EMAIL)

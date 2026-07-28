@@ -135,6 +135,44 @@ def build_view() -> html.Div:
                             html.Div(
                                 className="control-group",
                                 children=[
+                                    html.Div("Or upload a sample", className="control-group-title"),
+                                    dcc.Upload(
+                                        id="upload-counts",
+                                        className="upload-dropzone",
+                                        multiple=False,
+                                        children=html.Div([
+                                            html.Div("Drop a counts file or click to browse",
+                                                     className="upload-dropzone-title"),
+                                            html.Div(
+                                                "CSV/TSV, mouse Ensembl gene IDs in column 1, "
+                                                "samples in columns.",
+                                                className="upload-dropzone-hint"),
+                                        ]),
+                                    ),
+                                    html.Div(id="upload-preview", className="sample-preview"),
+                                    html.Div(
+                                        id="upload-column-control",
+                                        className="control",
+                                        style={"display": "none"},
+                                        children=[
+                                            html.Label("Sample column", className="control-label"),
+                                            dcc.Dropdown(id="upload-sample-column", clearable=False),
+                                        ],
+                                    ),
+                                    html.Button(
+                                        "Embed & search uploaded sample",
+                                        id="upload-search-button",
+                                        className="btn-secondary",
+                                        n_clicks=0,
+                                        disabled=True,
+                                    ),
+                                    html.Div(id="upload-running-indicator", className="running-indicator"),
+                                    dcc.Store(id="upload-store"),
+                                ],
+                            ),
+                            html.Div(
+                                className="control-group",
+                                children=[
                                     html.Div("Retrieval", className="control-group-title"),
                                     html.Div(
                                         className="control",
