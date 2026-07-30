@@ -6,6 +6,36 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-07-30 (file ingestion verified in a browser loop; two defects fixed; cohort pooling measured)
+
+Three things, in order.
+
+**An example input file now ships.** `examples/osdr_upload_example.csv` is two real columns of OSD-100's counts matrix - one spaceflight eye, one ground control - with all 55,536 gene rows intact, 1.3 MB.
+Both columns are cached OSDR samples, which is the point: the file is simultaneously the format documentation, the E2E fixture, and its own correctness oracle, because an upload of either column must return exactly what the sample picker returns for that sample.
+`examples/README.md` states the contract, what is accepted, what is rejected and why, and the fact that **no metadata is required or accepted** - the query vector is a pure function of one counts column, so no metadata a user could supply would move a single hit.
+
+**File ingestion was driven in a real browser, in a loop.** `tests/e2e_upload_check.py`, a sibling of `e2e_check.py` and likewise not collected by pytest: 97 checks, about eight minutes, three cycles through one long-lived page.
+The loop is the design, not thoroughness theatre. A one-shot upload check passes on a page that leaks state between runs, so every fixture runs three times through the same page and every cycle must reproduce cycle 1 step for step, which it does.
+Correctness is anchored to the catalog path rather than to a golden file: uploaded FLT and GC columns must return the catalog's exact hits and scores for `OSD-100|...FLT_Rep1_M23` and `...GC_Rep1_M33`. Format variations (single-column, version-suffixed IDs, TSV, gzip) must all return that same answer; human Ensembl IDs, gene symbols, and a file with no sample columns must be rejected with their reason and draw nothing; and a valid upload straight after a rejection must be correct again.
+
+Two harness traps cost a run each and are worth recording. Dash 4 portals an open dropdown menu to a `.dash-dropdown-content` at the end of the body, so typing at the closed trigger is a **silent no-op** - the first version selected nothing and tested the same column twice while reporting success. And Playwright's `:text-is()` matches only the deepest element holding the text, so it never matches a `<label>` wrapping a `<span>`, which is exactly how Dash renders an option.
+
+**Two real defects, found by that testing and fixed.**
+
+*Staged uploads accumulated without bound.* Every upload wrote a `NamedTemporaryFile(delete=False)` that was never removed: one looped run left **32 files and 29 MB** in the system temp directory, and they outlived the process. Three bounds now hold it: staged files live in one process-owned directory removed at exit, a session's previous file is unlinked when its next upload arrives, and a directory abandoned by a killed process is reaped by the next run. Steady state is one file per active session; measured, ~30 uploads now leave 1 file where they left 30.
+The reaping is PID-tagged rather than signal-based, and the reason is worth keeping: `atexit` does not run on SIGTERM (how a supervisor stops a server) or SIGKILL, and a signal handler is not an option either, because uploads arrive on Dash's request threads and `signal.signal` may only be called from the main one. A first attempt did install a SIGTERM handler; it silently never fired for exactly that reason, and the E2E caught it. PID reuse can only make a dead directory look alive, delaying a cleanup - it can never remove a live server's file. `os.kill(0, 0)` addresses the process *group*, so PID 0 is excluded from the liveness probe explicitly, with a test.
+
+*The inspector claimed an OSDR study for uploaded samples.* `_build_osdr_query_metadata_block` ran unconditionally, so an uploaded sample rendered an "OSDR study" section repeating the "Uploaded file" study ID already shown under Identity, with a "Study title" that can never fill, and sent an OSDR lookup for a study that does not exist. It now returns nothing unless the study ID is a real accession.
+
+224 tests pass (was 219), 45 browser checks pass, 97 upload browser checks pass.
+
+**One observation, deliberately not acted on:** after a failed embed the network is replaced with "Embedding failed" while the inspector still describes the *previous* successful query, because the failure path returns `no_update` for `hits-store`. It is a mixed state. Clearing it would mean clearing `hits-store`, which lives on the shell so the map can draw a retrieval you ran before walking over to it - so this is a cross-view semantics decision, not a local fix, and it is Josh's call.
+
+**Cohort pooling was measured and specified, not built.** Full analysis in `docs/cohort_pooling.md`; the headline is that the measurements change why the feature is worth building.
+Mean pooling is exactly "average the members' cosine scores", weighted by L2 norm - so normalize each member first, because invariant 2 already establishes that norm is transcriptome concentration and not a nuisance scale. Averaging embeddings was checked against the biological alternative on five real cohorts: the pseudo-bulk embedding (counts summed, embedded live through `embed_upload.py`) sits **closer to the spherical centroid than the cohort's own members do**, in all five, so the centroid is not an off-manifold artifact.
+The premise needs correcting, though. Cohorts have almost no outlier problem - mean pairwise cosine 0.9933 against 0.8826 for random same-size groups - and yet **two replicates of the same cohort share on average 0.13 of their top-5 hits**, sometimes nothing at all. The cause is a scale mismatch: the entire top-500 of the 940,455-sample index spans a cosine range comparable to the gap between two animals in the same cage. Pooling raises leave-one-out top-5 stability from 0.13 to **0.78**, and that six-fold gain, not outlier protection, is the case for the feature.
+The caveat to carry: random samples from the same *study* already reach 0.9805, closing 84% of the distance to a real cohort, so most of a cohort's coherence is batch. A within-study null is the first thing to run before shipping.
+
 ## 2026-07-26 (screenshot set, and the layout bug it exposed)
 
 Captured `screenshots/`, fourteen retina-scale PNGs (1680x1010 at 2x) of the real app driven end to end by Playwright against the real `cache/`: four of the retrieval view, ten of the map.

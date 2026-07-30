@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -122,6 +123,112 @@ def test_uploaded_query_series_carries_what_the_figure_and_panel_read():
     assert q["sample_id"].startswith("UPLOAD|")
     for field in ("study_id", "tissue", "condition", "strain", "sex", "duration"):
         assert field in q.index
+
+
+def test_a_staged_upload_is_bounded_to_one_file_per_session():
+    """Staging must not leave a counts matrix on disk per upload, forever.
+
+    The first version wrote a `delete=False` temp file per upload and removed
+    none of them: one looped E2E run left 32 files and 29 MB behind, and they
+    outlived the process. Every staged file now lives in one process-owned
+    directory, and the next upload in a session removes the previous one.
+    """
+    from bridge_rna import callbacks
+
+    first = Path(callbacks._stage_upload(b"gene,S1\n", ".csv"))
+    second = Path(callbacks._stage_upload(b"gene,S2\n", ".csv"))
+    assert first.exists() and second.exists()
+    assert first.parent == second.parent == callbacks._upload_dir()
+
+    callbacks._discard_upload({"path": str(first)})
+    assert not first.exists(), "the superseded upload is still on disk"
+    assert second.exists(), "discarding one upload took out the other"
+
+    callbacks._discard_upload({"path": str(second)})
+
+
+def test_a_killed_servers_staging_dir_is_reaped_by_the_next_run():
+    """Cleanup cannot depend on the process exiting cleanly.
+
+    `atexit` does not run on SIGTERM (how a supervisor stops a server), SIGKILL,
+    or a crash, and a signal handler is not available either because uploads
+    arrive on request threads. So the directory is tagged with its owner's PID
+    and reaped by a later run. A live owner's directory must survive that.
+    """
+    import os
+    import tempfile
+
+    from bridge_rna import callbacks
+
+    tmp = Path(tempfile.gettempdir())
+    prefix = callbacks._UPLOAD_DIR_PREFIX
+
+    # A genuinely dead PID: run a process to completion and reap it, so the
+    # kernel reports ProcessLookupError for it. PID 0 does not work as a
+    # stand-in, because `os.kill(0, 0)` addresses the process group and
+    # succeeds.
+    finished = subprocess.Popen([sys.executable, "-c", "pass"])
+    finished.wait()
+    dead = Path(tempfile.mkdtemp(prefix=f"{prefix}{finished.pid}_", dir=str(tmp)))
+    (dead / "upload_x.csv").write_text("gene,S1\n")
+    alive = Path(tempfile.mkdtemp(prefix=f"{prefix}{os.getpid()}_", dir=str(tmp)))
+    unrelated = Path(tempfile.mkdtemp(prefix=f"{prefix}notapid_", dir=str(tmp)))
+    zero = Path(tempfile.mkdtemp(prefix=f"{prefix}0_", dir=str(tmp)))
+
+    try:
+        reaped = callbacks._sweep_abandoned_upload_dirs()
+        assert dead in reaped and not dead.exists()
+        assert alive.exists(), "the running process's own staging dir was reaped"
+        assert unrelated.exists(), "an unparseable name was removed on a guess"
+        assert zero.exists(), "PID 0 reached the liveness probe, which is a group"
+    finally:
+        for d in (dead, alive, unrelated, zero):
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def test_discarding_an_upload_only_touches_the_apps_own_staging_dir(tmp_path):
+    """A stale or malformed store must never make the app unlink someone's file."""
+    from bridge_rna import callbacks
+
+    bystander = tmp_path / "important.csv"
+    bystander.write_text("gene,S1\n")
+    for payload in ({"path": str(bystander)}, {"path": ""}, {}, None):
+        callbacks._discard_upload(payload)
+    assert bystander.exists()
+
+
+def test_a_file_that_fails_to_parse_is_not_left_staged():
+    """The rejection paths take the unusable file back off disk."""
+    from bridge_rna import callbacks
+
+    staged = Path(callbacks._stage_upload(b"gene_id\nENSMUSG00000000001\n", ".csv"))
+    assert staged.exists()
+    callbacks._discard_upload({"path": str(staged)})
+    assert not staged.exists()
+
+
+def test_the_osdr_study_block_is_omitted_for_an_uploaded_query(monkeypatch):
+    """An uploaded sample has no OSDR study, so it must not claim a section.
+
+    "Uploaded file" is already shown as the Study ID under Identity, so an
+    "OSDR study" section repeats it, adds a title that can never fill, and
+    sends a lookup for a study that does not exist.
+    """
+    from bridge_rna import panels
+    from bridge_rna.callbacks import _uploaded_query_series
+
+    calls: list[str] = []
+    monkeypatch.setattr(panels, "_fetch_osdr_study_summary",
+                        lambda sid: calls.append(sid) or {})
+
+    q = _uploaded_query_series("mysample.csv", "SampleA")
+    assert panels._build_osdr_query_metadata_block(q) == []
+    assert calls == [], f"an OSDR lookup was sent for {calls}"
+
+    # A real accession still renders, and still asks OSDR about it.
+    real = pd.Series({"study_id": "OSD-100"})
+    assert panels._build_osdr_query_metadata_block(real) != []
+    assert calls == ["OSD-100"]
 
 
 def test_query_series_prefers_the_payload_then_falls_back():

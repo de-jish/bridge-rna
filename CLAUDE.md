@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 219 tests pass in about twenty-five seconds, plus 45 browser checks in `tests/e2e_check.py`.
+**Current state: built, run on the real corpus, and tested.** 224 tests pass in about twenty-five seconds, plus 45 browser checks in `tests/e2e_check.py` and 97 in `tests/e2e_upload_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -36,7 +36,10 @@ It is a fourth *query-vector source*, not a new pipeline - the cosine scan, `_an
 `embed_upload.py` reuses the exact preprocessing symbols from `manifold/bridge_rna.py` and enforces **invariant 1 (the gene-digest gate)** before producing any vector, so an uploaded sample is embedded in the same gene order as the corpus or the embed is refused.
 Verified: embedding an OSDR sample's own counts through this path reproduces its precomputed cached vector at cosine 1.0, max abs diff 0.0 (`tests/test_upload_ingestion.py`).
 Input is mouse Ensembl-indexed counts (OSDR is Mus musculus); a file mapping zero orthologs is rejected, never embedded into a meaningless vector.
-Design doc: `docs/file_ingestion.md`.
+**No metadata is required or accepted** on this path, and none would change anything: the query vector is a pure function of one counts column, so tissue, flight-vs-ground, and accession would only fill the inspector and the summary prompt, never a hit or a score.
+Design doc: `docs/file_ingestion.md`. Format contract and a real working input: `examples/README.md` and `examples/osdr_upload_example.csv`.
+
+An uploaded file is **staged**, not merely written: `bridge_rna.callbacks._upload_dir` owns one directory per process, a session's previous file is unlinked when its next upload arrives, and a directory abandoned by a killed process is reaped by the next run. The reaping is PID-tagged rather than signal-based because `atexit` does not run on SIGTERM or SIGKILL and a signal handler is not available either - uploads arrive on Dash's request threads, and `signal.signal` may only be called from the main one. Before this, every upload leaked its counts matrix into the system temp directory forever.
 
 ### Two retrieval tiers, not three
 
@@ -275,8 +278,9 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 219 tests, about twenty-five seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 224 tests, about twenty-five seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 45 browser checks, about three minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 97 upload checks, about eight minutes
 ```
 
 **The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.

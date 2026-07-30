@@ -7,8 +7,11 @@ one indent level deeper, inside a `register(app)` the shell calls once.
 
 from __future__ import annotations
 
+import atexit
 import base64
+import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -97,6 +100,95 @@ def _query_series(hits_payload: dict[str, Any] | None) -> pd.Series | None:
 def _query_dict(query: pd.Series) -> dict[str, str]:
     """A JSON-safe, NaN-free view of a query row for the hits-store payload."""
     return {str(k): _safe_str(v) for k, v in query.to_dict().items()}
+
+
+# --- staging an uploaded counts file ----------------------------------------
+#
+# An upload has to reach disk, because the embedder is a subprocess and takes a
+# path. The first version wrote a `NamedTemporaryFile(delete=False)` per upload
+# and never removed any of them, so a long-lived instance accumulated one
+# whole counts matrix (about 1.3 MB for a two-sample OSDR file, up to the
+# 200 MB cap) per upload, forever, surviving process exit. A single looped E2E
+# run left 32 files and 29 MB behind.
+#
+# Three bounds fix that without changing the flow: every staged file lives in
+# one process-owned directory removed at exit, each session's previous file is
+# unlinked when its next upload arrives, and a directory abandoned by a killed
+# process is reaped by the next run. Steady state is one file per active
+# session, and nothing outlives the process for longer than one restart.
+_UPLOAD_DIR: Path | None = None
+_UPLOAD_DIR_PREFIX = "bridge_rna_uploads_"
+
+
+def _sweep_abandoned_upload_dirs() -> list[Path]:
+    """Reap staging directories whose owning process is gone.
+
+    Exit-time cleanup cannot carry this on its own. `atexit` does not run on
+    SIGTERM, which is how a supervisor stops a server, nor on SIGKILL or a
+    crash - and a signal handler is not an option either, because uploads
+    arrive on Dash's request threads and `signal.signal` may only be called
+    from the main one. So each staging directory is tagged with its owner's
+    PID, and the next run reaps the ones whose owner is no longer running.
+
+    PID reuse can only make a dead directory look alive, which delays its
+    cleanup by one run; it can never remove a live server's staged file.
+    """
+    reaped: list[Path] = []
+    for d in Path(tempfile.gettempdir()).glob(f"{_UPLOAD_DIR_PREFIX}*"):
+        m = re.match(rf"{_UPLOAD_DIR_PREFIX}(\d+)_", d.name)
+        if not d.is_dir() or not m:
+            continue
+        pid = int(m.group(1))
+        # `os.kill(0, ...)` addresses the whole process group rather than a
+        # process, so PID 0 must never reach the liveness probe.
+        if pid <= 0 or pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            shutil.rmtree(d, ignore_errors=True)
+            reaped.append(d)
+        except OSError:
+            pass  # Alive but owned by another user: not ours to remove.
+    return reaped
+
+
+def _upload_dir() -> Path:
+    """The one directory staged uploads live in, created on first use."""
+    global _UPLOAD_DIR
+    if _UPLOAD_DIR is None:
+        _sweep_abandoned_upload_dirs()
+        _UPLOAD_DIR = Path(tempfile.mkdtemp(
+            prefix=f"{_UPLOAD_DIR_PREFIX}{os.getpid()}_"))
+        atexit.register(shutil.rmtree, _UPLOAD_DIR, True)
+    return _UPLOAD_DIR
+
+
+def _stage_upload(raw: bytes, suffix: str) -> str:
+    fh = tempfile.NamedTemporaryFile(
+        prefix="upload_", suffix=suffix, dir=str(_upload_dir()), delete=False)
+    try:
+        fh.write(raw)
+    finally:
+        fh.close()
+    return fh.name
+
+
+def _discard_upload(previous: dict[str, Any] | None) -> None:
+    """Remove the file a previous upload in this session staged, if any.
+
+    Confined to `_upload_dir()` so a malformed or stale store cannot point this
+    at anything the app did not itself write.
+    """
+    path = _safe_str((previous or {}).get("path"))
+    if not path:
+        return
+    try:
+        p = Path(path).resolve()
+        if p.is_file() and p.parent == _upload_dir().resolve():
+            p.unlink()
+    except OSError:
+        pass
 
 
 def _format_bytes(n: int) -> str:
@@ -359,18 +451,28 @@ def register(app) -> None:
         Output("upload-search-button", "disabled"),
         Input("upload-counts", "contents"),
         State("upload-counts", "filename"),
+        State("upload-store", "data"),
         prevent_initial_call=True,
     )
-    def handle_upload(contents: str | None, filename: str | None):
-        """Decode an uploaded counts file, cache it, and expose its sample columns.
+    def handle_upload(contents: str | None, filename: str | None,
+                      previous: dict[str, Any] | None = None):
+        """Decode an uploaded counts file, stage it, and expose its sample columns.
 
-        The file is decoded once, written to a temp file, and only its *header*
-        is read here so the column picker fills without parsing the whole matrix.
-        The embedding itself happens later, on the Embed & search click.
+        The file is decoded once, written under `_upload_dir()`, and only its
+        *header* is read here so the column picker fills without parsing the
+        whole matrix. The embedding itself happens later, on the Embed & search
+        click, which is why the file has to persist past this callback rather
+        than living in a `with` block.
+
+        A new upload supersedes this session's previous one, so that one is
+        removed first, and a file that fails to parse is removed rather than
+        left behind for a search that can never use it.
         """
         hidden = {"display": "none"}
         if not contents:
             return None, "", [], None, hidden, True
+
+        _discard_upload(previous)
 
         try:
             _, b64 = contents.split(",", 1)
@@ -386,23 +488,23 @@ def register(app) -> None:
 
         name = _safe_str(filename) or "uploaded_counts.csv"
         suffix = Path(name).suffix or ".csv"
-        tmp = tempfile.NamedTemporaryFile(prefix="bridge_upload_", suffix=suffix, delete=False)
-        try:
-            tmp.write(raw)
-        finally:
-            tmp.close()
+        staged = _stage_upload(raw, suffix)
+
+        def _reject(message: str):
+            """Report the reason and take the unusable file back off disk."""
+            _discard_upload({"path": staged})
+            return (None, build_status_banner(message, kind="error"),
+                    [], None, hidden, True)
 
         sep = "\t" if suffix.lower() in (".tsv", ".txt") else ","
         try:
-            cols = list(map(str, pd.read_csv(tmp.name, sep=sep, index_col=0, nrows=0).columns))
+            cols = list(map(str, pd.read_csv(staged, sep=sep, index_col=0, nrows=0).columns))
         except Exception as exc:
-            return (None, build_status_banner(f"Could not read the counts file: {exc}", kind="error"),
-                    [], None, hidden, True)
+            return _reject(f"Could not read the counts file: {exc}")
         if not cols:
-            return (None, build_status_banner(
+            return _reject(
                 "No sample columns found. Expected mouse Ensembl gene IDs in the "
-                "first column and one or more sample columns.", kind="error"),
-                [], None, hidden, True)
+                "first column and one or more sample columns.")
 
         options = [{"label": c, "value": c} for c in cols]
         preview = html.Div(className="upload-loaded", children=[
@@ -411,7 +513,7 @@ def register(app) -> None:
                 f"{len(cols)} sample column{'s' if len(cols) != 1 else ''} detected.",
                 className="upload-meta"),
         ])
-        store = {"path": tmp.name, "filename": name, "columns": cols}
+        store = {"path": staged, "filename": name, "columns": cols}
         # Show the column picker only when there is a choice to make.
         col_style = {} if len(cols) > 1 else hidden
         return store, preview, options, cols[0], col_style, False

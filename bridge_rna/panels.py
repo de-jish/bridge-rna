@@ -174,9 +174,21 @@ def build_status_banner(message: str, kind: str = "info", detail: str | None = N
     return html.Div(children, className=f"status-banner status-{kind}")
 
 
+OSDR_ACCESSION_RE = re.compile(r"^(OSD|GLDS)-\d+$")
+
+
 def _build_osdr_query_metadata_block(query: pd.Series) -> list[Any]:
-    """Appendable OSDR metadata section for the right panel."""
+    """Appendable OSDR metadata section for the right panel.
+
+    Only an OSDR accession has an OSDR study behind it. An uploaded sample
+    carries the synthesized study_id "Uploaded file", which the Identity
+    section already shows, so rendering an "OSDR study" section for it repeats
+    that row, adds a "Study title —" that can never fill, and sends a lookup
+    for a study that does not exist. Say nothing instead.
+    """
     study_id = _safe_str(query.get("study_id", ""))
+    if not OSDR_ACCESSION_RE.match(study_id):
+        return []
     summary = _fetch_osdr_study_summary(study_id)
     study_title = _safe_str(summary.get("study_title", ""))
     study_description = _safe_str(summary.get("study_description", ""))

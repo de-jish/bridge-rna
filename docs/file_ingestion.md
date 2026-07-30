@@ -74,3 +74,18 @@ This is added to the banner's mode->label map, not special-cased.
 - **Annotation schema**: uploaded hits carry the same columns as cached hits, including `archs4_index`.
 - **Mode**: the uploaded path reports `"uploaded"` and the banner names it.
 - **Serving-import invariant still holds**: `embed_upload.py` is in `precompute/`, so the app-import test is unaffected.
+
+## Verified in a browser, in a loop (2026-07-30)
+
+`tests/e2e_upload_check.py` drives the real app through the real flow: 97 checks, three cycles through one long-lived page, about eight minutes.
+The loop is the design. A one-shot upload check passes on a page that leaks state between runs, so every fixture runs three times and every cycle must reproduce cycle 1 step for step.
+Correctness is anchored to the catalog path rather than to a golden file: `examples/osdr_upload_example.csv` is two columns of OSD-100, both cached OSDR samples, so an uploaded column must return exactly what the picker returns for that sample. Format variations (single-column, version-suffixed IDs, TSV, gzip) must return that same answer, rejections must draw nothing and say why, and a valid upload straight after a rejection must be correct again.
+
+Two defects it found, both fixed:
+
+- **Staged uploads accumulated forever.** Every upload wrote a `delete=False` temp file that nothing removed; one looped run left 32 files and 29 MB behind, surviving process exit. See `_upload_dir` / `_discard_upload` / `_sweep_abandoned_upload_dirs` in `bridge_rna/callbacks.py`, and the note there on why the reaping is PID-tagged rather than signal-based.
+- **The inspector claimed an OSDR study for an uploaded sample**, repeating the "Uploaded file" study ID already under Identity and sending a lookup for a study that does not exist.
+
+## Staging, and why it is not just a temp file
+
+The embedder is a subprocess and takes a path, so an upload has to reach disk and survive past the callback that received it. That is the whole reason it cannot live in a `with` block. Three bounds keep it from being a leak: one process-owned directory removed at exit, a session's previous file unlinked when its next upload arrives, and PID-tagged reaping of directories whose owner is gone. Steady state is one file per active session.
