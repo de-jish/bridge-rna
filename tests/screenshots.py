@@ -5,10 +5,17 @@ A sibling of `e2e_check.py` rather than a test: same harness, opposite purpose.
 `e2e_check.py` asserts and returns an exit code; this one composes. It boots
 app.py against the real `cache/` and walks both views the way a user does,
 capturing a retina-scale PNG (1680x1010 at 2x) wherever the app is showing
-something worth showing - fourteen of them, in the order a walkthrough would
-take: pick a sample, search, open a hit, widen to top-20, then the whole corpus
-under all three projections, the OSDR-only coverage case, a zoom, a hover card,
-3-D, and the same retrieval drawn and framed on the map.
+something worth showing.
+
+Two independent retrieval walkthroughs (a spaceflight mouse liver, OSD-137, and
+a spaceflight mouse kidney, OSD-102), each: pick a study and sample, run the
+search, open a hit in the inspector, then jump to the map and frame the
+viewport on the query and its neighbours so the retrieved network and its
+position in the whole corpus are shown side by side. The liver query also
+widens to top-20 before that. Then a clean map pass: default UMAP view coloured
+by tissue and by species, the OSDR-only coverage case, a zoomed neighbourhood,
+a hover card, and all three projections (PCA, UMAP, t-SNE) in both 2-D and
+3-D.
 
 Named so pytest does not collect it, for the same reason `e2e_check.py` is: it
 needs the real artifacts and takes about ten minutes.
@@ -37,10 +44,15 @@ from playwright.sync_api import sync_playwright
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 
-# A 39-day spaceflight mouse liver: recognisable biology, in the cached tier,
-# and its Earth analogs are a clean five-hit network.
-QUERY_STUDY = "OSD-137"
-QUERY_SAMPLE = "Mmus_BAL-TAL_LVR_FLT_Rep1_F1"
+# Two cached-tier queries, deliberately different studies and tissues so the
+# two retrieval walkthroughs read as distinct examples rather than the same
+# shot twice: a 39-day spaceflight mouse liver, and a flight mouse kidney.
+QUERIES = [
+    {"study": "OSD-137", "sample": "Mmus_BAL-TAL_LVR_FLT_Rep1_F1",
+     "slug": "liver", "label": "OSD-137 spaceflight mouse liver"},
+    {"study": "OSD-102", "sample": "Mmus_C57-6J_KDN_FLT_Rep1_M23",
+     "slug": "kidney", "label": "OSD-102 spaceflight mouse kidney"},
+]
 
 COUNT_JS = """() => {
   const gd = document.querySelector('.js-plotly-plot');
@@ -189,78 +201,117 @@ def main() -> int:
             page.on("console", lambda m: errors.append(m.text)
                     if m.type == "error" else None)
 
-            # ---------------- Retrieve ----------------
-            print("\n== retrieve: pick a study and a sample ==", flush=True)
-            page.goto(f"{base}/", wait_until="load")
-            page.wait_for_selector(".sample-preview", timeout=60_000)
-            page.wait_for_timeout(1500)
+            # ---------------- Retrieve: two independent examples ----------------
+            for qi, q in enumerate(QUERIES):
+                print(f"\n== retrieve[{q['slug']}]: pick a study and a sample ==",
+                      flush=True)
+                page.goto(f"{base}/", wait_until="load")
+                page.wait_for_selector(".sample-preview", timeout=60_000)
+                page.wait_for_timeout(1500)
 
-            page.locator("#study-dropdown").click()
-            page.locator(".dash-dropdown-content").get_by_text(
-                QUERY_STUDY, exact=True).first.click()
-            page.wait_for_timeout(1200)
-            page.locator("#sample-dropdown").click()
-            page.locator(".dash-dropdown-content").get_by_text(
-                QUERY_SAMPLE, exact=False).first.click()
-            page.wait_for_function(
-                "n => { const el = document.querySelector('.sample-preview');"
-                " return el && el.innerText.includes(n); }",
-                arg=QUERY_SAMPLE, timeout=60_000)
-            page.wait_for_timeout(1200)
-            s.shot(page, "retrieve-query-selected")
-
-            print("== retrieve: run the search ==", flush=True)
-            t0 = time.time()
-            page.locator("#search-button").click()
-            # The status banner reports which retrieval path ran; wait for it to
-            # stop saying "select a sample" and for the network to have nodes.
-            page.wait_for_function(
-                "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
-                " if (!gd || !gd._fullData) return false;"
-                " const t = gd._fullData[gd._fullData.length - 1];"
-                " return !!(t && t.customdata && t.customdata.length > 3); }",
-                timeout=180_000)
-            page.wait_for_timeout(1500)
-            status = page.locator("#search-status").inner_text().replace("\n", " ")
-            print(f"     search took {time.time() - t0:.1f}s -> {status[:140]}", flush=True)
-            s.shot(page, "retrieve-network")
-
-            print("== retrieve: open a hit in the inspector ==", flush=True)
-            pos = node_xy(page, "gsm", 0)
-            if not pos:
-                print("     no GSM node found", flush=True)
-            else:
-                print(f"     clicking {pos['label']}", flush=True)
-                page.mouse.click(pos["x"], pos["y"])
+                page.locator("#study-dropdown").click()
+                page.locator(".dash-dropdown-content").get_by_text(
+                    q["study"], exact=True).first.click()
+                page.wait_for_timeout(1200)
+                page.locator("#sample-dropdown").click()
+                page.locator(".dash-dropdown-content").get_by_text(
+                    q["sample"], exact=False).first.click()
                 page.wait_for_function(
-                    "() => { const d = document.querySelector('#details-panel');"
-                    " return d && d.innerText.includes('GSM'); }", timeout=90_000)
-                page.wait_for_timeout(2500)  # GEO enrichment fetch for this hit
-                s.shot(page, "retrieve-hit-inspector")
+                    "n => { const el = document.querySelector('.sample-preview');"
+                    " return el && el.innerText.includes(n); }",
+                    arg=q["sample"], timeout=60_000)
+                page.wait_for_timeout(1200)
+                s.shot(page, f"retrieve-{q['slug']}-01-query-selected")
 
-            print("== retrieve: widen to 20 neighbours ==", flush=True)
-            # Dash 4 renders the slider on Radix: the paired number input is
-            # hidden, so drive the thumb with the keyboard the way a keyboard
-            # user would, one step per press from 5 up to 20.
-            thumb = page.locator("#topk-slider [role=slider]").first
-            thumb.click()
-            for _ in range(15):
-                thumb.press("ArrowRight")
-                page.wait_for_timeout(60)
-            page.wait_for_timeout(800)
-            print("     top-k now "
-                  + page.locator("#topk-slider [role=slider]").first
-                        .get_attribute("aria-valuenow"), flush=True)
-            page.locator("#search-button").click()
-            page.wait_for_function(
-                "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
-                " if (!gd || !gd._fullData) return false;"
-                " const t = gd._fullData[gd._fullData.length - 1];"
-                " return !!(t && t.customdata"
-                "   && t.customdata.filter(c => c[0] === 'gsm').length >= 20); }",
-                timeout=180_000)
-            page.wait_for_timeout(2000)
-            s.shot(page, "retrieve-network-top20")
+                print(f"== retrieve[{q['slug']}]: run the search ==", flush=True)
+                t0 = time.time()
+                page.locator("#search-button").click()
+                # The status banner reports which retrieval path ran; wait for it
+                # to stop saying "select a sample" and for the network to have
+                # nodes.
+                page.wait_for_function(
+                    "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
+                    " if (!gd || !gd._fullData) return false;"
+                    " const t = gd._fullData[gd._fullData.length - 1];"
+                    " return !!(t && t.customdata && t.customdata.length > 3); }",
+                    timeout=180_000)
+                page.wait_for_timeout(1500)
+                status = page.locator("#search-status").inner_text().replace("\n", " ")
+                print(f"     search took {time.time() - t0:.1f}s -> {status[:140]}",
+                      flush=True)
+                s.shot(page, f"retrieve-{q['slug']}-02-network")
+
+                print(f"== retrieve[{q['slug']}]: open a hit in the inspector ==",
+                      flush=True)
+                pos = node_xy(page, "gsm", 0)
+                if not pos:
+                    print("     no GSM node found", flush=True)
+                else:
+                    print(f"     clicking {pos['label']}", flush=True)
+                    page.mouse.click(pos["x"], pos["y"])
+                    page.wait_for_function(
+                        "() => { const d = document.querySelector('#details-panel');"
+                        " return d && d.innerText.includes('GSM'); }", timeout=90_000)
+                    page.wait_for_timeout(2500)  # GEO enrichment fetch for this hit
+                    s.shot(page, f"retrieve-{q['slug']}-03-hit-inspector")
+
+                if qi == 0:
+                    print("== retrieve: widen to 20 neighbours ==", flush=True)
+                    # Dash 4 renders the slider on Radix: the paired number input
+                    # is hidden, so drive the thumb with the keyboard the way a
+                    # keyboard user would, one step per press from 5 up to 20.
+                    thumb = page.locator("#topk-slider [role=slider]").first
+                    thumb.click()
+                    for _ in range(15):
+                        thumb.press("ArrowRight")
+                        page.wait_for_timeout(60)
+                    page.wait_for_timeout(800)
+                    print("     top-k now "
+                          + page.locator("#topk-slider [role=slider]").first
+                                .get_attribute("aria-valuenow"), flush=True)
+                    page.locator("#search-button").click()
+                    page.wait_for_function(
+                        "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
+                        " if (!gd || !gd._fullData) return false;"
+                        " const t = gd._fullData[gd._fullData.length - 1];"
+                        " return !!(t && t.customdata"
+                        "   && t.customdata.filter(c => c[0] === 'gsm').length >= 20); }",
+                        timeout=180_000)
+                    page.wait_for_timeout(2000)
+                    s.shot(page, "retrieve-liver-04-network-top20")
+                    # Reset back to 5 so the map cross-reference below frames the
+                    # same tight neighbourhood the network view showed by default.
+                    thumb = page.locator("#topk-slider [role=slider]").first
+                    thumb.click()
+                    for _ in range(15):
+                        thumb.press("ArrowLeft")
+                        page.wait_for_timeout(60)
+                    page.locator("#search-button").click()
+                    page.wait_for_function(
+                        "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
+                        " if (!gd || !gd._fullData) return false;"
+                        " const t = gd._fullData[gd._fullData.length - 1];"
+                        " return !!(t && t.customdata && t.customdata.length > 3); }",
+                        timeout=180_000)
+                    page.wait_for_timeout(1500)
+
+                print(f"== retrieve[{q['slug']}]: see this retrieval on the map, "
+                      "framed on the query and its neighbours ==", flush=True)
+                page.locator("#see-on-map").click()
+                wait_points(page, minimum=900_000)
+                page.wait_for_selector("#retrieval-group", state="visible",
+                                        timeout=60_000)
+                page.wait_for_timeout(3000)
+                summary = page.locator("#retrieval-summary").inner_text().replace(
+                    "\n", " ")
+                print(f"     rail says: {summary[:140]}", flush=True)
+                s.shot(page, f"retrieve-{q['slug']}-05-map-whole-corpus")
+
+                page.locator("#frame-retrieval").click()
+                page.wait_for_timeout(7000)
+                wait_points(page, minimum=10)
+                page.wait_for_timeout(2000)
+                s.shot(page, f"retrieve-{q['slug']}-06-map-framed-on-hit")
 
             # ---------------- Map, clean (no retrieval in the store) ----------
             print("\n== map: default view, whole corpus ==", flush=True)
@@ -330,66 +381,54 @@ def main() -> int:
                 mp.wait_for_timeout(5000)
                 wait_points(mp, minimum=900_000)
 
-            print("== map: 3-D ==", flush=True)
-            set_segment(mp, "Dimensions", "3D")
-            wait_points(mp, minimum=1000)
-            mp.wait_for_timeout(6000)
-            # The default scatter3d camera leaves the cloud small in a lot of
-            # empty axis box, so dolly in and turn it a little off-square.
-            box = mp.locator(".js-plotly-plot").first.bounding_box()
-            if box:
-                cx, cy = box["x"] + box["width"] * 0.45, box["y"] + box["height"] / 2
-                mp.mouse.move(cx, cy)
-                for _ in range(2):
-                    mp.mouse.wheel(0, -240)
-                    mp.wait_for_timeout(500)
-                mp.mouse.move(cx, cy)
-                mp.mouse.down()
-                mp.mouse.move(cx - 70, cy + 25, steps=20)
-                mp.mouse.up()
-                mp.wait_for_timeout(4000)
-            s.shot(mp, "map-umap-3d")
-            set_segment(mp, "Dimensions", "2D")
-            mp.wait_for_timeout(3000)
-            wait_points(mp, minimum=900_000)
+            def shoot_3d(name: str):
+                set_segment(mp, "Dimensions", "3D")
+                wait_points(mp, minimum=1000)
+                mp.wait_for_timeout(6000)
+                # The default scatter3d camera leaves the cloud small in a lot
+                # of empty axis box, so dolly in and turn it a little
+                # off-square.
+                box = mp.locator(".js-plotly-plot").first.bounding_box()
+                if box:
+                    cx = box["x"] + box["width"] * 0.45
+                    cy = box["y"] + box["height"] / 2
+                    mp.mouse.move(cx, cy)
+                    for _ in range(2):
+                        mp.mouse.wheel(0, -240)
+                        mp.wait_for_timeout(500)
+                    mp.mouse.move(cx, cy)
+                    mp.mouse.down()
+                    mp.mouse.move(cx - 70, cy + 25, steps=20)
+                    mp.mouse.up()
+                    mp.wait_for_timeout(4000)
+                s.shot(mp, name)
+                set_segment(mp, "Dimensions", "2D")
+                mp.wait_for_timeout(3000)
+                wait_points(mp, minimum=900_000)
 
-            print("== map: PCA ==", flush=True)
+            print("== map: UMAP 3-D ==", flush=True)
+            shoot_3d("map-umap-3d")
+
+            print("== map: PCA 2-D and 3-D ==", flush=True)
             set_segment(mp, "Projection", "PCA")
             wait_points(mp, minimum=900_000)
             mp.wait_for_timeout(4000)
             print("     params: "
                   + mp.locator("#method-params").inner_text().replace("\n", " "),
                   flush=True)
-            s.shot(mp, "map-pca")
+            s.shot(mp, "map-pca-2d")
+            shoot_3d("map-pca-3d")
 
-            print("== map: t-SNE ==", flush=True)
+            print("== map: t-SNE 2-D and 3-D ==", flush=True)
             set_segment(mp, "Projection", "t-SNE")
             wait_points(mp, minimum=900_000)
             mp.wait_for_timeout(5000)
             print("     params: "
                   + mp.locator("#method-params").inner_text().replace("\n", " "),
                   flush=True)
-            s.shot(mp, "map-tsne")
+            s.shot(mp, "map-tsne-2d")
+            shoot_3d("map-tsne-3d")
             clean.close()
-
-            # ---------------- Map, carrying the retrieval ----------------
-            print("\n== map: the retrieval drawn where it sits in the space ==",
-                  flush=True)
-            page.bring_to_front()
-            page.locator("#see-on-map").click()
-            wait_points(page, minimum=900_000)
-            page.wait_for_selector("#retrieval-group", state="visible", timeout=60_000)
-            page.wait_for_timeout(3000)
-            summary = page.locator("#retrieval-summary").inner_text().replace("\n", " ")
-            print(f"     rail says: {summary[:140]}", flush=True)
-            s.shot(page, "map-with-retrieval")
-
-            print("== map: frame the retrieval ==", flush=True)
-            page.locator("#frame-retrieval").click()
-            page.wait_for_timeout(7000)
-            wait_points(page, minimum=10)
-            page.wait_for_timeout(2000)
-            s.shot(page, "map-retrieval-framed")
 
             ctx.close()
             browser.close()
