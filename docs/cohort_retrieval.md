@@ -13,7 +13,7 @@ Every number below was produced by `precompute/validate_cohorts.py` against the 
 | Against a structure-free null | 0.331, so the cohort definition is worth **+0.407** |
 | Against a within-study null | 0.683, so tissue and arm are worth **+0.055** on top of the study |
 | Cost of a pooled query | one memmap pass, the same ~0.5 s as a single sample, at any k |
-| Tests | 34 unit tests, 60 browser checks, 6 corpus-scale validation checks |
+| Tests | 36 unit tests, 87 browser checks, 6 corpus-scale validation checks |
 
 ## Why this exists, in one paragraph
 
@@ -255,7 +255,7 @@ The cohort-count line hangs under the facet chips, and the confidence card hangs
 
 Three layers, each answering a question the others cannot.
 
-**`tests/test_cohorts.py`, 34 tests, against the synthetic fixture corpus.**
+**`tests/test_cohorts.py`, 36 tests, against the synthetic fixture corpus.**
 Facet grouping, the estimator, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
 Two are worth calling out because they pin claims made in prose everywhere else.
 `test_pooled_ranking_is_the_mean_of_the_members_own_cosines` checks the central algebraic claim directly: ranking by cosine to the spherical mean is identical to ranking by the unweighted average of the members' own cosines, which is what "ask every animal, then average the votes" means.
@@ -264,7 +264,7 @@ Two are worth calling out because they pin claims made in prose everywhere else.
 **`precompute/validate_cohorts.py`, 6 checks, against the real corpus.**
 Section 6. This is the only layer that can speak to whether pooling works, as opposed to whether it computes what it says.
 
-**`tests/e2e_cohort_check.py`, 60 browser checks, against the real app and the real cache.**
+**`tests/e2e_cohort_check.py`, 87 browser checks, against the real app and the real cache.**
 Define a cohort, retick facets, watch the count change, read the confidence card, open the member list, pool and search, open the inspector, exclude a member and watch every number restate, compare two arms, and follow the whole cohort to the map.
 It asserts on what the page reports about itself, and two of its checks exist because this feature shipped those exact regressions and had them fixed: callbacks firing at page load so the canvas greeted a visitor with "Cohort retrieval failed", and the legend continuing to advertise a GSE column while a comparison that draws none was on screen.
 
