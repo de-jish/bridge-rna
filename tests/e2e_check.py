@@ -16,11 +16,6 @@ corpus reaches the client in one figure.
 
     /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py [--port 8062] [--headed]
 
-By default it starts its own `app.py`. Pass `--base-url` to point it at an app
-that is already running instead, with `--http-auth user:password` when that app
-is behind the deployment's basic-auth guard. That is how a deployment is
-verified: the same checks, run against the hosted URL rather than a subprocess.
-
 One trap is baked into the counting helper below: under plotly 6 the
 coordinates arrive as base64 typed-array specs, so `gd.data[i].x` has no
 `.length` and naive counting silently yields NaN, which looks exactly like an
@@ -37,8 +32,6 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-
-from e2e_target import add_target_args, credentials, target
 
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
@@ -142,16 +135,30 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8062)
     ap.add_argument("--headed", action="store_true")
-    add_target_args(ap)
     args = ap.parse_args()
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
 
-    with target(args, PY, REPO) as base:
+    server = subprocess.Popen(
+        [PY, "app.py", "--port", str(args.port)], cwd=REPO,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        # Wait for the server to announce itself rather than sleeping blind.
+        t0 = time.time()
+        while time.time() - t0 < 120:
+            line = server.stdout.readline()
+            if not line:
+                break
+            print("    [server] " + line.rstrip(), flush=True)
+            if "serving on" in line:
+                break
+        else:
+            print("server never announced itself")
+            return 1
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
-            page = browser.new_page(viewport={"width": 1680, "height": 1000},
-                                    http_credentials=credentials(args))
+            page = browser.new_page(viewport={"width": 1680, "height": 1000})
             console_errors: list[str] = []
             page.on("console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
@@ -159,7 +166,7 @@ def main() -> int:
 
             print("\n=== 1. first paint, default controls ===")
             t0 = time.time()
-            page.goto(f"{base}/map", wait_until="load")
+            page.goto(f"http://127.0.0.1:{args.port}/map", wait_until="load")
             info = wait_for_points(page)
             first_paint = time.time() - t0
             c.note(f"first interactive frame in {first_paint:.1f}s")
@@ -362,12 +369,11 @@ def main() -> int:
             # fold, took the AI panel off screen, and stretched the network
             # canvas out of the window with it. The page height is the check,
             # because that is the thing that must not move.
-            rp = browser.new_page(viewport={"width": 1680, "height": 1010},
-                                  http_credentials=credentials(args))
+            rp = browser.new_page(viewport={"width": 1680, "height": 1010})
             rp.on("console", lambda m: console_errors.append(m.text)
                   if m.type == "error" else None)
             rp.on("pageerror", lambda e: console_errors.append(str(e)))
-            rp.goto(f"{base}/", wait_until="load")
+            rp.goto(f"http://127.0.0.1:{args.port}/", wait_until="load")
             rp.wait_for_selector(".sample-preview", timeout=60_000)
             rp.wait_for_timeout(1500)
             fits = "() => document.scrollingElement.scrollHeight" \
@@ -417,6 +423,12 @@ def main() -> int:
             c.ok(not real, f"no console errors ({len(real)} seen)")
 
             browser.close()
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
 
     print("\n" + "=" * 62)
     for n in c.notes:

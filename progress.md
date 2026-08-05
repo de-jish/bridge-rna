@@ -6,63 +6,6 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
-## 2026-08-05 (cohort retrieval merged to main, and the app hosted)
-
-Cohort retrieval was merged to `main` and pushed, then the app was given a deployment.
-Until now it was a localhost instrument: both `README.md` and `MEETING_QA.md` described it as `.venv/bin/python app.py` at `http://127.0.0.1:8050`.
-
-**Fly.io, one container, artifacts baked in.**
-The choice was forced by shape rather than preference.
-Bridge RNA memory-maps a 963 MB index and peaks at **1,852 MB resident**, measured on the real corpus with all six coordinate sets, the tissue color-by and a cached retrieval live in one process.
-Vercel and Netlify cap a bundle at 250 MB and give it no persistent process to hold a memmap open between requests, so neither was ever a candidate.
-Region `sjc`, the closest Fly region to Ames.
-
-**gunicorn with one worker, and that number is measured rather than cautious.**
-`app.py`'s `app.run()` is Flask's development server.
-The container runs gunicorn against a new `wsgi.py`; the 1,852 MB is ordinary heap that a second worker would not share, so concurrency comes from four threads instead, which suits work that is numpy and file IO.
-The timeout is 300 s because the upload path shells out to a subprocess that loads a 522 MB checkpoint before it embeds anything.
-
-**The image leaves out 658 MB it would never read, and one exclusion needed checking rather than assuming.**
-`data/osdr/raw/` (536 MB) serves only the `subprocess` retrieval tier, and that tier is empty whenever the cache exists.
-Verified in the code rather than inferred from the tier table: `sample_tier` returns `cached` before it looks at a counts path, and of the 788 unavailable samples only 55 reach `_counts_columns`, which returns an empty frozenset for a missing file and therefore still classifies them `unavailable`.
-No sample changes tier.
-`cache/osdr_expression.float32.npy` (122 MB) is a precompute intermediate the serving app never opens.
-The precompute stack is dropped too, via a new `requirements-deploy.txt` - which is the boundary `tests/test_app.py` already pinned, made physical.
-
-**Basic auth, because the upload endpoint is an abuse primitive on an open URL.**
-It accepts 200 MB and starts a torch subprocess for whoever calls it, and the summary endpoint would be an open proxy.
-`bridge_rna/auth.py` guards every request when `BRIDGE_RNA_BASIC_AUTH` is set and does nothing when it is not, so local runs and the suite are unaffected.
-It is installed in `wsgi.py` rather than in `build_app` because a credential belongs to a deployment, not to the application.
-`/healthz` is exempt, since Fly's health check has no credential to present.
-
-**The verification loop reaches the deployment, and that is what earned its keep.**
-The three e2e scripts each had their own copy of start-a-server-and-wait; that is now `tests/e2e_target.py`, and all three take `--base-url` and `--http-auth`.
-The suite is 285 tests (27 new for the guard), plus **45 map checks and 60 cohort checks passing against the hosted URL**.
-
-**Four defects existed only on the deployment, and nothing local could have found them.**
-Each was found by running the browser checks against the hosted app, and each is recorded in `docs/deployment.md` with its measurement.
-
-1. **A 502 from gunicorn's 2-second `--keep-alive`.** Shorter than the proxy's idle reuse, so the proxy occasionally wrote to a connection gunicorn was closing. It appeared as exactly one reset among hundreds of good requests, no crash and no traceback, and the casualty was the callback behind the rail's parameter readout - which then sat showing the previous projection's numbers. That is the failure invariant 7 exists to prevent, arriving by a route invariant 7 cannot see: the readout was right and the transport dropped it. `--keep-alive 75`.
-2. **`shared-cpu-2x` made the upload path unusable.** One live embed: 10.4 s on a laptop, **13 m 36 s** on the shared machine for only 1 m 55 s of CPU. 14% utilization on a process pegging both vCPUs is Fly throttling a shared vCPU to its baseline once burst is spent. `performance-2x` runs the same work at 103% utilization in **1 m 35 s**. The map and cached retrieval were fine on the shared machine, so this was easy to ship and never notice.
-3. **The proxy rejected Dash callbacks while an upload ran.** `hard_limit` was 8, mirroring the thread count; an embed holds a thread for minutes while the browser fires short callbacks behind it, and past the hard limit Fly rejects rather than queues. A rejected callback is a figure that never updates, so an uploaded search appeared to return the *previous* column's result - a plausible wrong answer rather than an error. Now 20 / 40, and gunicorn runs 8 threads.
-4. **The 300 s gunicorn timeout sat exactly on the observed in-app embed time** (300.3 s measured), which kills the worker mid-request and leaves the browser holding the old figure. Now 900 s.
-
-Two smaller things worth not relearning.
-`swap_size_mb` was set and then removed because the running machine reported `SwapTotal: 0` - it silently did nothing, and the memory it insured against never appeared.
-And Fly's autostop counts HTTP requests, so it will stop a machine out from under an SSH-run benchmark; the first embed measurement was invalid for that reason and had to be redone with traffic kept flowing.
-
-**Where verification stands.**
-`tests/e2e_check.py` (45) and `tests/e2e_cohort_check.py` (60) pass against the deployment, and all suites pass locally (285 unit, 45 map, 68 upload, 60 cohort).
-The upload *feature* is verified on the deployment - both columns of the example file embedded live, each matching the catalog path exactly (5 hits, 248 s and 273 s) - but the upload *suite* is not yet a reliable gate there, because a hosted embed is four to five minutes and the machine auto-stops between runs.
-`e2e_target.patience()` multiplies every wait by 5 for a remote target and 1 locally, which is what made the map and cohort suites reliable remotely; the upload suite needs a pinned-warm machine rather than more patience.
-
-**Two harness bugs the deployment exposed, both worth remembering.**
-A dropdown's displayed value updates in the browser before the callback carrying it reaches the server, so "the picker holds the GC column" passed while the search still ran on the previous column.
-And waiting for the upload slot to be merely non-empty is satisfied by the previous upload's text, so a run continued against a stale `upload-store` pointing at a file the app had already unlinked, which surfaced as a rejection with the wrong reason.
-Both produced plausible wrong answers rather than errors, and both are the same mistake: **wait for a condition that names the thing you just did**, because a condition the previous step also satisfies is not a wait at all.
-
-Design, tradeoffs, and the volume-versus-baked-in argument: `docs/deployment.md`.
-
 ## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
 
 `docs/cohort_pooling.md` had specified and measured this feature on 2026-07-30 and left it unbuilt.

@@ -171,25 +171,6 @@ By default the app is reachable only from your own machine.
 Use `--port`, `--debug`, or `--host 0.0.0.0` to change that.
 This is a development server, so put a real WSGI server in front of it for anything beyond local use.
 
-### Hosting it
-
-`Dockerfile` and `fly.toml` deploy the app to Fly.io, serving it with gunicorn through `wsgi.py`:
-
-```bash
-fly secrets set BRIDGE_RNA_BASIC_AUTH='user:password'
-fly deploy
-```
-
-The image carries the 963 MB embedding index and the checkpoint, so the first deploy is slow and later code-only deploys are not.
-Set `BRIDGE_RNA_BASIC_AUTH` before exposing it: the upload endpoint accepts 200 MB and starts a torch subprocess for whoever calls it, which is not something to leave open.
-The same browser checks that verify a local run will verify the deployed one:
-
-```bash
-.venv/bin/python tests/e2e_check.py --base-url https://your-app.fly.dev --http-auth user:password
-```
-
-What the image carries, what it leaves out, and why it runs a single worker are in [`docs/deployment.md`](docs/deployment.md).
-
 ## AI readings (optional)
 
 The AI summary uses a local [Ollama](https://ollama.com) server, which needs no account or API key.

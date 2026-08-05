@@ -41,8 +41,6 @@ from typing import Any
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-from e2e_target import add_target_args, credentials, patience, target
-
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 EXAMPLE = REPO / "examples" / "osdr_upload_example.csv"
@@ -155,9 +153,6 @@ def build_fixtures(dest: Path) -> dict[str, Path]:
 
 # --- browser helpers --------------------------------------------------------
 
-PATIENCE = 1  # set from the target in main(); 1 locally
-
-
 def _wait_run(page, indicator: str, timeout: int = 300_000) -> float:
     """Wait out one Dash `running=` cycle on `indicator`, returning its seconds.
 
@@ -169,11 +164,11 @@ def _wait_run(page, indicator: str, timeout: int = 300_000) -> float:
     t0 = time.time()
     page.wait_for_function(
         f"() => (document.querySelector('{indicator}')||{{}}).innerText",
-        timeout=30_000 * PATIENCE)
+        timeout=30_000)
     page.wait_for_function(
         f"() => !((document.querySelector('{indicator}')||{{}}).innerText || '').trim()",
-        timeout=timeout * PATIENCE)
-    page.wait_for_timeout(400 * PATIENCE)
+        timeout=timeout)
+    page.wait_for_timeout(400)
     return time.time() - t0
 
 
@@ -207,78 +202,14 @@ def open_mode(page, key: str) -> None:
     tab = page.locator(f"#mode-tab-{key}")
     if "is-active" not in (tab.get_attribute("class") or ""):
         tab.click()
-        page.wait_for_selector(f"#mode-panel-{key}", state="visible",
-                               timeout=30_000 * PATIENCE)
-        page.wait_for_timeout(400 * PATIENCE)
+        page.wait_for_selector(f"#mode-panel-{key}", state="visible", timeout=30_000)
+        page.wait_for_timeout(400)
 
 
-def upload(page, path: Path, timeout: int = 180_000,
-           settle: int = 1200) -> None:
-    """Put a file in the dropzone and wait until the app says it read it.
-
-    The retry is not defensive padding. `dcc.Upload` lazy-loads its own
-    JavaScript bundle, and setting the file input before that bundle lands is a
-    silent no-op: no request is made, no preview appears, and the run continues
-    against a file the app never saw. Locally the bundle arrives in
-    milliseconds and a fixed 1.2 s sleep hid this completely; against a
-    deployment it does not, and the failure presented as the column picker
-    staying hidden forever rather than as an upload error.
-
-    Waiting for the slot to be merely non-empty is not enough, because the
-    previous upload's own text satisfies that instantly and the run continues
-    with a stale `upload-store` still pointing at the previous file - which the
-    app has by then unlinked, so the search fails with "Uploaded counts file
-    not found" naming the *previous* fixture's path. That is the exact stale-
-    store failure this file exists to catch, scored as a wrong rejection reason.
-
-    So the wait is: the slot names this file, or its text changed. The first
-    covers everything that parses, including the same file uploaded again on a
-    later cycle; the second covers the fixtures that are meant to be rejected
-    at parse time, where the slot holds a banner that never names the file.
-    """
+def upload(page, path: Path) -> None:
     open_mode(page, "upload")
-    deadline = time.time() + (timeout * PATIENCE) / 1000
-    before = ""
-    el = page.locator("#upload-preview")
-    if el.count():
-        before = (el.inner_text() or "").strip()
-    while True:
-        page.set_input_files("#upload-counts input[type=file]", str(path))
-        page.wait_for_timeout(settle * PATIENCE)
-        el = page.locator("#upload-preview")
-        now = (el.inner_text() or "").strip() if el.count() else ""
-        if now and (path.name in now or now != before):
-            return
-        if time.time() >= deadline:
-            raise AssertionError(
-                f"the app never acknowledged the uploaded file {path.name}")
-
-
-def wait_for_selected_sample(page, sample_id: str, timeout: int = 120_000) -> None:
-    """Wait until a `/?q=` link has settled on *this* sample.
-
-    `.sample-preview` mounts before the dropdowns are populated, so a fixed
-    pause after navigation is a race: the search fires with nothing selected
-    and the banner answers "Select a sample to start", which reads like a
-    retrieval that returned nothing rather than one that never ran.
-
-    It has to match the requested sample rather than merely being non-empty.
-    The page is reused across navigations, so the previous sample's name is
-    already sitting in the control and would satisfy any weaker condition
-    instantly - which is the same stale-state trap this file exists to catch,
-    reintroduced in the harness that checks for it.
-    """
-    wanted = sample_id.split("|", 1)[-1].replace("\\", "\\\\").replace("'", "\\'")
-    page.wait_for_function(
-        "() => ((document.querySelector('#sample-dropdown .dash-dropdown-value')"
-        f"||{{}}).innerText||'').includes('{wanted}')",
-        timeout=timeout * PATIENCE)
-    # The control showing the sample and the app being ready to search on it
-    # are different callbacks, and this one is *in addition to* the settle
-    # rather than instead of it. Replacing the settle with this condition made
-    # the second catalog search fire mid-render and answer "Select a sample to
-    # start", which is a failure that reads like an empty retrieval.
-    page.wait_for_timeout(1200 * PATIENCE)
+    page.set_input_files("#upload-counts input[type=file]", str(path))
+    page.wait_for_timeout(1200)
 
 
 def upload_notice(page) -> tuple[str, str]:
@@ -310,13 +241,13 @@ def pick_column(page, column: str) -> None:
     # Wait for an option, not just for the portal: the container mounts a frame
     # before its options do, and catching it in between reads as an empty menu.
     page.wait_for_selector(".dash-dropdown-content .dash-options-list-option",
-                           timeout=10_000 * PATIENCE)
-    page.wait_for_timeout(250 * PATIENCE)
+                           timeout=10_000)
+    page.wait_for_timeout(250)
     opts = page.locator(".dash-dropdown-content .dash-options-list-option")
     for i in range(opts.count()):
         if opts.nth(i).inner_text().strip() == column:
             opts.nth(i).click()
-            page.wait_for_timeout(400 * PATIENCE)
+            page.wait_for_timeout(400)
             return
     raise AssertionError(
         f"column {column!r} not offered; menu has "
@@ -341,32 +272,15 @@ def catalog_search(page) -> float:
 
 # --- the run ----------------------------------------------------------------
 
-def _report(c) -> int:
-    print("\n" + "=" * 62)
-    for n in c.notes:
-        print("NOTE: " + n)
-    if c.failures:
-        for f in c.failures:
-            print("FAIL: " + f)
-        print(f"UPLOAD E2E FAILED ({len(c.failures)} checks)")
-        return 1
-    print(f"ALL UPLOAD E2E CHECKS PASSED (screenshots in {SHOTS})")
-    return 0
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8063)
     ap.add_argument("--headed", action="store_true")
-    add_target_args(ap)
     ap.add_argument("--cycles", type=int, default=2,
                     help="How many times to run the whole fixture set.")
     args = ap.parse_args()
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
-
-    global PATIENCE
-    PATIENCE = patience(args)
 
     if not EXAMPLE.exists():
         print(f"missing {EXAMPLE}")
@@ -376,11 +290,25 @@ def main() -> int:
     fx = build_fixtures(tmp)
     print(f"fixtures in {tmp}")
 
-    with target(args, PY, REPO, timeout=180) as base:
+    server = subprocess.Popen(
+        [PY, "app.py", "--port", str(args.port)], cwd=REPO,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 180:
+            line = server.stdout.readline()
+            if not line:
+                break
+            print("    [server] " + line.rstrip(), flush=True)
+            if "serving on" in line:
+                break
+        else:
+            print("server never announced itself")
+            return 1
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
-            page = browser.new_page(viewport={"width": 1680, "height": 1010},
-                                    http_credentials=credentials(args))
+            page = browser.new_page(viewport={"width": 1680, "height": 1010})
             console_errors: list[str] = []
             page.on("console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
@@ -390,9 +318,9 @@ def main() -> int:
             print("\n=== 0. the catalog answers, which the uploads must match ===")
             truth: dict[str, list[tuple[str, str]]] = {}
             for sid in (FLT_ID, GC_ID):
-                page.goto(f"{base}/?q={sid}", wait_until="load")
-                page.wait_for_selector(".sample-preview", timeout=60_000 * PATIENCE)
-                wait_for_selected_sample(page, sid)
+                page.goto(f"http://127.0.0.1:{args.port}/?q={sid}", wait_until="load")
+                page.wait_for_selector(".sample-preview", timeout=60_000)
+                page.wait_for_timeout(1200)
                 secs = catalog_search(page)
                 hits, _ = read_hits(page)
                 truth[sid] = hits
@@ -534,23 +462,18 @@ def main() -> int:
             c.ok(not real, f"no console errors ({len(real)} seen)")
 
             browser.close()
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.kill()
 
     # `terminate()` is SIGTERM, which is how a supervisor stops a server and is
     # exactly the shutdown `atexit` does not cover, so the killed server's
     # staging directory is expected to still be there. What must hold is that
     # the next run reaps it - which is the guarantee, checked against a real
     # abandoned directory rather than a synthetic one.
-    #
-    # This reads *this* machine's temp directory, so it is only a statement
-    # about a server this process started. Against a deployment there is no
-    # local server and no local staging directory, and asserting on one would
-    # be a check that passes for the wrong reason.
-    if args.base_url:
-        print("\n  ..   skipping the staging-directory reap check: "
-              "it describes a locally started server, and this run drove "
-              f"{args.base_url}")
-        return _report(c)
-
     time.sleep(1.0)
     sys.path.insert(0, str(REPO))
     from bridge_rna.callbacks import _sweep_abandoned_upload_dirs
@@ -563,7 +486,16 @@ def main() -> int:
          f"the next run reaps the killed server's staging directory "
          f"(reaped {len(reaped)}, {len(still)} left)")
 
-    return _report(c)
+    print("\n" + "=" * 62)
+    for n in c.notes:
+        print("NOTE: " + n)
+    if c.failures:
+        for f in c.failures:
+            print("FAIL: " + f)
+        print(f"UPLOAD E2E FAILED ({len(c.failures)} checks)")
+        return 1
+    print(f"ALL UPLOAD E2E CHECKS PASSED (screenshots in {SHOTS})")
+    return 0
 
 
 if __name__ == "__main__":

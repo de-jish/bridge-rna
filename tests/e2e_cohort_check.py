@@ -32,8 +32,6 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from e2e_target import add_target_args, credentials, patience, target
-
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 SHOTS = Path(os.environ.get("MANIFOLD_E2E_SHOTS",
@@ -97,9 +95,6 @@ MAP_QUERY_JS = """() => {
 }"""
 
 
-PATIENCE = 1  # set from the target in main(); 1 locally
-
-
 class Checks:
     def __init__(self):
         self.failures: list[str] = []
@@ -115,7 +110,7 @@ class Checks:
 
 
 def shot(page, name: str) -> None:
-    page.wait_for_timeout(250 * PATIENCE)
+    page.wait_for_timeout(250)
     page.screenshot(path=str(SHOTS / f"{name}.png"))
 
 
@@ -123,16 +118,15 @@ def open_mode(page, key: str) -> None:
     tab = page.locator(f"#mode-tab-{key}")
     if "is-active" not in (tab.get_attribute("class") or ""):
         tab.click()
-        page.wait_for_selector(f"#mode-panel-{key}", state="visible",
-                               timeout=30_000 * PATIENCE)
-        page.wait_for_timeout(500 * PATIENCE)
+        page.wait_for_selector(f"#mode-panel-{key}", state="visible", timeout=30_000)
+        page.wait_for_timeout(500)
 
 
 def choose(page, dropdown_id: str, text: str, exact: bool = False) -> None:
     page.locator(f"#{dropdown_id}").click()
-    page.wait_for_timeout(400 * PATIENCE)
+    page.wait_for_timeout(400)
     page.locator(".dash-dropdown-content").get_by_text(text, exact=exact).first.click()
-    page.wait_for_timeout(1800 * PATIENCE)
+    page.wait_for_timeout(1800)
 
 
 def banner(page) -> str:
@@ -157,13 +151,12 @@ def run_cohort_search(page, timeout: int = 180_000) -> float:
     page.locator("#cohort-search-button").click()
     page.wait_for_function(
         "prev => { const el = document.querySelector('#search-status');"
-        " return el && el.innerText !== prev; }", arg=before,
-        timeout=timeout * PATIENCE)
-    page.wait_for_function(NETWORK_READY_JS, timeout=timeout * PATIENCE)
+        " return el && el.innerText !== prev; }", arg=before, timeout=timeout)
+    page.wait_for_function(NETWORK_READY_JS, timeout=timeout)
     page.wait_for_function(
         "() => { const el = document.querySelector('#cohort-running-indicator');"
-        " return el && !el.innerText.trim(); }", timeout=timeout * PATIENCE)
-    page.wait_for_timeout(900 * PATIENCE)
+        " return el && !el.innerText.trim(); }", timeout=timeout)
+    page.wait_for_timeout(900)
     return time.time() - t0
 
 
@@ -171,18 +164,30 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8064)
     ap.add_argument("--headed", action="store_true")
-    add_target_args(ap)
     args = ap.parse_args()
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
+    base = f"http://127.0.0.1:{args.port}"
 
-    global PATIENCE
-    PATIENCE = patience(args)
-    with target(args, PY, REPO) as base:
+    server = subprocess.Popen(
+        [PY, "app.py", "--port", str(args.port)], cwd=REPO,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 120:
+            line = server.stdout.readline()
+            if not line:
+                break
+            print("    [server] " + line.rstrip(), flush=True)
+            if "serving on" in line:
+                break
+        else:
+            print("server never announced itself")
+            return 1
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
-            page = browser.new_page(viewport={"width": 1680, "height": 1010},
-                                    http_credentials=credentials(args))
+            page = browser.new_page(viewport={"width": 1680, "height": 1010})
             console_errors: list[str] = []
             page.on("console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
@@ -191,8 +196,8 @@ def main() -> int:
             # ---- 1. the rail opens on Sample and stays quiet ----------------
             print("\n=== 1. a cold load runs nothing ===")
             page.goto(f"{base}/", wait_until="load")
-            page.wait_for_selector(".sample-preview", timeout=60_000 * PATIENCE)
-            page.wait_for_timeout(1500 * PATIENCE)
+            page.wait_for_selector(".sample-preview", timeout=60_000)
+            page.wait_for_timeout(1500)
 
             c.ok(page.locator(".mode-tab").count() == 3,
                  "the rail offers three query sources")
@@ -264,7 +269,7 @@ def main() -> int:
                  "tightness is present but secondary")
 
             page.locator(".cohort-members-summary").click()
-            page.wait_for_timeout(700 * PATIENCE)
+            page.wait_for_timeout(700)
             rows = page.locator(".member-list label")
             c.ok(rows.count() >= 2, f"the member list opens: {rows.count()} rows")
             c.ok(re.search(r"0\.\d{4}", rows.first.inner_text()) is not None,
@@ -276,13 +281,7 @@ def main() -> int:
             secs = run_cohort_search(page)
             msg = banner(page)
             c.note(f"the pooled search took {secs:.1f}s")
-            # The claim is algorithmic - one pass over the memmap regardless of
-            # cohort size, not k passes - and 30 s is how that reads on a warm
-            # local SSD. Hosted, the same single pass streams 963 MB through a
-            # container filesystem with a cold page cache and took 50 s, so the
-            # constant scales with the target while the claim does not.
-            c.ok(secs < 30 * PATIENCE,
-                 f"a pooled query costs one memmap pass ({secs:.1f}s)")
+            c.ok(secs < 30, f"a pooled query costs one memmap pass ({secs:.1f}s)")
             c.ok("pooled mean" in msg,
                  f"the banner names the path that answered: {msg[:90]!r}")
             c.ok("pooled samples" in msg, "and says how many samples went in")
@@ -305,7 +304,7 @@ def main() -> int:
             pos = page.evaluate(QUERY_NODE_JS)
             if c.ok(pos is not None, "the query node is locatable"):
                 page.mouse.click(pos["x"], pos["y"])
-                page.wait_for_timeout(1500 * PATIENCE)
+                page.wait_for_timeout(1500)
             details = page.locator("#details-panel").inner_text()
             c.ok("POOLED OSDR COHORT" in details.upper(),
                  "the inspector opens it as a cohort, not as one blank sample")
@@ -321,14 +320,14 @@ def main() -> int:
             print("\n=== 6. excluding a member changes the numbers ===")
             before = page.locator("#cohort-card").inner_text().split("\n")[0]
             page.locator(".member-list input[type=checkbox]").first.uncheck()
-            page.wait_for_timeout(1800 * PATIENCE)
+            page.wait_for_timeout(1800)
             after = page.locator("#cohort-card").inner_text().split("\n")[0]
             c.ok(before != after,
                  f"the card restates the pooled size: {before!r} -> {after!r}")
             c.ok("excluded" in page.locator("#cohort-members-summary").inner_text(),
                  "and the disclosure says one was excluded")
             page.locator(".member-list input[type=checkbox]").first.check()
-            page.wait_for_timeout(1500 * PATIENCE)
+            page.wait_for_timeout(1500)
 
             # ---- 7. two arms -----------------------------------------------
             print("\n=== 7. comparing two arms ===")
@@ -373,8 +372,8 @@ def main() -> int:
             page.wait_for_function(
                 "() => { const gd = document.querySelector('.js-plotly-plot');"
                 " return gd && gd._fullData && gd._fullData.some("
-                "t => t.name === 'query'); }", timeout=180_000 * PATIENCE)
-            page.wait_for_timeout(3000 * PATIENCE)
+                "t => t.name === 'query'); }", timeout=180_000)
+            page.wait_for_timeout(3000)
             drawn = page.evaluate(MAP_QUERY_JS) or {}
             c.ok(drawn.get("query", 0) >= 2,
                  f"every pooled member is drawn, not one: {drawn}")
@@ -392,6 +391,12 @@ def main() -> int:
             c.ok(not noise, f"no console errors ({len(noise)}): {noise[:2]}")
 
             browser.close()
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            server.kill()
 
     print(f"\nscreenshots in {SHOTS}")
     if c.failures:
