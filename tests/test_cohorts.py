@@ -76,10 +76,19 @@ def test_adding_a_facet_only_ever_splits():
     Every cohort under the finer definition has to sit inside one cohort of the
     coarser one. If that ever fails, the grouping is not a facet intersection
     and the count under the chips is describing something else.
+
+    The strictly-finer assertion is not decoration. This test named a facet that
+    was later deleted, and `normalize_facets` drops an unknown key silently, so
+    the two definitions collapsed to the same 83 cohorts and every containment
+    check passed trivially while the invariant went unchecked.
     """
-    coarse = {m: c.cohort_id for c in C.build_cohorts(["study", "tissue"])
-              for m in c.members}
-    for fine in C.build_cohorts(["study", "tissue", "spaceflight"]):
+    coarse_cohorts = C.build_cohorts(["study", "tissue"])
+    fine_cohorts = C.build_cohorts(["study", "tissue", "spaceflight"])
+    assert len(fine_cohorts) > len(coarse_cohorts), (
+        "the finer definition must actually be finer, or this test is vacuous")
+
+    coarse = {m: c.cohort_id for c in coarse_cohorts for m in c.members}
+    for fine in fine_cohorts:
         parents = {coarse[m] for m in fine.members}
         assert len(parents) == 1, f"{fine.cohort_id} straddles {parents}"
 
