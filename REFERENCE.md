@@ -773,7 +773,7 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 | `tests/test_projections.py` | 15 |
 | `tests/test_upload_ingestion.py` | 13 |
 
-Plus **200 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 87 in `tests/e2e_cohort_check.py`.
+Plus **202 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 89 in `tests/e2e_cohort_check.py`.
 These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from dash import Input, Output, State, html, no_update
+from dash import Input, Output, State, ctx, html, no_update
 
 from . import colorby, data, layout, render
 
@@ -382,15 +382,28 @@ def register(app):
         button would have been a click with no visible effect - the thing this
         map removed the lasso for.
 
+        The ticks are only *reset* when the retrieval itself changes. This
+        callback also fires on a dimensionality switch, because the frame button
+        is 2-D only, and reasserting the value there would silently re-tick an
+        arm the user had hidden the moment they looked at it in 3-D.
+
         A comparison turns the single "Show it on the map" tick into one tick
         per cohort, each carrying that cohort's own name. It is the same control
         rather than a new one, so nothing else on the rail moves, and unticking
         one is the escape hatch when two large cohorts crowd the same region.
         """
+        # A dimensionality switch changes only the frame button; leave the ticks
+        # exactly as the user set them.
+        freeze = ctx.triggered_id == "dims"
+        single = [{"label": " Show it on the map", "value": "on"}]
+
+        def ticks(options, value):
+            return ((no_update, no_update) if freeze else (options, value))
+
         overlay = _retrieval_overlay(hits_payload)
         if overlay is None:
             return ({"display": "none"}, "", {"display": "none"},
-                    [{"label": " Show it on the map", "value": "on"}], ["on"])
+                    *ticks(single, ["on"]))
 
         frame_style = {} if dims == "2d" else {"display": "none"}
         cohorts = overlay["cohorts"]
@@ -402,8 +415,7 @@ def register(app):
                 f" and its {n} nearest ARCHS4 neighbour{'s' if n != 1 else ''}, "
                 "drawn where they sit in the space.",
             ]
-            return ({}, summary, frame_style,
-                    [{"label": " Show it on the map", "value": "on"}], ["on"])
+            return {}, summary, frame_style, *ticks(single, ["on"])
 
         n_shared = len(overlay["shared_points"])
         options = [
@@ -425,7 +437,7 @@ def register(app):
             "is a mean of them and has no position here.",
             className="bm-retrieval-key-note"))
         return ({}, html.Div(rows, className="bm-retrieval-key"), frame_style,
-                options, ["on", ROLE_B])
+                *ticks(options, ["on", ROLE_B]))
 
     @app.callback(
         Output("viewport-store", "data"),

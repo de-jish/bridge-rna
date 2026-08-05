@@ -528,6 +528,20 @@ def main() -> int:
             c.ok(any(h["hasText"] for h in solo.get("hits", [])),
                  "and the rank numerals come back, with one list to number")
             shot(page, "08-one-arm")
+
+            # The ticks are the user's, and only a new retrieval may reset them.
+            # This callback also fires on a dimensionality switch, because the
+            # frame button is 2-D only, so reasserting the value there would
+            # re-tick a hidden arm the moment you looked at it in 3-D.
+            page.locator("#dims label", has_text="3D").first.click()
+            page.wait_for_timeout(4000)
+            c.ok(not ticks.nth(1).is_checked(),
+                 "switching to 3-D leaves the hidden arm hidden")
+            c.ok(len((page.evaluate(MAP_OVERLAY_JS) or {}).get("members", [])) == 1,
+                 "and 3-D draws the one arm, with no unknown-symbol error")
+            page.locator("#dims label", has_text="2D").first.click()
+            page.wait_for_timeout(4000)
+
             ticks.nth(1).check()
             page.wait_for_timeout(2500)
             c.ok(len((page.evaluate(MAP_OVERLAY_JS) or {}).get("members", [])) == 2,
