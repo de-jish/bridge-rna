@@ -44,25 +44,25 @@ The UI shows it as a pinned chip that cannot be removed, with the reason on hove
 
 ### What the user controls
 
-Nine facets are available, drawn from `cache/osdr_metadata.parquet`, which is exactly the table of the 2,108 samples that have a cached embedding.
+Three facets are available, drawn from `cache/osdr_metadata.parquet`, which is exactly the table of the 2,108 samples that have a cached embedding.
 
 | facet | default | note |
 | --- | --- | --- |
 | Study | **pinned on** | cannot be removed, for the reason above |
 | Tissue | on | |
 | Spaceflight arm | on | raw arm, seven values |
-| Sex | off | |
-| Strain | off | |
-| Genotype | off | |
-| Habitat | off | |
-| Mission duration | off | |
-| Diet | off | |
 
-Adding a facet splits cohorts and makes them smaller and more homogeneous.
-Removing one merges them and makes them larger and more heterogeneous.
-Both directions are legitimate questions and both are one click, so the cohort count and the size distribution update live under the chips.
+Unticking one merges cohorts and makes them larger: dropping Tissue pools a study's organs, dropping Spaceflight arm pools its flight animals with its controls.
+The cohort count and the size distribution update live under the chips.
 
-A tenth control sits below the cohort picker: the **member list**, where any individual sample can be excluded from the pool.
+**Six further facets were offered and were removed on 2026-08-05: sex, strain, genotype, habitat, mission duration, diet.**
+They came from the same parquet and cost nothing to offer, which is exactly why they were there, and that turned out to be the wrong reason.
+Every one of them could only ever *split* a cohort, and the measured stability curve in section 3 is a function of size: a cohort of 10 reads 0.81 and a cohort of 3 reads 0.51.
+So the six controls did nothing but trade away the quantity this whole feature exists to buy, in exchange for a contrast the two-arm comparison in section 4 answers directly and attributably.
+They also made the *default* harder to read, because nine chips of which six are off looks like a definition you are expected to tune rather than the curated grouping OSDR already publishes.
+The columns are still in the parquet, still resolved by the map's color-by registry, and re-adding one is a single line in `bridge_rna/cohorts.FACETS`; nothing else in the app hard-codes a facet.
+
+A fourth control sits below the cohort picker: the **member list**, where any individual sample can be excluded from the pool.
 Nothing is ever auto-excluded.
 
 ## 2. The estimator
@@ -80,11 +80,16 @@ Without that, `cos(mean, x)` is the members' cosines weighted by their L2 norms,
 Within a real cohort the spread is only 1.09x and the two estimators agree to a median cosine of 0.9999994, so this changes almost nothing today.
 It is done anyway because it is the maximum-likelihood estimator for data compared by cosine, and because it stays correct if anyone ever unticks Tissue and pools across organs, where the 3.9x spread is real.
 
-Three statistics fall out of the same `u` and all three are shown:
+Two statistics fall out of the same `u`, and both are shown:
 
-- **`R̄ = |u.mean(axis=0)|`**, the vMF resultant length, in [0, 1]. How tightly the cohort agrees on a direction.
 - **Each member's cosine to the leave-one-out centroid.** This is the correct outlier statistic. Using the full centroid instead lets an outlier pull the reference towards itself and hide inside it.
 - **Expected top-5 stability given k**, read off the measured curve in `precompute/validate_cohorts.py`. This is the honest confidence number, and it is a property of the cohort's size rather than of its tightness.
+
+A third was shown and **was removed on 2026-08-05**: `R̄ = |u.mean(axis=0)|`, the vMF resultant length, labelled "Group tightness" on the card.
+It is a real statistic and it is measured in `docs/cohort_pooling.md`, but as a readout it was inert.
+Across all 212 real cohorts its median is **0.9991**, and it is no lower for a cohort of two than for one of thirty, so it never separated a group worth trusting from one that was not.
+A number that is always within a thousandth of its maximum, sitting on a card beside a number that genuinely varies, is read as a grade rather than as a constant, which is the opposite of what it says.
+The per-member leave-one-out cosine stays, because that one does vary within a cohort and names an individual animal a user can act on.
 
 The medoid was measured and rejected: it agrees with the centroid on only 0.46 of the top-5, and being one sample it inherits exactly the single-sample instability the feature exists to remove.
 
@@ -161,7 +166,7 @@ No model, no subprocess, no torch, no new artifact, and one memmap scan, so the 
 | `bridge_rna/retrieval.py` | `run_cohort_retrieval`, mode `"cohort"` |
 | `bridge_rna/callbacks.py` | a `"cohort"` entry in `_retrieval_phrase`, the mode switch, the cohort callbacks, a synthesized cohort query row |
 | `bridge_rna/layout.py` | the segmented Sample / Cohort / Upload switch and the cohort panel |
-| `bridge_rna/panels.py` | the cohort inspector: membership, `R̄`, per-member LOO cosine, the overlap readout |
+| `bridge_rna/panels.py` | the cohort inspector: membership, per-member LOO cosine, the overlap readout |
 | `bridge_rna/figures.py` | a pooled query node, and a two-query network for the compare case |
 | `manifold/callbacks.py` | `_retrieval_overlay` draws every pooled member on the map, not one |
 | `precompute/validate_cohorts.py` | **new.** The honesty gate. |
@@ -238,7 +243,7 @@ Cohort mode, top to bottom:
 1. **OSDR study** dropdown, the same one Sample mode uses.
 2. **Group by**, a row of facet chips. Study is pinned. A line under it reports how many cohorts the current definition produces and their size range.
 3. **Cohort** dropdown, listing this study's cohorts with size and confidence state. Singletons are disabled with the reason, matching how the sample picker treats an unretrievable sample.
-4. **The cohort card**: k pooled, `R̄`, the measured stability at this k, and the amber low-N flag when it applies.
+4. **The cohort card**: k pooled, the measured stability at this k, and the amber low-N flag when it applies.
 5. **Members**, a collapsed disclosure listing every sample with its leave-one-out cosine, each with a checkbox. Any member flagged as an outlier is marked, never removed.
 6. **Compare against**, an optional sibling-cohort picker, empty by default.
 7. **Search cohort**.
@@ -251,7 +256,7 @@ The cohort-count line hangs under the facet chips, and the confidence card hangs
 Three layers, each answering a question the others cannot.
 
 **`tests/test_cohorts.py`, 34 tests, against the synthetic fixture corpus.**
-Facet grouping, the estimator, `R̄`, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
+Facet grouping, the estimator, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
 Two are worth calling out because they pin claims made in prose everywhere else.
 `test_pooled_ranking_is_the_mean_of_the_members_own_cosines` checks the central algebraic claim directly: ranking by cosine to the spherical mean is identical to ranking by the unweighted average of the members' own cosines, which is what "ask every animal, then average the votes" means.
 `test_one_animal_one_vote_regardless_of_transcriptome_concentration` scales one member's norm by 10 and asserts the pooled direction is unchanged, and then asserts that the *raw* mean would have been dragged, so the test cannot pass vacuously.

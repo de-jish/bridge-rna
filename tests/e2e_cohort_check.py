@@ -232,14 +232,17 @@ def main() -> int:
                  "the study picker is shared with Sample mode")
 
             chips = page.locator(".facet-chip")
-            c.ok(chips.count() == 9, f"nine facets offered, saw {chips.count()}")
+            c.ok(chips.count() == 3, f"three facets offered, saw {chips.count()}")
+            labels = {chips.nth(i).inner_text().strip() for i in range(chips.count())}
+            c.ok(labels == {"Study", "Tissue", "Spaceflight arm"},
+                 f"and they are the curated grouping, nothing else: {sorted(labels)}")
             study_chip = page.locator("button.facet-chip", has_text="Study").first
             c.ok(study_chip.is_disabled(), "Study is pinned and cannot be unticked")
             c.ok(bool(study_chip.get_attribute("title")),
                  "the pinned chip carries the reason it is pinned")
             on = page.locator(".facet-chip.is-on")
-            c.ok(on.count() == 3,
-                 f"three facets on by default, saw {on.count()}")
+            c.ok(on.count() == chips.count(),
+                 f"every offered facet is on by default, saw {on.count()}")
 
             summary = page.locator("#cohort-facet-summary").inner_text()
             c.ok("212 cohorts" in summary,
@@ -258,15 +261,18 @@ def main() -> int:
             c.ok("samples pooled into one query" in card,
                  "the card states the pooled size")
             c.ok("RESULT STABILITY" in card.upper(),
-                 "the card leads with stability, not tightness")
+                 "the card quotes result stability")
             m = re.search(r"0\.\d\d", card)
             c.ok(bool(m), f"stability is a quoted number: {card[:60]!r}")
             c.ok("0.16" in card,
                  "and it is stated against what one sample alone scores")
             c.ok(page.locator(".cohort-meter-fill").count() == 1,
                  "the stability meter is drawn")
-            c.ok("R" in card and "GROUP TIGHTNESS" in card.upper(),
-                 "tightness is present but secondary")
+            # R-bar was removed on 2026-08-05: median 0.9991 over all 212 real
+            # cohorts and no lower at k=2 than at k=30, so it graded nothing
+            # while looking like a grade. Stability is the only headline now.
+            c.ok("GROUP TIGHTNESS" not in card.upper() and "R̄" not in card,
+                 "and no group-tightness figure sits beside it")
 
             page.locator(".cohort-members-summary").click()
             page.wait_for_timeout(700)

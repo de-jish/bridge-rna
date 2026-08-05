@@ -63,8 +63,9 @@ That is not a defect in either query: the entire top-500 of a 940,455-sample ind
 It groups the samples the way OSDR already curates them, by study, tissue and flight condition, averages the group's embeddings into one query, and searches with that.
 Measured over all 212 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.74**, a 4.6-fold gain, and it costs no more than a single-sample search.
 
-You can change what counts as one cohort: split further by sex, strain, genotype, habitat, mission duration or diet, or widen by dropping tissue or condition.
+You can widen what counts as one cohort by dropping tissue or condition, which merges a study's organs or its arms into one larger group.
 Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
+Splitting finer than this is deliberately not offered: every further split makes the cohort smaller, and size is what the stability above is a function of.
 
 The panel says how far to trust each result rather than leaving you to guess.
 A cohort of three is flagged in amber with the measured number for that size, every member is listed with how far it sits from the rest, and you can exclude one and watch the numbers restate.

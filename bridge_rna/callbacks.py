@@ -111,7 +111,6 @@ def _cohort_query_series(cohort, geometry, excluded: list[str]) -> pd.Series:
         "is_cohort": "1",
         "grouped_by": grouped,
         "stability": f"{geometry.stability:.2f} at k = {geometry.size}",
-        "resultant": f"{geometry.resultant:.4f}",
         "members": "\n".join(geometry.members),
         "excluded": "\n".join(excluded),
         "outliers": "\n".join(outliers),
@@ -719,7 +718,7 @@ def register(app) -> None:
     )
     def update_cohort_card(included: list[str] | None, cohort_id: str | None,
                            facets: list[str] | None):
-        """Restate size, stability and tightness for what is actually ticked.
+        """Restate size and stability for what is actually ticked.
 
         This reads the *included* members rather than the cohort's full
         membership, because excluding two of six changes every number on the
@@ -729,7 +728,7 @@ def register(app) -> None:
         """
         cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
         if cohort is None:
-            return (html.Div("Select a cohort to see how tightly it groups.",
+            return (html.Div("Select a cohort to see how far to trust it.",
                              className="cohort-card cohort-card--empty"),
                     "Members", True)
         members = [m for m in (included or []) if m in set(cohort.members)]

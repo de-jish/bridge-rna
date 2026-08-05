@@ -178,22 +178,21 @@ def build_status_banner(message: str, kind: str = "info", detail: str | None = N
 
 
 def build_cohort_card(cohort, geometry) -> Any:
-    """Size, stability and tightness for the cohort currently selected.
+    """Size and result stability for the cohort currently selected.
 
-    Two numbers, deliberately labelled as different things.
+    One number, and that is the point. **Stability** is a property of *k*: the
+    measured agreement between this cohort's top-5 and the top-5 it would have
+    produced with any one animal left out. It says how far to trust the list,
+    and it is quoted rather than reduced to a word, because "low confidence"
+    tells a researcher nothing they can act on while "3 samples, 0.51" tells
+    them exactly how far down the list to stop reading.
 
-    **Stability** is the headline, and it is a property of *k*: the measured
-    agreement between this cohort's top-5 and the top-5 it would have produced
-    with any one animal left out. It is the number that says how far to trust
-    the list, and it is quoted rather than reduced to a word, because "low
-    confidence" tells a researcher nothing they can act on while "3 samples,
-    0.51" tells them exactly how far down the list to stop reading.
-
-    **Tightness** is `R̄`, and it is a property of the *group*: how nearly the
-    members point the same way. It sits second and quieter because it is almost
-    always ~0.999 and therefore almost never the thing that should change a
-    decision. Leading with it would imply a tight cohort is a trustworthy one,
-    and a tight cohort of two is not.
+    A second stat sat beside it and was removed: `R̄`, the vMF resultant
+    length, labelled "Group tightness". Measured over all 212 real cohorts it
+    is near-constant at a median 0.9991, and no lower for a cohort of two than
+    for one of thirty, so it never changed a decision while looking like a
+    grade. The per-member leave-one-out cosine stays, in the member list on the
+    rail, because that one varies and points at a specific animal.
     """
     from .cohorts import (
         LOW_N_THRESHOLD,
@@ -240,24 +239,6 @@ def build_cohort_card(cohort, geometry) -> Any:
                     f"Measured share of the top 5 that survives dropping any one "
                     f"of these {k} samples. One sample alone scores "
                     f"{SINGLE_SAMPLE_STABILITY:.2f}.",
-                    className="cohort-stat-note"),
-            ],
-        ),
-        html.Div(
-            className="cohort-stat cohort-stat--minor",
-            children=[
-                html.Div(
-                    className="cohort-stat-head",
-                    children=[
-                        html.Span("Group tightness", className="cohort-stat-label"),
-                        html.Span(f"R̄ {geometry.resultant:.4f}",
-                                  className="cohort-stat-value"),
-                    ],
-                ),
-                html.Div(
-                    "How nearly the members point the same way. Real cohorts sit "
-                    "near 1.000, so this flags a mixed group rather than "
-                    "grading a clean one.",
                     className="cohort-stat-note"),
             ],
         ),
@@ -317,8 +298,6 @@ def build_cohort_details(query: pd.Series) -> list[Any]:
                 _detail_row("Grouped by", _safe_str(query.get("grouped_by"))),
                 _detail_row("Samples pooled", str(len(members))),
                 _detail_row("Result stability", _safe_str(query.get("stability"))),
-                _detail_row("Group tightness",
-                            f"R̄ {_safe_str(query.get('resultant'))}"),
             ],
         ),
     ]

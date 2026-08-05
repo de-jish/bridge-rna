@@ -14,7 +14,7 @@ Design and every measurement: `docs/cohort_retrieval.md`.
 
 **A cohort is study x tissue x spaceflight arm by default, and the user can retune it.**
 That is the ISA-Tab factor grouping OSDR already curates: 212 cohorts with two or more members across 70 studies, median 10, max 38, grouping 2,105 of the 2,108 embedded samples.
-Nine facets are offered as chips and six more can be added (sex, strain, genotype, habitat, duration, diet).
+Three facets are offered as chips: study, tissue and spaceflight arm. (Six more were offered at first - sex, strain, genotype, habitat, duration, diet - and were removed on 2026-08-05; see that entry.)
 **Study is pinned and cannot be unticked**, because random samples from one study already reach 0.9805 mean pairwise cosine against 0.9933 for a real cohort, so pooling across studies would average across the corpus's strongest batch boundary.
 
 **The case for the feature is stability, not outlier protection, and it is now measured over all 212 cohorts rather than a sample.**
@@ -30,7 +30,7 @@ Against a within-study null at 0.683, tissue and arm are worth **+0.055** on top
 
 *Two Dash callbacks were firing at page load.* Restyling the action slots on the initial call remounted the buttons inside them, and Dash fires a callback when an input component newly appears - so the cohort and upload searches both ran at `n_clicks: 0` and the canvas greeted every visitor with "Cohort retrieval failed". Fixed by giving the mode switch `prevent_initial_call` (the layout already renders the right initial state) plus an `n_clicks` guard in both callbacks. The browser suite now checks for it by name.
 
-**Interface.** The rail's two stacked query sources became a three-way tablist, so it is shorter than before rather than longer. The confidence card leads with **result stability** (a property of k, and the number that says how far to trust the list) and puts `R̄` second and quieter (a property of the group, almost always ~0.999, so leading with it would imply a tight cohort of two is a trustworthy one). Low N is amber, not red, and names the measured number rather than the word "low". The member list shows each sample's leave-one-out cosine and lets you exclude one; nothing is ever auto-dropped. Excluding a member restates every number on the card.
+**Interface.** The rail's two stacked query sources became a three-way tablist, so it is shorter than before rather than longer. The confidence card leads with **result stability** (a property of k, and the number that says how far to trust the list) and put `R̄` second and quieter. (`R̄` was removed on 2026-08-05; see that entry.) Low N is amber, not red, and names the measured number rather than the word "low". The member list shows each sample's leave-one-out cosine and lets you exclude one; nothing is ever auto-dropped. Excluding a member restates every number on the card.
 
 **The comparison runs two independent pooled queries, never a difference vector.** `centroid(flight) - centroid(ground)` is not a transcriptome, and the corpus-level version of it was already built and rejected (r = -0.990 with PC1). Only siblings differing in exactly one facet are offered, so the reported Jaccard overlap is attributable. Measured live: OSD-137 Liver Basal Control against Liver Ground Control share 2 of 8 retrieved samples, overlap 0.25.
 
