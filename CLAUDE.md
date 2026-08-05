@@ -310,6 +310,28 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 60 cohort checks, about two minutes
 ```
 
+## Hosting
+
+`Dockerfile`, `fly.toml` and `wsgi.py` deploy the app to Fly.io (`fly deploy`); design and tradeoffs are in `docs/deployment.md`.
+Four things about it are load-bearing.
+
+**One gunicorn worker, and the number is measured.** Peak resident memory is **1,852 MB** on the real corpus with all six coordinate sets, the tissue color-by and a cached retrieval live in one process.
+Those are ordinary heap pages a second worker would not share, so concurrency is four threads instead - the work is numpy and file IO, both of which release the GIL.
+`app.py`'s `app.run()` is Flask's development server and is never what serves a deployment.
+That measurement is also why the machine is 4 GB: the headroom is for the upload path's torch subprocess running beside the web worker, and why the gunicorn timeout is 300 s rather than the default 30, which would kill it mid-checkpoint-load.
+
+**The image excludes 658 MB, and one exclusion was checked rather than assumed.**
+`data/osdr/raw/` (536 MB) is read only by the `subprocess` tier, which is empty whenever the cache exists - `sample_tier` returns `cached` before it looks at a counts path, and the 55 unavailable samples that do reach `_counts_columns` stay `unavailable` because a missing file yields an empty frozenset. **No sample changes tier.**
+`cache/osdr_expression.float32.npy` (122 MB) is a precompute intermediate the app never opens.
+`requirements-deploy.txt` drops the precompute stack, which is the boundary `tests/test_app.py` already pins, made physical.
+The consequence to keep in mind: the hosted app has **no fallback** if the cache is ever absent, where a local checkout does.
+
+**`BRIDGE_RNA_BASIC_AUTH` must be set before the URL is shared.** The upload endpoint accepts 200 MB and starts a torch subprocess loading a 522 MB checkpoint for any caller, which on an open URL is a denial-of-service primitive, and the summary endpoint would be an open proxy.
+`bridge_rna/auth.py` is a no-op when the variable is unset, so local runs and the suite are unaffected, and it is installed in `wsgi.py` rather than in `build_app` because a credential belongs to a deployment and not to the application.
+`/healthz` is the one exempt path, because Fly's health check has no credential to present.
+
+**The browser checks reach the deployment.** `tests/e2e_check.py --base-url URL --http-auth user:password` runs the same 45 checks against a hosted app instead of a local subprocess, which is what makes "it deployed" and "it works" separable claims.
+
 **The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.
 `--skip-tsne` exists for exactly this reason, and skipping it is not a broken build: the t-SNE pill is shown disabled, the validator prints `SKIP` rather than failing, and everything else works.
 Measured stage timings are in `REFERENCE.md` section 4.

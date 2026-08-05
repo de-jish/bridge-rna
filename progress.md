@@ -6,6 +6,41 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-05 (cohort retrieval merged to main, and the app hosted)
+
+Cohort retrieval was merged to `main` and pushed, then the app was given a deployment.
+Until now it was a localhost instrument: both `README.md` and `MEETING_QA.md` described it as `.venv/bin/python app.py` at `http://127.0.0.1:8050`.
+
+**Fly.io, one container, artifacts baked in.**
+The choice was forced by shape rather than preference.
+Bridge RNA memory-maps a 963 MB index and peaks at **1,852 MB resident**, measured on the real corpus with all six coordinate sets, the tissue color-by and a cached retrieval live in one process.
+Vercel and Netlify cap a bundle at 250 MB and give it no persistent process to hold a memmap open between requests, so neither was ever a candidate.
+Region `sjc`, the closest Fly region to Ames.
+
+**gunicorn with one worker, and that number is measured rather than cautious.**
+`app.py`'s `app.run()` is Flask's development server.
+The container runs gunicorn against a new `wsgi.py`; the 1,852 MB is ordinary heap that a second worker would not share, so concurrency comes from four threads instead, which suits work that is numpy and file IO.
+The timeout is 300 s because the upload path shells out to a subprocess that loads a 522 MB checkpoint before it embeds anything.
+
+**The image leaves out 658 MB it would never read, and one exclusion needed checking rather than assuming.**
+`data/osdr/raw/` (536 MB) serves only the `subprocess` retrieval tier, and that tier is empty whenever the cache exists.
+Verified in the code rather than inferred from the tier table: `sample_tier` returns `cached` before it looks at a counts path, and of the 788 unavailable samples only 55 reach `_counts_columns`, which returns an empty frozenset for a missing file and therefore still classifies them `unavailable`.
+No sample changes tier.
+`cache/osdr_expression.float32.npy` (122 MB) is a precompute intermediate the serving app never opens.
+The precompute stack is dropped too, via a new `requirements-deploy.txt` - which is the boundary `tests/test_app.py` already pinned, made physical.
+
+**Basic auth, because the upload endpoint is an abuse primitive on an open URL.**
+It accepts 200 MB and starts a torch subprocess for whoever calls it, and the summary endpoint would be an open proxy.
+`bridge_rna/auth.py` guards every request when `BRIDGE_RNA_BASIC_AUTH` is set and does nothing when it is not, so local runs and the suite are unaffected.
+It is installed in `wsgi.py` rather than in `build_app` because a credential belongs to a deployment, not to the application.
+`/healthz` is exempt, since Fly's health check has no credential to present.
+
+**The verification loop reaches the deployment.**
+`tests/e2e_check.py` grew `--base-url` and `--http-auth`, so the same 45 browser checks can drive a hosted URL instead of only a local subprocess.
+All 45 pass against gunicorn behind the guard - first interactive frame 2.1 s, 942,563 glyphs, a real retrieval, no console errors - and the suite is 285 tests, 27 of them new for the guard.
+
+Design, tradeoffs, and the volume-versus-baked-in argument: `docs/deployment.md`.
+
 ## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
 
 `docs/cohort_pooling.md` had specified and measured this feature on 2026-07-30 and left it unbuilt.
