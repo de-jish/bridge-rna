@@ -11,7 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 258 tests pass in about twenty-five seconds, plus 202 browser checks: 45 in `tests/e2e_check.py`, 97 in `tests/e2e_upload_check.py`, and 60 in `tests/e2e_cohort_check.py`.
+**Current state: built, run on the real corpus, tested, and hosted.** 285 tests pass in about twenty-five seconds, plus 173 browser checks: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, and 60 in `tests/e2e_cohort_check.py`.
+The map and cohort checks also pass against the deployment; see "Hosting" below and `docs/deployment.md`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -304,9 +305,9 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 258 tests, about twenty-five seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 285 tests, about twenty-five seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 45 browser checks, about three minutes
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 97 upload checks, about eight minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 68 upload checks, about eight minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 60 cohort checks, about two minutes
 ```
 
