@@ -583,6 +583,44 @@ It used to apply only where there was no density raster to carry the shape; with
 `OSDR_HIGHLIGHT #f2a03d` is the single warm color the OSDR overlay takes when the field describes ARCHS4 only.
 The OSDR overlay is always a white-ringed `diamond`, so the 2,108 spaceflight samples stay findable among 940k circles.
 
+### The retrieval overlay, and the two-cohort case
+
+| token | value | role |
+| --- | --- | --- |
+| `RETRIEVAL_QUERY` | `#0bab9f` | cohort A's pooled members; == `ACCENT_TEAL`, the network's query star |
+| `RETRIEVAL_QUERY_RGB` | `11, 171, 159` | the same colour, for a computed halo alpha |
+| `RETRIEVAL_QUERY_B` | `#ffc233` | cohort B's members, in a comparison only |
+| `RETRIEVAL_QUERY_B_RGB` | `255, 194, 51` | |
+| `RETRIEVAL_QUERY_SIZE` | 20.0 | px; x0.7 when pooled, x0.5 in 3-D |
+| `RETRIEVAL_QUERY_HALO_SIZE` | 46.0 | a single query point |
+| `RETRIEVAL_QUERY_HALO_SIZE_POOLED` | 32.0 | two or more members |
+| `RETRIEVAL_QUERY_HALO_ALPHA` | 0.50 | at k=1; `halo_rgba` divides by `sqrt(k)`, floored at 0.14 |
+| `RETRIEVAL_HIT_RING` | `#ffffff` | every hit ring, in both cohorts |
+| `RETRIEVAL_HIT_SIZE` / `_B` | 20.0 / 27.0 | B's square circumscribes A's circle |
+| `RETRIEVAL_HIT_SYMBOL` / `_B` | `circle-open` / `square-open` | both valid in `Scatter3d` |
+| `RETRIEVAL_HIT_LINE` | 2.2 | ring stroke width |
+| `RETRIEVAL_DIM_ARCHS4` / `_OSDR` | 0.35 / 0.30 | how far each corpus recedes behind a retrieval |
+| `RETRIEVAL_MAX_NUMERALS` | 25 | rank numerals stop here, and are off entirely in a comparison |
+
+**Which cohort a *member* belongs to is hue; which cohort retrieved a *hit* is ring shape.** Measured, against `PLOT_BG` and the eleven categorical hues:
+
+| candidate | worst contrast vs a categorical hue |
+| --- | --- |
+| `#2b7fff` (network cohort A) | **1.03:1** vs `#3987e5`, the 155,761-point Blood / immune bucket |
+| `#d9791b` (network cohort B) | **1.00:1** vs `#9085e9` |
+| `#0bab9f` (network shared) | **1.07:1** vs `#c98500` |
+| `#ffffff` | **3.07:1** worst case, 16.9:1 vs `PLOT_BG` |
+
+So no hue can carry a hit ring, which is the same finding that made the ring white in the first place.
+Hue is safe on a member because a member is a *filled* mark with a 2 px white outline: its findability comes from the outline, so the fill only has to separate A from B.
+`#ffc233` against `#0bab9f` is CIEDE2000 **43.4** normal, **31.7 / 45.0 / 48.0** under protanopia, deuteranopia and tritanopia, all far above the palette's 8.4 CVD bar; it is 10.5:1 on `PLOT_BG` and 17.0 dE from the nearest categorical hue.
+`ACCENT_WARM #d9791b` was rejected for the map: 0.3 dE from `CATEGORICAL[3]` under deuteranopia.
+
+The rail's two-cohort swatches mirror these hexes in `assets/map.css` (`.bm-retrieval-swatch.is-a` / `.is-b`), because Plotly cannot read a CSS variable. A test pins the pair.
+
+`bridge_rna/figures.GRAPH_THEME` names the retrieval view's own three roles: `cohort_a #0bab9f`, `cohort_b #d9791b`, `cohort_shared #2b7fff`.
+Cohort A is teal and shared is blue, which is a swap from what shipped first: teal is the query star in the single-query network *and* the query mark on the map, so giving it to "shared" meant running a comparison silently recoloured the star the previous search had drawn teal.
+
 Figure `dragmode` is **`pan`**, not `lasso` or `select`, and the graph config removes both `select2d` and `lasso2d` from the modebar.
 There is no selection feature, and a drag that draws a marquee doing nothing would be a promise the app does not keep.
 (For the record: an earlier config removed `select2d` only, so the lasso button was in fact still on the modebar after the rest of the feature had been designed away.)
@@ -721,21 +759,24 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**258 tests, all passing, in about 26 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-05 by running the suite.
+**290 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-05 by running the suite.
 
 | file | tests |
 | --- | --- |
+| `tests/test_app.py` | 63 |
+| `tests/test_render.py` | 55 |
 | `tests/test_tissue.py` | 46 |
-| `tests/test_app.py` | 46 |
-| `tests/test_render.py` | 42 |
-| `tests/test_cohorts.py` | 34 |
+| `tests/test_cohorts.py` | 36 |
 | `tests/test_retrieval.py` | 22 |
 | `tests/test_data.py` | 22 |
 | `tests/test_colorby.py` | 18 |
 | `tests/test_projections.py` | 15 |
 | `tests/test_upload_ingestion.py` | 13 |
 
-Plus **202 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 97 in `tests/e2e_upload_check.py`, 60 in `tests/e2e_cohort_check.py`.
+The rows sum to the headline; regenerate both with `pytest tests/ -q --collect-only`.
+
+Plus **205 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 92 in `tests/e2e_cohort_check.py`.
+These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
 The runtime fell by 88% mostly because the fixture no longer builds an approximate-nearest-neighbour index, which was 43% of the old wall clock; it rose again to ~1.0 s because `test_projections.py` runs several 512-dimensional eigendecompositions.
@@ -785,6 +826,21 @@ The current `build_projections.py` takes `--umap-neighbors`, `--tsne-perplexity`
 Produced by `precompute/validate_cohorts.py` against the real 963 MB ARCHS4 memmap and the real 2,108 cached OSDR embeddings, over **all 212 cohorts** rather than a sample.
 The whole run is 9,270 query vectors scored in **one 73-second pass** over the memmap, using the same running-top-k streaming technique as `validate_artifacts.py --mixing`.
 Full narrative in `docs/cohort_retrieval.md`; the prior measurement that specified the feature is `docs/cohort_pooling.md`.
+
+### What the user can change, and what was removed (2026-08-05)
+
+The definition is `(study, tissue, spaceflight)`; study is pinned, tissue and arm can be unticked to *widen* it.
+There is no way to narrow it, and that is the whole of the registry.
+
+Six further facets were offered and deleted: `sex`, `strain`, `genotype`, `habitat`, `duration`, `diet`.
+Every one of them could only ever split a cohort, and the stability curve below is a function of size, so they traded away the quantity pooling exists to buy.
+The columns remain in `cache/osdr_metadata.parquet` and remain map color-bys; re-adding one is a single line in `bridge_rna/cohorts.FACETS`, and the deletion touched no other source file, which is the registry design working.
+**Every measurement in this section was taken under `(study, tissue, spaceflight)`, which is exactly what remains, so none of it needs re-measuring.**
+
+`R̄`, the vMF resultant length shown as "Group tightness", was removed in the same pass and `resultant_length` deleted.
+Its measurement stands and is the reason: median **0.9991** over all 212 cohorts, and no lower at k=2 than at k=30.
+A statistic that is always within a thousandth of its maximum grades nothing, while sitting on a card beside one that genuinely varies it reads as a grade.
+The per-member leave-one-out cosine stays: it varies within a cohort and names an individual animal.
 
 ### Cohort structure under the default definition `(study, tissue, spaceflight)`
 

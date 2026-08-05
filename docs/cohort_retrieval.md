@@ -13,7 +13,7 @@ Every number below was produced by `precompute/validate_cohorts.py` against the 
 | Against a structure-free null | 0.331, so the cohort definition is worth **+0.407** |
 | Against a within-study null | 0.683, so tissue and arm are worth **+0.055** on top of the study |
 | Cost of a pooled query | one memmap pass, the same ~0.5 s as a single sample, at any k |
-| Tests | 34 unit tests, 60 browser checks, 6 corpus-scale validation checks |
+| Tests | 36 unit tests, 92 browser checks, 6 corpus-scale validation checks |
 
 ## Why this exists, in one paragraph
 
@@ -44,25 +44,25 @@ The UI shows it as a pinned chip that cannot be removed, with the reason on hove
 
 ### What the user controls
 
-Nine facets are available, drawn from `cache/osdr_metadata.parquet`, which is exactly the table of the 2,108 samples that have a cached embedding.
+Three facets are available, drawn from `cache/osdr_metadata.parquet`, which is exactly the table of the 2,108 samples that have a cached embedding.
 
 | facet | default | note |
 | --- | --- | --- |
 | Study | **pinned on** | cannot be removed, for the reason above |
 | Tissue | on | |
 | Spaceflight arm | on | raw arm, seven values |
-| Sex | off | |
-| Strain | off | |
-| Genotype | off | |
-| Habitat | off | |
-| Mission duration | off | |
-| Diet | off | |
 
-Adding a facet splits cohorts and makes them smaller and more homogeneous.
-Removing one merges them and makes them larger and more heterogeneous.
-Both directions are legitimate questions and both are one click, so the cohort count and the size distribution update live under the chips.
+Unticking one merges cohorts and makes them larger: dropping Tissue pools a study's organs, dropping Spaceflight arm pools its flight animals with its controls.
+The cohort count and the size distribution update live under the chips.
 
-A tenth control sits below the cohort picker: the **member list**, where any individual sample can be excluded from the pool.
+**Six further facets were offered and were removed on 2026-08-05: sex, strain, genotype, habitat, mission duration, diet.**
+They came from the same parquet and cost nothing to offer, which is exactly why they were there, and that turned out to be the wrong reason.
+Every one of them could only ever *split* a cohort, and the measured stability curve in section 3 is a function of size: a cohort of 10 reads 0.81 and a cohort of 3 reads 0.51.
+So the six controls did nothing but trade away the quantity this whole feature exists to buy, in exchange for a contrast the two-arm comparison in section 4 answers directly and attributably.
+They also made the *default* harder to read, because nine chips of which six are off looks like a definition you are expected to tune rather than the curated grouping OSDR already publishes.
+The columns are still in the parquet, still resolved by the map's color-by registry, and re-adding one is a single line in `bridge_rna/cohorts.FACETS`; nothing else in the app hard-codes a facet.
+
+A fourth control sits below the cohort picker: the **member list**, where any individual sample can be excluded from the pool.
 Nothing is ever auto-excluded.
 
 ## 2. The estimator
@@ -80,11 +80,16 @@ Without that, `cos(mean, x)` is the members' cosines weighted by their L2 norms,
 Within a real cohort the spread is only 1.09x and the two estimators agree to a median cosine of 0.9999994, so this changes almost nothing today.
 It is done anyway because it is the maximum-likelihood estimator for data compared by cosine, and because it stays correct if anyone ever unticks Tissue and pools across organs, where the 3.9x spread is real.
 
-Three statistics fall out of the same `u` and all three are shown:
+Two statistics fall out of the same `u`, and both are shown:
 
-- **`R̄ = |u.mean(axis=0)|`**, the vMF resultant length, in [0, 1]. How tightly the cohort agrees on a direction.
 - **Each member's cosine to the leave-one-out centroid.** This is the correct outlier statistic. Using the full centroid instead lets an outlier pull the reference towards itself and hide inside it.
 - **Expected top-5 stability given k**, read off the measured curve in `precompute/validate_cohorts.py`. This is the honest confidence number, and it is a property of the cohort's size rather than of its tightness.
+
+A third was shown and **was removed on 2026-08-05**: `R̄ = |u.mean(axis=0)|`, the vMF resultant length, labelled "Group tightness" on the card.
+It is a real statistic and it is measured in `docs/cohort_pooling.md`, but as a readout it was inert.
+Across all 212 real cohorts its median is **0.9991**, and it is no lower for a cohort of two than for one of thirty, so it never separated a group worth trusting from one that was not.
+A number that is always within a thousandth of its maximum, sitting on a card beside a number that genuinely varies, is read as a grade rather than as a constant, which is the opposite of what it says.
+The per-member leave-one-out cosine stays, because that one does vary within a cohort and names an individual animal a user can act on.
 
 The medoid was measured and rejected: it agrees with the centroid on only 0.46 of the top-5, and being one sample it inherits exactly the single-sample instability the feature exists to remove.
 
@@ -161,7 +166,7 @@ No model, no subprocess, no torch, no new artifact, and one memmap scan, so the 
 | `bridge_rna/retrieval.py` | `run_cohort_retrieval`, mode `"cohort"` |
 | `bridge_rna/callbacks.py` | a `"cohort"` entry in `_retrieval_phrase`, the mode switch, the cohort callbacks, a synthesized cohort query row |
 | `bridge_rna/layout.py` | the segmented Sample / Cohort / Upload switch and the cohort panel |
-| `bridge_rna/panels.py` | the cohort inspector: membership, `R̄`, per-member LOO cosine, the overlap readout |
+| `bridge_rna/panels.py` | the cohort inspector: membership, per-member LOO cosine, the overlap readout |
 | `bridge_rna/figures.py` | a pooled query node, and a two-query network for the compare case |
 | `manifold/callbacks.py` | `_retrieval_overlay` draws every pooled member on the map, not one |
 | `precompute/validate_cohorts.py` | **new.** The honesty gate. |
@@ -238,7 +243,7 @@ Cohort mode, top to bottom:
 1. **OSDR study** dropdown, the same one Sample mode uses.
 2. **Group by**, a row of facet chips. Study is pinned. A line under it reports how many cohorts the current definition produces and their size range.
 3. **Cohort** dropdown, listing this study's cohorts with size and confidence state. Singletons are disabled with the reason, matching how the sample picker treats an unretrievable sample.
-4. **The cohort card**: k pooled, `R̄`, the measured stability at this k, and the amber low-N flag when it applies.
+4. **The cohort card**: k pooled, the measured stability at this k, and the amber low-N flag when it applies.
 5. **Members**, a collapsed disclosure listing every sample with its leave-one-out cosine, each with a checkbox. Any member flagged as an outlier is marked, never removed.
 6. **Compare against**, an optional sibling-cohort picker, empty by default.
 7. **Search cohort**.
@@ -250,8 +255,8 @@ The cohort-count line hangs under the facet chips, and the confidence card hangs
 
 Three layers, each answering a question the others cannot.
 
-**`tests/test_cohorts.py`, 34 tests, against the synthetic fixture corpus.**
-Facet grouping, the estimator, `R̄`, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
+**`tests/test_cohorts.py`, 36 tests, against the synthetic fixture corpus.**
+Facet grouping, the estimator, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
 Two are worth calling out because they pin claims made in prose everywhere else.
 `test_pooled_ranking_is_the_mean_of_the_members_own_cosines` checks the central algebraic claim directly: ranking by cosine to the spherical mean is identical to ranking by the unweighted average of the members' own cosines, which is what "ask every animal, then average the votes" means.
 `test_one_animal_one_vote_regardless_of_transcriptome_concentration` scales one member's norm by 10 and asserts the pooled direction is unchanged, and then asserts that the *raw* mean would have been dragged, so the test cannot pass vacuously.
@@ -259,7 +264,7 @@ Two are worth calling out because they pin claims made in prose everywhere else.
 **`precompute/validate_cohorts.py`, 6 checks, against the real corpus.**
 Section 6. This is the only layer that can speak to whether pooling works, as opposed to whether it computes what it says.
 
-**`tests/e2e_cohort_check.py`, 60 browser checks, against the real app and the real cache.**
+**`tests/e2e_cohort_check.py`, 92 browser checks, against the real app and the real cache.**
 Define a cohort, retick facets, watch the count change, read the confidence card, open the member list, pool and search, open the inspector, exclude a member and watch every number restate, compare two arms, and follow the whole cohort to the map.
 It asserts on what the page reports about itself, and two of its checks exist because this feature shipped those exact regressions and had them fixed: callbacks firing at page load so the canvas greeted a visitor with "Cohort retrieval failed", and the legend continuing to advertise a GSE column while a comparison that draws none was on screen.
 
@@ -267,3 +272,76 @@ It asserts on what the page reports about itself, and two of its checks exist be
 The obvious wait predicates for a search - "the network has nodes", "the spinner is idle" - are both already true when a *second* search starts, so waiting on them returns instantly and the check then reads the previous result's banner.
 The comparison step appeared to fail while the app was doing exactly the right thing.
 `run_cohort_search` now waits for the status banner to change, and uses the spinner only as a secondary settle.
+
+## 9. Both cohorts on the map
+
+**Status: designed and built 2026-08-05.**
+
+Until now a comparison was invisible on the map.
+`_retrieval_overlay` read `member_ids` and `hits`, both of which describe cohort A only, and ignored `payload["comparison"]` entirely.
+So a user who ran flight against ground and then walked to the map saw one arm, one set of hits, a badge reading "Showing retrieval: 5 hits", and a rail line naming cohort A - with nothing anywhere saying a second cohort had been retrieved and was not being drawn.
+
+That is not a limitation, it is an omission, and the distinction matters because option A - keep it main-only and say so - would have cost the same UI work as fixing it.
+The choice was between spending that work on a disclaimer and spending it on the answer.
+
+### Why the map is the right place to settle a comparison
+
+The comparison reports a **Jaccard overlap between two hit sets**, and section 4 states the question it stands for: do this study's flight animals and its ground controls land in the same part of Earth's transcriptome space?
+Set overlap and spatial coincidence come apart in both directions, and this corpus makes that the common case rather than an edge case.
+Two cohorts can share **zero** hits and sit in one tissue neighbourhood, each retrieving different GEO samples from the same crowd - Jaccard says 0.00 and the honest answer is "the same place, resolved finer than k=5".
+The reverse happens too: an overlap of 0.4 where the shared hits are generic and each cohort's exclusive hits sit in different territories.
+Neither reading is available from the network figure, which has no space in it.
+Drawing both cohorts is the structure-free check on the headline number, which is how every other claim in this repo was accepted or rejected.
+
+### Hue tells you the cohort; shape tells you who retrieved a hit
+
+The obvious move - lift the comparison network's blue, warm and teal onto the map - was measured and is dead.
+Against the worst of the eleven `CATEGORICAL` tissue hues on `PLOT_BG`, the network's cohort-A `#2b7fff` measures **1.03:1**, its cohort-B `#d9791b` **1.00:1**, and its shared `#0bab9f` **1.07:1**.
+All three vanish over large tissue buckets.
+That is the same measurement `manifold/theme.py` already records as the reason a hit ring is white at all: `#2b7fff` against `CATEGORICAL[0]` (the 155,761-point Blood / immune bucket, 16.6% of the corpus) is 1.03:1, and white is 3.64:1 against it and 16.9:1 against the background.
+A two-cohort map can afford a lost hit even less than a one-cohort map, because a lost hit is now also a lost group assignment.
+
+So the two channels are split by what each can carry:
+
+| what | channel | A | B |
+| --- | --- | --- | --- |
+| pooled member | **fill hue** | teal `RETRIEVAL_QUERY` | gold `RETRIEVAL_QUERY_B` |
+| retrieved hit | **ring shape**, always white | `circle-open`, size 20 | `square-open`, size 27 |
+
+Hue is safe on a member because a member is a *filled* mark with a 2 px white outline: its findability comes from the outline, so the fill only has to be discriminable from the other cohort's fill.
+Gold `#ffc233` against teal `#0bab9f` measures CIEDE2000 **43.4** in normal vision and **31.7 / 45.0 / 48.0** under protanopia, deuteranopia and tritanopia, every one far above the 8.4 CVD bar the categorical palette was validated to.
+It is 10.5:1 against `PLOT_BG` and 17.0 dE from the nearest categorical hue, so it cannot be read as a legend row.
+`ACCENT_WARM #d9791b`, the network's own cohort-B colour, was rejected for the map specifically: it sits 0.3 dE from `CATEGORICAL[3]` under deuteranopia.
+
+Cohort A keeps teal deliberately.
+A comparison is then the single-cohort case plus a second thing, rather than a new colour scheme, so a single-sample map, a single-cohort map and the first arm of a comparison all draw the same mark.
+
+**A shared hit is emergent, never computed.** It is in both hit lists, so it receives both traces: a 20 px ring inscribed in a 27 px square. There is no third symbol and no set intersection in the renderer, which means the shared set drawn on the map cannot drift from the `comparison["shared"]` the banner quotes, because it is not calculated twice.
+
+`square-open` and `circle-open` are both in `Scatter3d`'s small symbol vocabulary, so the hit encoding is identical in 2-D and 3-D - which no hue scheme would have managed, since `star` is rejected outright in 3-D and already falls back to `diamond`.
+
+### Three things this fixed on the way
+
+**The halo scaled with membership and should not have.** Every query point got a 46 px ring at 0.50 alpha, so a 38-animal cohort composited into a teal disc - before any comparison existed. The star already shrank to 0.7x when pooled; the halo never got the same treatment. Alpha is now `0.50 / sqrt(k)` clamped to `[0.14, 0.50]` and the ring narrows to 32 px when pooled, so total halo ink stays roughly constant instead of growing with the cohort.
+
+**The map-rank hover line was measured from an arbitrary animal.** It took `query_points[0]`, which for a cohort is whichever member happened to be first in metadata order, and for cohort B would have been a member of the wrong cohort entirely. Each hit is now ranked from **the nearest drawn member of the cohort that retrieved it**, and the hover says so.
+
+**Rank numerals are dropped in a comparison.** Two competing numeral sets over the same few hundred pixels is illegible, and prefixing them is worse at 9 px. The hover carries strictly more: for a shared hit it names both cohorts, both 512-d ranks and both cosines.
+
+### What the user controls
+
+The map rail's "Show it on the map" checkbox becomes **one tick per cohort**, labelled with each cohort's own name, both on by default.
+It is the same control rather than a new one, so nothing else about the rail changes, and unticking one is the escape hatch when two 38-member cohorts crowd the same region.
+Directly under it sits a colour key naming each cohort against its swatch, stating how many hits each retrieved and how many both did, and saying that a ring inside a square is a hit both found.
+That follows the rail's existing rule: the fact that qualifies a control sits under that control.
+
+Framing follows the ticks, so "Frame the retrieval" frames what is actually drawn.
+
+### The cross-view colour swap
+
+`GRAPH_THEME` expressed the comparison network's A / B / shared language through keys named `gsm`, `gse` and `query`, which mean something else in `build_network_figure`, and it gave "retrieved by both" `#0bab9f` - the exact hex the map uses for the query.
+Teal therefore meant "the query" in one view and "a shared hit" in the other, for the same search, and running a comparison silently recoloured the query star that the search a minute earlier had drawn teal.
+
+Two literals fix it: cohort A becomes teal and "retrieved by both" becomes blue.
+Both views now agree that teal is cohort A and warm is cohort B, while each renders "both" the way its own canvas supports - a colour on white, a doubled mark on navy.
+`GRAPH_THEME` gains `cohort_a` / `cohort_b` / `cohort_shared` keys so the retrieval view names what it means.

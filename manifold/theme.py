@@ -91,9 +91,67 @@ OSDR_HIGHLIGHT = "#f2a03d"
 # the one glyph a returning user already recognises survives the trip. It is
 # not in CATEGORICAL, so it cannot be mistaken for a legend row.
 RETRIEVAL_QUERY = "#0bab9f"      # == ACCENT_TEAL, the network graph's query star
-RETRIEVAL_QUERY_HALO = "rgba(11, 171, 159, 0.50)"
+RETRIEVAL_QUERY_RGB = "11, 171, 159"   # the same colour, for a computed alpha
 RETRIEVAL_QUERY_SIZE = 20.0
 RETRIEVAL_QUERY_HALO_SIZE = 46.0
+# A pooled cohort is several query points, so the halo narrows: at full width
+# every member of a 38-animal cohort carried a 46 px ring and the overlap
+# composited into a teal disc rather than marking 38 places.
+RETRIEVAL_QUERY_HALO_SIZE_POOLED = 32.0
+RETRIEVAL_QUERY_HALO_ALPHA = 0.50
+
+
+def halo_rgba(rgb: str, k: int) -> str:
+    """Halo alpha for a query of `k` points, so total ink stays about constant.
+
+    `alpha / sqrt(k)`, floored so a large cohort's ring does not disappear
+    entirely: 0.50 at k=1 (unchanged), 0.25 at k=4, 0.16 at the median cohort
+    size of 10, and the 0.14 floor from k=13 up. Without this the halo was the
+    one part of the overlay that got *louder* as the cohort got larger, which is
+    backwards - a bigger cohort should read as a constellation, not a blot.
+    """
+    alpha = min(RETRIEVAL_QUERY_HALO_ALPHA,
+                max(0.14, RETRIEVAL_QUERY_HALO_ALPHA / max(k, 1) ** 0.5))
+    return f"rgba({rgb}, {alpha:.2f})"
+
+
+# --- The second cohort, in a two-arm comparison ------------------------------
+# Cohort A keeps RETRIEVAL_QUERY above, so a single-sample search, a single
+# cohort, and the first arm of a comparison all draw the same mark and a
+# comparison is "the usual picture plus a second thing" rather than a new
+# scheme.
+#
+# B needed a second hue, and the map's colour budget is nearly spent: eleven
+# CATEGORICAL, two greys, ARCHS4_CONTEXT, OSDR_HIGHLIGHT and this teal are all
+# taken. The bar was therefore applied where it is load-bearing - B must be
+# unmistakable from A - rather than against every hue on the map at once:
+#   #ffc233 vs #0bab9f : dE2000 43.4 normal, 31.7 protan, 45.0 deutan, 48.0 tritan
+#   #ffc233 vs PLOT_BG : 10.5:1;  nearest categorical (#c98500) : dE 17.0
+# That clears the 8.4 CVD bar the categorical palette was validated to by more
+# than three times over. It is warm, so it agrees in family with the comparison
+# network's cohort-B colour without borrowing ACCENT_WARM #d9791b, which is
+# unusable here: 0.3 dE from CATEGORICAL[3] under deuteranopia.
+#
+# Hue is safe on a member and nowhere else in this overlay, because a member is
+# a *filled* mark with a 2 px white outline - its findability comes from the
+# outline, so the fill only has to separate A from B.
+RETRIEVAL_QUERY_B = "#ffc233"
+RETRIEVAL_QUERY_B_RGB = "255, 194, 51"
+
+# Which cohort retrieved a hit is carried by ring SHAPE, never by hue. Every
+# candidate hue measures 1.00 to 1.07:1 against the worst categorical bucket -
+# the network's own three included - which is the same measurement that made
+# the ring white in the first place (see below). Shape is also the one channel
+# that survives Scatter3d's eight-symbol vocabulary unchanged, so 2-D and 3-D
+# encode a hit identically.
+#
+# B's square is larger than A's circle on purpose: a hit retrieved by *both*
+# receives both traces, so it draws as a ring inscribed in a square. That means
+# the shared set on the map is emergent rather than computed, and cannot drift
+# from the `shared` list the status banner quotes.
+RETRIEVAL_HIT_SYMBOL = "circle-open"
+RETRIEVAL_HIT_SYMBOL_B = "square-open"
+RETRIEVAL_HIT_SIZE_B = 27.0
 
 # Hits are an **open white ring**, and both halves of that matter.
 #

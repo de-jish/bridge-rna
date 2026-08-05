@@ -32,12 +32,24 @@ def test_study_is_pinned_and_cannot_be_removed():
 
 
 def test_normalize_facets_canonicalizes_order_and_drops_unknowns():
-    got = C.normalize_facets(["diet", "tissue", "not-a-column", "study"])
-    assert got == ("study", "tissue", "diet"), "registry order, unknowns dropped"
+    got = C.normalize_facets(["spaceflight", "tissue", "not-a-column", "study"])
+    assert got == ("study", "tissue", "spaceflight"), (
+        "registry order, unknowns dropped")
 
 
 def test_default_definition_is_the_curated_isatab_grouping():
     assert C.DEFAULT_FACETS == ("study", "tissue", "spaceflight")
+
+
+def test_the_registry_is_exactly_the_curated_grouping_and_nothing_else():
+    """Six further columns (sex, strain, genotype, habitat, duration, diet) were
+    offered and removed. Every one of them could only make a cohort smaller, and
+    size is what the measured stability curve is a function of, so a finer
+    definition trades away the quantity the feature exists to buy. Pinned here
+    so a facet cannot drift back onto the rail without this test being read."""
+    assert tuple(f.key for f in C.FACETS) == ("study", "tissue", "spaceflight")
+    assert C.DEFAULT_FACETS == tuple(f.key for f in C.FACETS), (
+        "every remaining facet is on by default")
 
 
 # --- Grouping ----------------------------------------------------------------
@@ -58,18 +70,47 @@ def test_members_are_partitioned_without_overlap_or_loss():
     assert len(seen) == len(C.cohort_metadata()), "a sample landed in none"
 
 
-def test_adding_a_facet_only_ever_splits():
+def test_adding_a_facet_only_ever_splits(two_arm_study):
     """Narrowing the definition must refine the partition, never reshuffle it.
 
     Every cohort under the finer definition has to sit inside one cohort of the
     coarser one. If that ever fails, the grouping is not a facet intersection
     and the count under the chips is describing something else.
+
+    It runs on `two_arm_study` rather than on the synthetic corpus, and the
+    strictly-finer assertions are why. The synthetic corpus gives every study
+    exactly one tissue and one arm, so *every* definition produces the same 12
+    cohorts on it and the containment loop below passes without comparing
+    anything. That was true of this test from the day it was written; it named a
+    facet that has since been deleted, which would have been a second way to go
+    vacuous, but it was already not testing the invariant it is named for.
+    `two_arm_study` crosses two tissues with three arms, so each step of the
+    chain genuinely divides.
     """
-    coarse = {m: c.cohort_id for c in C.build_cohorts(["study", "tissue"])
-              for m in c.members}
-    for fine in C.build_cohorts(["study", "tissue", "sex"]):
-        parents = {coarse[m] for m in fine.members}
-        assert len(parents) == 1, f"{fine.cohort_id} straddles {parents}"
+    chain = [["study"], ["study", "tissue"], ["study", "tissue", "spaceflight"]]
+    partitions = [C.build_cohorts(keys, metadata=two_arm_study) for keys in chain]
+    assert [len(p) for p in partitions] == [1, 2, 6], (
+        "each step must actually divide, or the containment check is vacuous")
+
+    for coarser, finer in zip(partitions, partitions[1:]):
+        parent_of = {m: c.cohort_id for c in coarser for m in c.members}
+        for fine in finer:
+            parents = {parent_of[m] for m in fine.members}
+            assert len(parents) == 1, f"{fine.cohort_id} straddles {parents}"
+
+
+def test_every_sample_keeps_its_cohort_when_a_facet_is_dropped():
+    """The corpus-wide half of the invariant above, on the real fixture corpus.
+
+    Widening can only merge, so no sample may leave the company of a sample it
+    was already grouped with. This is checkable even though the fixture corpus
+    cannot express a split.
+    """
+    fine = {m: c.cohort_id for c in C.build_cohorts() for m in c.members}
+    for wide in C.build_cohorts(["study"]):
+        assert {fine[m] for m in wide.members}, wide.cohort_id
+        assert all(m in fine for m in wide.members), (
+            "widening dropped a sample that the default definition grouped")
 
 
 def test_widening_to_study_alone_gives_one_cohort_per_study():
@@ -188,16 +229,19 @@ def test_empty_input_is_refused():
         C.cohort_query_vector(np.zeros((0, 512), dtype=np.float32))
 
 
-# --- Tightness and outliers --------------------------------------------------
+# --- Per-member outliers -----------------------------------------------------
 
 
-def test_resultant_is_one_for_identical_members_and_lower_for_spread(rng):
-    v = rng.normal(size=512).astype(np.float32)
-    identical = np.stack([v, v, v])
-    assert C.resultant_length(identical) == pytest.approx(1.0, abs=1e-6)
-
-    spread = rng.normal(size=(3, 512)).astype(np.float32)
-    assert 0.0 <= C.resultant_length(spread) < 0.9
+def test_no_group_tightness_statistic_is_offered(rng):
+    """`R̄`, the vMF resultant length, was measured over all 212 real cohorts and
+    is near-constant at a median 0.9991 - no lower for a cohort of two than for
+    one of thirty. It never separated a group worth trusting from one that was
+    not, while sitting on the card looking like a grade, so it is gone. The
+    per-member leave-one-out cosine below is a different kind of statistic and
+    stays: it varies within a cohort and names an individual animal."""
+    assert not hasattr(C, "resultant_length")
+    g = C.cohort_geometry(["S|0", "S|1"], rng.normal(size=(2, 512)).astype(np.float32))
+    assert not hasattr(g, "resultant")
 
 
 def test_leave_one_out_scores_the_member_against_the_others(rng):
@@ -222,14 +266,15 @@ def test_two_members_get_the_same_leave_one_out_score_twice(rng):
         "flag would be an artifact")
 
 
-def test_cohort_geometry_bundles_the_three_statistics(rng):
+def test_cohort_geometry_bundles_what_the_interface_reads(rng):
     rows = rng.normal(size=(4, 512)).astype(np.float32)
     members = [f"S|{i}" for i in range(4)]
     g = C.cohort_geometry(members, rows)
     assert g.size == 4
     assert g.members == tuple(members)
     assert len(g.loo_cosines) == 4 and len(g.outliers) == 4
-    assert 0.0 <= g.resultant <= 1.0
+    assert g.tier == C.size_tier(4)
+    assert g.stability == C.expected_stability(4)
 
 
 # --- Low N -------------------------------------------------------------------
@@ -293,9 +338,6 @@ def two_arm_study():
                 rows.append({
                     "sample_key": f"OSD-137|{tissue[:3]}_{arm[:3]}_{rep}",
                     "study": "OSD-137", "tissue": tissue, "spaceflight": arm,
-                    "sex": "Female", "strain": "C57BL/6J", "genotype": "Unknown",
-                    "habitat": "Rodent Habitat", "duration": "39 day",
-                    "diet": "Standard chow",
                 })
     return pd.DataFrame(rows)
 

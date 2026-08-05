@@ -42,8 +42,17 @@ class Facet:
 
 
 # Order is the order the chips appear in. Study first because it is pinned,
-# then the two that make up the curated ISA-Tab factor grouping, then the
-# optional splits in rough order of how often they carry a real contrast.
+# then the two that complete OSDR's own curated ISA-Tab factor grouping.
+#
+# These three are the whole registry, and that is a deliberate narrowing. An
+# earlier build offered six more columns from the same table - sex, strain,
+# genotype, habitat, mission duration, diet - and every one of them made the
+# cohort *smaller*. Size is the thing the measured stability curve is a
+# function of (0.34 at k=2 against 0.86 at k>=15), so a finer definition trades
+# away the exact quantity the feature exists to buy, and it does so for a
+# contrast the two-arm comparison already answers more directly. The six are
+# recorded in `docs/cohort_retrieval.md` rather than left on the rail; adding
+# one back is one line here, and nothing else in the app hard-codes a facet.
 FACETS: tuple[Facet, ...] = (
     Facet("study", "Study", default=True, pinned=True,
           reason="Pooling across studies would average across the strongest "
@@ -53,12 +62,6 @@ FACETS: tuple[Facet, ...] = (
                  "cohort's coherence on its own."),
     Facet("tissue", "Tissue", default=True),
     Facet("spaceflight", "Spaceflight arm", default=True),
-    Facet("sex", "Sex", default=False),
-    Facet("strain", "Strain", default=False),
-    Facet("genotype", "Genotype", default=False),
-    Facet("habitat", "Habitat", default=False),
-    Facet("duration", "Mission duration", default=False),
-    Facet("diet", "Diet", default=False),
 )
 
 FACETS_BY_KEY: dict[str, Facet] = {f.key: f for f in FACETS}
@@ -186,19 +189,18 @@ def _unit_rows(arr: np.ndarray) -> np.ndarray:
     return arr / np.maximum(norms, 1e-12)
 
 
-def resultant_length(rows: np.ndarray) -> float:
-    """`R̄ = |mean(unit vectors)|`, the vMF concentration, in [0, 1].
-
-    1.0 means every member points in exactly the same direction. It is a
-    tightness statistic and *not* a confidence one: real cohorts sit at a median
-    0.9991 whether they hold two animals or thirty, so a high R̄ says the group
-    is homogeneous, while how far to trust its hit list is a question about k.
-    Both are shown, and they are labelled differently for that reason.
-    """
-    arr = np.asarray(rows, dtype=np.float32)
-    if arr.ndim != 2 or arr.shape[0] == 0:
-        return 0.0
-    return float(np.linalg.norm(_unit_rows(arr).mean(axis=0)))
+# A group-level tightness statistic used to live here: `R̄`, the vMF resultant
+# length `|mean(unit vectors)|`, in [0, 1]. It was measured over all 212 real
+# cohorts and it is essentially constant - median 0.9991, and no lower for a
+# cohort of two than for one of thirty - so it never separated a group worth
+# trusting from one that was not, while sitting on the card looking like a
+# grade. It is deleted rather than hidden; `docs/cohort_pooling.md` keeps the
+# measurement. What replaced it is nothing, because the honest confidence
+# number was already beside it: `expected_stability(k)`.
+#
+# The per-member statistic below is deliberately *not* the same kind of thing
+# and stays. It varies within a cohort and names an individual animal, which is
+# something a user can act on.
 
 
 def leave_one_out_cosines(rows: np.ndarray) -> np.ndarray:
@@ -311,10 +313,11 @@ def cohort_metadata() -> pd.DataFrame:
 
     This is `cache/osdr_metadata.parquet` rather than the OSDR TSV the sample
     picker reads, and the difference is deliberate. Only a sample with a cached
-    vector can be pooled at all, and this table is exactly that set; it also
-    carries three facets the TSV does not (genotype, habitat, diet). Its
-    `sample_key` is the same string the retrieval calls `sample_id`, which is
-    the join the whole app is built on.
+    vector can be pooled at all, and this table is exactly that set, so a cohort
+    can never list a member it cannot pool. Its `sample_key` is the same string
+    the retrieval calls `sample_id`, which is the join the whole app is built
+    on. It also carries every column the map's color-by registry resolves, so a
+    facet can be added back here without a new artifact.
 
     Returns an empty frame rather than raising when the cache is absent, which
     is the state a fresh clone starts in. Cohort mode then reports that it needs
@@ -441,7 +444,6 @@ class CohortGeometry:
     """The measured facts about a pooled cohort, ready to render."""
 
     members: tuple[str, ...]
-    resultant: float
     loo_cosines: tuple[float, ...]
     outliers: tuple[bool, ...]
 
@@ -464,7 +466,6 @@ def cohort_geometry(members: list[str] | tuple[str, ...],
     loo = leave_one_out_cosines(vectors)
     return CohortGeometry(
         members=tuple(members),
-        resultant=resultant_length(vectors),
         loo_cosines=tuple(float(x) for x in loo),
         outliers=tuple(bool(x) for x in outlier_flags(loo)),
     )

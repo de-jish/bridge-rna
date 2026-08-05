@@ -138,7 +138,7 @@ def build_cohort_facet_chips() -> Any:
 
 
 def build_cohort_panel() -> Any:
-    """Cohort mode: define the group, see how tight it is, then search it."""
+    """Cohort mode: define the group, see how far to trust it, then search it."""
     return html.Div(
         id="mode-panel-cohort",
         className="mode-panel",

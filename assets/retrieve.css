@@ -962,8 +962,6 @@ summary:focus-visible,
   line-height: 1.45;
   color: var(--text-secondary);
 }
-.cohort-stat--minor .cohort-stat-value { color: var(--text-secondary); }
-
 /* Same track treatment as the map's coverage bar, for the same reason: the
    unfilled part is the message, so the track needs enough contrast to be read
    as a track rather than as background. */

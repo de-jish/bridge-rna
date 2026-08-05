@@ -673,3 +673,249 @@ def test_the_cross_corpus_caution_is_not_shown_on_the_rail(map_view):
     classes = {getattr(c, "className", "") for c in _walk(map_view)}
     assert not any("bm-caution" in str(c) for c in classes)
     assert "54x" not in _text(map_view)
+
+
+# --- A comparison, translated onto the map -----------------------------------
+
+
+def _comparison_payload(members_a, members_b):
+    """A hits-store payload shaped exactly as `run_cohort_search` writes one."""
+    def hit(i, gsm):
+        return {"gsm": gsm, "score": 0.99, "archs4_index": i}
+    return {
+        "sample_id": "COHORT|study=OSD-1|tissue=Liver|spaceflight=Space Flight",
+        "mode": "cohort",
+        "hits": [hit(0, "GSM1"), hit(1, "GSM2"), hit(2, "GSM3")],
+        "query": {"cohort_label": "Liver · Space Flight", "is_cohort": "1"},
+        "member_ids": list(members_a),
+        "comparison": {
+            "query_b": {"cohort_label": "Liver · Ground Control", "is_cohort": "1"},
+            "hits_b": [hit(1, "GSM2"), hit(2, "GSM3"), hit(5, "GSM6")],
+            "shared": ["GSM2", "GSM3"],
+            "overlap": 0.5,
+            "facet": "spaceflight arm",
+            "member_ids": list(members_b),
+        },
+    }
+
+
+@pytest.fixture
+def two_cohorts(corpus):
+    """Two disjoint groups of real OSDR sample keys from the fixture corpus."""
+    keys = data.osdr_metadata()["sample_key"].astype(str).tolist()
+    assert len(keys) >= 5
+    return keys[:3], keys[3:5]
+
+
+def test_a_comparison_becomes_two_drawable_cohorts(two_cohorts):
+    """The payload already carried everything needed - cohort B's hits have
+    always had `archs4_index` - and the overlay simply never looked at it. A
+    user who ran flight against ground saw one arm and no sign of the other."""
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    assert overlay is not None
+    assert [c["role"] for c in overlay["cohorts"]] == ["a", "b"]
+    assert [c["label"] for c in overlay["cohorts"]] == ["Liver · Space Flight",
+                                                        "Liver · Ground Control"]
+    assert [len(c["query_points"]) for c in overlay["cohorts"]] == [3, 2]
+
+
+def test_the_flat_keys_are_the_union_of_both_cohorts(two_cohorts):
+    """`_frame_for` and the retrieval summary read the flat keys. Keeping them a
+    union rather than cohort A's own values is what lets both of them frame and
+    describe a comparison without either learning what a comparison is."""
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    assert overlay["hit_points"] == [p for c in overlay["cohorts"]
+                                     for p in c["hit_points"]]
+    assert overlay["query_points"] == [p for c in overlay["cohorts"]
+                                       for p in c["query_points"]]
+    assert len(overlay["query_points"]) == 5
+
+
+def test_shared_points_are_the_intersection_of_the_two_hit_sets(two_cohorts):
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    first, second = (set(c["hit_points"]) for c in overlay["cohorts"])
+    assert set(overlay["shared_points"]) == first & second
+    assert overlay["shared_points"], "this fixture is built to share two hits"
+
+
+def test_unticking_an_arm_removes_it_from_everything_downstream(two_cohorts):
+    """The escape hatch when two large cohorts crowd one region. It has to
+    reach the frame as well as the figure, or framing zooms out past what is
+    actually drawn."""
+    a, b = two_cohorts
+    payload = _comparison_payload(a, b)
+    only_a = callbacks._retrieval_overlay(payload, ("a",))
+    assert [c["role"] for c in only_a["cohorts"]] == ["a"]
+    assert len(only_a["query_points"]) == 3
+    assert only_a["shared_points"] == [], "nothing to share with one cohort"
+
+    only_b = callbacks._retrieval_overlay(payload, ("b",))
+    assert [c["role"] for c in only_b["cohorts"]] == ["b"]
+    assert len(only_b["query_points"]) == 2
+
+
+def test_the_checklist_value_maps_to_the_cohorts_it_asks_for():
+    """Cohort A stays "on" rather than becoming "a" so a single-query retrieval
+    keeps the exact value this control has always held, and a session store
+    written before comparisons could be drawn still resolves."""
+    assert callbacks._roles_from_checklist(["on"]) == ("a",)
+    assert callbacks._roles_from_checklist(["on", "b"]) == ("a", "b")
+    assert callbacks._roles_from_checklist(["b"]) == ("b",)
+    assert callbacks._roles_from_checklist([]) == ()
+    assert callbacks._roles_from_checklist(None) == ()
+
+
+def test_a_single_cohort_payload_is_unchanged_by_the_comparison_machinery(
+        two_cohorts):
+    """A comparison must be the single-cohort case plus a second thing. If the
+    one-cohort overlay drifts, every existing behaviour drifts with it."""
+    a, _b = two_cohorts
+    payload = _comparison_payload(a, [])
+    payload.pop("comparison")
+    overlay = callbacks._retrieval_overlay(payload)
+    assert len(overlay["cohorts"]) == 1
+    assert overlay["query_label"] == "3 pooled cohort samples"
+    assert overlay["shared_points"] == []
+    assert overlay["query_point"] == overlay["query_points"][0]
+
+
+def test_a_single_sample_retrieval_is_still_named_by_its_sample_key(corpus):
+    """The map rail prints this, and it must not become "1 pooled cohort
+    samples" for a plain Sample-mode search."""
+    key = str(data.osdr_metadata()["sample_key"].iloc[0])
+    overlay = callbacks._retrieval_overlay(
+        {"sample_id": key, "hits": [{"gsm": "GSM1", "score": 0.9,
+                                     "archs4_index": 0}]})
+    assert overlay["query_label"] == key
+    assert len(overlay["cohorts"]) == 1
+
+
+def test_the_map_swatches_match_the_colours_plotly_draws():
+    """Plotly cannot read a CSS variable, so the rail's two-cohort key mirrors
+    the plot's hexes by hand. A drifted swatch would label the wrong cohort."""
+    css = _all_css()
+    for selector, value in [(".bm-retrieval-swatch.is-a", theme.RETRIEVAL_QUERY),
+                            (".bm-retrieval-swatch.is-b", theme.RETRIEVAL_QUERY_B)]:
+        assert f"{selector} {{ background: {value}; }}" in css, (
+            f"{selector} drifted from {value}")
+
+
+def test_the_second_cohorts_hit_symbol_is_valid_in_three_dimensions():
+    """Scatter3d rejects an unknown symbol outright rather than degrading - the
+    failure that took the whole figure callback down with a 500 the first time
+    3-D was opened with a retrieval showing."""
+    import plotly.graph_objects as go
+
+    # Constructing the trace is the check: Scatter3d validates the symbol at
+    # construction and raises ValueError on one it does not know.
+    for symbol in (theme.RETRIEVAL_HIT_SYMBOL, theme.RETRIEVAL_HIT_SYMBOL_B):
+        go.Scatter3d(x=[0], y=[0], z=[0], mode="markers",
+                     marker=dict(symbol=symbol))
+
+    with pytest.raises(ValueError):
+        go.Scatter3d(x=[0], y=[0], z=[0], mode="markers",
+                     marker=dict(symbol="star"))  # the reason 3-D uses diamond
+
+
+# --- The router must not repaint a view that is already on screen ------------
+
+
+def test_the_router_declines_to_repaint_the_route_already_painted():
+    """`prevent_initial_call` is not enough on its own, and the gap it left was a
+    live bug. `dcc.Location` publishes `pathname` once it mounts, which Dash
+    reads as a change, so the router rebuilt the view the server had already
+    painted. Rebuilding the retrieval view is not free - it reads the OSDR
+    catalog and renders the sample preview - so its response landed a few
+    hundred milliseconds after load, on top of whatever the user had done in the
+    meantime. Clicking Cohort on arrival opened the cohort panel and then closed
+    it again, 6 times out of 6, and the click was innocent: its own callback ran
+    and returned the right answer, then the router overwrote the subtree it had
+    just updated."""
+    assert shell.navigation_for("/", "retrieve") is None
+    assert shell.navigation_for("/map", "map") is None
+
+
+def test_the_router_still_swaps_when_the_route_actually_changes():
+    assert shell.navigation_for("/map", "retrieve")["key"] == "map"
+    assert shell.navigation_for("/", "map")["key"] == "retrieve"
+
+
+def test_an_unknown_path_resolves_to_the_default_route():
+    assert shell.navigation_for("/nope", "map")["key"] == shell.DEFAULT_ROUTE["key"]
+    assert shell.navigation_for("/nope", shell.DEFAULT_ROUTE["key"]) is None, (
+        "and does not repaint the default view when that is already showing")
+
+
+def test_a_query_string_link_is_not_treated_as_a_navigation():
+    """`/?q=<sample_id>` is the deep link the served layout already handles at
+    build time. Repainting it would throw that away and restart the view."""
+    assert shell.navigation_for("/", "retrieve") is None
+
+
+def test_the_router_writes_back_the_route_it_painted(app):
+    """The store has to be an Output as well as a State, or the first real
+    navigation is the only one that ever happens."""
+    writers = [cb for cb in app.callback_map.values()
+               if any(o.component_id == "route-store"
+                      for o in (cb["output"] if isinstance(cb["output"], list)
+                                else [cb["output"]]))]
+    assert len(writers) == 1, "route-store must have exactly one writer"
+
+
+def test_an_uploaded_retrieval_is_not_labelled_as_a_pooled_cohort(corpus):
+    """An uploaded sample has no `sample_key`, so it has no coordinate on this
+    map. Reporting that as "0 pooled cohort samples" would be false twice over,
+    and it is what the rail said once the label moved out of its guard: the
+    branch tested how many members were *locatable*, not whether anything was
+    pooled."""
+    overlay = callbacks._retrieval_overlay({
+        "sample_id": "UPLOAD|my_counts.csv::SampleA",
+        "mode": "uploaded",
+        "hits": [{"gsm": "GSM1", "score": 0.9, "archs4_index": 0}],
+        "query": {"sample_name": "SampleA"},
+    })
+    assert overlay is not None, "an uploaded search still draws its hits"
+    assert overlay["query_points"] == []
+    assert overlay["query_label"] == "", (
+        "an empty label is what lets the rail fall back to 'an OSDR sample'")
+
+
+def test_the_second_query_star_opens_the_second_cohort(corpus):
+    """The comparison figure draws a `query2` node and every node it draws is
+    clickable. This branch was added because clicking it reported "No metadata
+    found"; it then raised TypeError instead, which is worse - the callback
+    errors and the inspector silently keeps showing the previous node."""
+    import pandas as pd
+    from bridge_rna import panels
+
+    a = pd.Series({"sample_id": "COHORT|a", "cohort_label": "Liver · Flight",
+                   "is_cohort": "1", "study_id": "OSD-137", "grouped_by": "Study",
+                   "stability": "0.72 at k = 6", "members": "OSD-137|x\nOSD-137|y",
+                   "excluded": "", "outliers": ""})
+    b = pd.Series({**a.to_dict(), "sample_id": "COHORT|b",
+                   "cohort_label": "Liver · Ground"})
+    hits = pd.DataFrame([{"gsm": "GSM1", "score": 0.9, "gse": "GSE1"}])
+
+    panel = panels.build_details_panel(
+        query=a, selected_payload={"kind": "query2", "node_id": "COHORT|b"},
+        hits_df=hits, query_b=b)
+    # ensure_ascii would escape the middot in a cohort label, so the
+    # assertions below could never match and would pass vacuously.
+    text = json.dumps(panel, default=str, ensure_ascii=False)
+    assert "Liver · Ground" in text, "the second star must open the second cohort"
+    assert "Liver · Flight" not in text, "and not the first"
+
+
+def test_a_comparison_without_a_second_query_says_so_rather_than_raising(corpus):
+    import pandas as pd
+    from bridge_rna import panels
+
+    a = pd.Series({"sample_id": "S1", "sample_name": "S1"})
+    panel = panels.build_details_panel(
+        query=a, selected_payload={"kind": "query2", "node_id": "nope"},
+        hits_df=pd.DataFrame([{"gsm": "GSM1", "score": 0.9}]), query_b=None)
+    assert "no second cohort" in json.dumps(panel, default=str,
+                                            ensure_ascii=False)

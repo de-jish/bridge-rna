@@ -25,6 +25,24 @@ GRAPH_THEME = {
     "edge_gse": "rgba(217, 121, 27, 0.35)",
     "marker_line": "#ffffff",
     "font_sans": "Inter, 'Segoe UI', -apple-system, sans-serif",
+    # The comparison view's own three roles, named. They used to borrow `gsm`,
+    # `gse` and `query`, which mean a hit node, a study node and the query in
+    # the single-query network - so the same key meant two things depending on
+    # which figure was being built.
+    #
+    # Cohort A is teal and "retrieved by both" is blue, which is a swap from
+    # what shipped first, and it fixes a real inconsistency rather than a
+    # preference: teal is the query star in the single-query network and the
+    # query mark on the map, so giving it to "shared" meant running a
+    # comparison silently recoloured the star the previous search drew teal.
+    # Both views now agree that teal is cohort A and warm is cohort B, and each
+    # renders "both" the way its canvas supports - a third colour on white, a
+    # doubled mark on the map's navy.
+    "cohort_a": "#0bab9f",
+    "cohort_b": "#d9791b",
+    "cohort_shared": "#2b7fff",
+    "edge_cohort_a": "rgba(11, 171, 159, 0.42)",
+    "edge_cohort_b": "rgba(217, 121, 27, 0.35)",
 }
 
 
@@ -343,8 +361,8 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
                       "color": colour},
                 hoverinfo="skip", showlegend=False))
 
-    _edges(a_only + shared, qa_y, GRAPH_THEME["edge"], score_a)
-    _edges(b_only + shared, qb_y, GRAPH_THEME["edge_gse"], score_b)
+    _edges(a_only + shared, qa_y, GRAPH_THEME["edge_cohort_a"], score_a)
+    _edges(b_only + shared, qb_y, GRAPH_THEME["edge_cohort_b"], score_b)
 
     def _hover(g: str) -> str:
         r = meta.get(g)
@@ -362,10 +380,10 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
 
     bands = [
         (a_only, _safe_str(query_a.get("cohort_label")) or "First cohort only",
-         GRAPH_THEME["gsm"], 15),
-        (shared, "Retrieved by both", GRAPH_THEME["query"], 19),
+         GRAPH_THEME["cohort_a"], 15),
+        (shared, "Retrieved by both", GRAPH_THEME["cohort_shared"], 19),
         (b_only, _safe_str(query_b.get("cohort_label")) or "Second cohort only",
-         GRAPH_THEME["gse"], 15),
+         GRAPH_THEME["cohort_b"], 15),
     ]
     for ids, name, colour, size in bands:
         if not ids:
@@ -380,8 +398,8 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
             showlegend=True))
 
     for query, qy, colour, kind in (
-        (query_a, qa_y, GRAPH_THEME["gsm"], "query"),
-        (query_b, qb_y, GRAPH_THEME["gse"], "query2"),
+        (query_a, qa_y, GRAPH_THEME["cohort_a"], "query"),
+        (query_b, qb_y, GRAPH_THEME["cohort_b"], "query2"),
     ):
         label = _safe_str(query.get("cohort_label")) or _safe_str(query.get("sample_name"))
         fig.add_trace(go.Scatter(

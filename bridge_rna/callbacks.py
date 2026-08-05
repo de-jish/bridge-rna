@@ -111,7 +111,6 @@ def _cohort_query_series(cohort, geometry, excluded: list[str]) -> pd.Series:
         "is_cohort": "1",
         "grouped_by": grouped,
         "stability": f"{geometry.stability:.2f} at k = {geometry.size}",
-        "resultant": f"{geometry.resultant:.4f}",
         "members": "\n".join(geometry.members),
         "excluded": "\n".join(excluded),
         "outliers": "\n".join(outliers),
@@ -544,6 +543,9 @@ def register(app) -> None:
         Output("network-graph", "figure", allow_duplicate=True),
         *[Input(f"mode-tab-{m['key']}", "n_clicks") for m in QUERY_MODES],
         State("hits-store", "data"),
+        # Which mode we are already in, so a call this callback did not ask for
+        # can restate it instead of guessing. See the fallback below.
+        State("query-mode-store", "data"),
         # The layout already renders Sample selected and the other two hidden,
         # so there is nothing for the initial call to do - and doing it anyway
         # was a real bug rather than a wasted round trip. Restyling the action
@@ -564,11 +566,29 @@ def register(app) -> None:
         Everything is derived from `QUERY_MODES` rather than hand-listed, so a
         fifth source is one entry there and no edits here.
         """
-        hits_payload = args[-1]
+        hits_payload, stored_mode = args[-2], args[-1]
         triggered = _safe_str(ctx.triggered_id)
         active = next((m["key"] for m in QUERY_MODES
-                       if f"mode-tab-{m['key']}" == triggered),
-                      QUERY_MODES[0]["key"])
+                       if f"mode-tab-{m['key']}" == triggered), "")
+
+        if not active:
+            # Not a tab click, so this is a call nobody asked for - Dash fires a
+            # callback when an input component newly appears, which is the same
+            # mechanism that once ran both searches at `n_clicks: 0`.
+            #
+            # Restate the mode we are already in. Falling back to QUERY_MODES[0]
+            # would silently drop the rail back to Sample, which is a guess
+            # dressed as a decision: this callback has no evidence the user
+            # wants Sample, only that something remounted a tab.
+            #
+            # This is belt and braces rather than the fix for anything observed:
+            # the bug that *looked* like this - clicking Cohort on arrival and
+            # watching the panel close itself - was the router repainting the
+            # whole view on top of a correct answer, and it is fixed in
+            # `app.render_page`.
+            keys = {m["key"] for m in QUERY_MODES}
+            candidate = _safe_str(stored_mode)
+            active = candidate if candidate in keys else QUERY_MODES[0]["key"]
         hint = next(m["hint"] for m in QUERY_MODES if m["key"] == active)
         shown, hidden = {}, {"display": "none"}
 
@@ -719,7 +739,7 @@ def register(app) -> None:
     )
     def update_cohort_card(included: list[str] | None, cohort_id: str | None,
                            facets: list[str] | None):
-        """Restate size, stability and tightness for what is actually ticked.
+        """Restate size and stability for what is actually ticked.
 
         This reads the *included* members rather than the cohort's full
         membership, because excluding two of six changes every number on the
@@ -729,7 +749,7 @@ def register(app) -> None:
         """
         cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
         if cohort is None:
-            return (html.Div("Select a cohort to see how tightly it groups.",
+            return (html.Div("Select a cohort to see how far to trust it.",
                              className="cohort-card cohort-card--empty"),
                     "Members", True)
         members = [m for m in (included or []) if m in set(cohort.members)]
@@ -894,6 +914,12 @@ def register(app) -> None:
             "shared": sorted(shared),
             "overlap": overlap,
             "facet": facet_label,
+            # The map draws the second cohort's members too, for the same reason
+            # it draws the first cohort's: a pooled query has no position, so
+            # what can be drawn is who went into it. This is a real list rather
+            # than the newline-joined `members` string inside `query_b`, which
+            # exists for the inspector to print.
+            "member_ids": list(other_geometry.members),
         }
         message = (
             f"Two pooled queries differing by {facet_label}: "
@@ -1142,7 +1168,12 @@ def register(app) -> None:
         cannot be located on the map. Offering the link anyway would send
         someone to a map that draws nothing and looks broken.
         """
-        hits = (hits_payload or {}).get("hits") or []
+        payload = hits_payload or {}
+        # A comparison retrieved two hit lists and the map now draws both, so
+        # the offer counts both. Counting cohort A's alone would send someone to
+        # a map showing more than the link promised.
+        hits = list(payload.get("hits") or [])
+        hits += list((payload.get("comparison") or {}).get("hits_b") or [])
         locatable = [h for h in hits if h.get("archs4_index") is not None]
         if not locatable:
             return {"display": "none"}, ""
@@ -1182,7 +1213,22 @@ def register(app) -> None:
         q_row = _query_series(hits_payload)
         if q_row is None:
             q_row = pd.Series({"sample_id": _safe_str(hits_payload.get("sample_id"))})
-        hits_df = pd.DataFrame(hits_payload.get("hits", []))
+
+        # A comparison draws two query stars and three bands of hits, and every
+        # one of those nodes is clickable. Looking node ids up in cohort A's
+        # hits alone meant a B-only hit, and the second star, both opened "No
+        # metadata found" - the figure offering something the inspector could
+        # not answer.
+        comparison = hits_payload.get("comparison") or {}
+        rows = list(hits_payload.get("hits") or []) + list(comparison.get("hits_b") or [])
+        hits_df = pd.DataFrame(rows)
+        if not hits_df.empty and "gsm" in hits_df.columns:
+            # A shared hit is in both lists with the same GEO metadata and a
+            # different score; cohort A's row is kept, which is the one the
+            # single-cohort inspector would have shown.
+            hits_df = hits_df.drop_duplicates(subset="gsm", keep="first").reset_index(drop=True)
+        q_row_b = (pd.Series(comparison["query_b"])
+                   if isinstance(comparison.get("query_b"), dict) else None)
 
         # Open a GSM whose study context was never fetched, and fetch it now -
         # one accession, for the hit actually being read. This is what makes
@@ -1220,4 +1266,5 @@ def register(app) -> None:
                             hits_df[col] = ""
                         hits_df.loc[row_mask, col] = enriched_one.iloc[0][col]
 
-        return build_details_panel(query=q_row, selected_payload=selected_node, hits_df=hits_df)
+        return build_details_panel(query=q_row, selected_payload=selected_node,
+                                   hits_df=hits_df, query_b=q_row_b)

@@ -63,13 +63,19 @@ That is not a defect in either query: the entire top-500 of a 940,455-sample ind
 It groups the samples the way OSDR already curates them, by study, tissue and flight condition, averages the group's embeddings into one query, and searches with that.
 Measured over all 212 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.74**, a 4.6-fold gain, and it costs no more than a single-sample search.
 
-You can change what counts as one cohort: split further by sex, strain, genotype, habitat, mission duration or diet, or widen by dropping tissue or condition.
+You can widen what counts as one cohort by dropping tissue or condition, which merges a study's organs or its arms into one larger group.
 Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
+Splitting finer than this is deliberately not offered: every further split makes the cohort smaller, and size is what the stability above is a function of.
 
 The panel says how far to trust each result rather than leaving you to guess.
 A cohort of three is flagged in amber with the measured number for that size, every member is listed with how far it sits from the rest, and you can exclude one and watch the numbers restate.
 An optional comparison runs a second cohort as its own separate query, so you can ask how much of the Earth that a study's flight animals resemble is also resembled by its ground controls.
 It is deliberately not a flight-minus-ground difference vector: a difference of two directions is not a transcriptome, and an earlier attempt at exactly that turned out to be measuring something else entirely.
+
+Both cohorts are drawn on the map, which is where that comparison is actually settled.
+The overlap the panel reports is a number about two *sets* of hits, and two arms can share no hits at all while sitting in the same neighbourhood, each picking different samples out of the same crowd.
+Each cohort's pooled animals are drawn in its own colour, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
+You can untick either arm when the picture gets crowded.
 
 Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md).
 
@@ -225,10 +231,10 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 258 tests, about twenty-five seconds
+.venv/bin/python -m pytest tests/ -q             # 290 tests, about twenty-five seconds
 .venv/bin/python tests/e2e_check.py              # 45 browser checks; needs the built cache
-.venv/bin/python tests/e2e_upload_check.py       # 97 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 60 checks of cohort retrieval
+.venv/bin/python tests/e2e_upload_check.py       # 68 checks of the upload path
+.venv/bin/python tests/e2e_cohort_check.py       # 92 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.

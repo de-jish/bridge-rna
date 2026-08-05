@@ -515,3 +515,226 @@ def test_the_osdr_overlay_never_recedes(corpus):
     fig, _, _ = render.build_figure("pca", "2d", "tissue", ["osdr"], 2000, None)
     opacities = {t.marker.opacity for t in _osdr_traces(fig)}
     assert len(opacities) == 1, f"OSDR glyphs drawn at mixed weights: {opacities}"
+
+
+# --- Two cohorts drawn at once (the compare-against case) --------------------
+
+_COMPARISON = {
+    "cohorts": [
+        {"role": "a", "label": "Liver · Space Flight",
+         "hit_points": [1, 2, 3], "hit_labels": ["GSM1", "GSM2", "GSM3"],
+         "hit_scores": [0.997, 0.995, 0.993], "query_points": [10, 11, 12]},
+        {"role": "b", "label": "Liver · Ground Control",
+         "hit_points": [2, 3, 7], "hit_labels": ["GSM2", "GSM3", "GSM7"],
+         "hit_scores": [0.996, 0.994, 0.992], "query_points": [13, 14]},
+    ],
+    "hit_points": [1, 2, 3, 2, 3, 7],
+    "hit_labels": ["GSM1", "GSM2", "GSM3", "GSM2", "GSM3", "GSM7"],
+    "hit_scores": [0.997, 0.995, 0.993, 0.996, 0.994, 0.992],
+    "shared_points": [2, 3],
+    "query_point": 10,
+    "query_points": [10, 11, 12, 13, 14],
+    "query_label": "Liver · Space Flight vs Liver · Ground Control",
+}
+
+
+def _coords(n=50, is_3d=False, seed=7):
+    return np.random.default_rng(seed).normal(
+        size=(n, 3 if is_3d else 2)).astype(np.float32)
+
+
+@pytest.mark.parametrize("is_3d", [False, True])
+def test_a_comparison_draws_both_cohorts_in_both_dimensionalities(is_3d):
+    """3-D is the case that broke the single-cohort overlay with a 500, because
+    Scatter3d rejects an unknown symbol outright. Both hit symbols used here are
+    deliberately in its vocabulary, so the encoding is identical in 2-D and 3-D
+    rather than needing a fallback that would mean something different."""
+    from manifold import render
+
+    traces = render._retrieval_traces(_coords(is_3d=is_3d), is_3d, _COMPARISON)
+    expected = "scatter3d" if is_3d else "scatter"
+    assert all(t.type == expected for t in traces)
+    assert len([t for t in traces if t.name == "query"]) == 2
+    assert len([t for t in traces if t.name == "retrieved hit"]) == 2
+
+
+def test_the_two_cohorts_members_differ_by_hue_and_not_by_symbol():
+    """Hue is safe on a member because a member is a filled mark with a white
+    outline: its findability comes from the outline, so the fill only has to
+    separate A from B. Symbol is already spent telling a member from a hit."""
+    from manifold import render, theme
+
+    traces = render._retrieval_traces(_coords(), False, _COMPARISON)
+    members = [t for t in traces if t.name == "query"]
+    assert [t.marker.color for t in members] == [theme.RETRIEVAL_QUERY,
+                                                 theme.RETRIEVAL_QUERY_B]
+    assert len({t.marker.symbol for t in members}) == 1, "symbol must not differ"
+
+
+def test_the_two_cohorts_hits_differ_by_symbol_and_are_both_white():
+    """No hue clears 3:1 against the worst categorical tissue bucket - the
+    comparison network's own three measure 1.00 to 1.07 - which is the same
+    measurement that made the ring white in the first place. A two-cohort map
+    can afford a lost hit even less, because a lost hit is also a lost group."""
+    from manifold import render, theme
+
+    traces = render._retrieval_traces(_coords(), False, _COMPARISON)
+    hits = [t for t in traces if t.name == "retrieved hit"]
+    assert {t.marker.color for t in hits} == {theme.RETRIEVAL_HIT_RING}
+    assert [t.marker.symbol for t in hits] == [theme.RETRIEVAL_HIT_SYMBOL,
+                                               theme.RETRIEVAL_HIT_SYMBOL_B]
+
+
+def test_a_hit_both_cohorts_retrieved_carries_both_marks():
+    """The shared set is emergent, never computed: a shared hit is in both hit
+    lists, so it receives both traces and draws as a ring inside a square. That
+    is why the shared count on the map cannot drift from the one the status
+    banner quotes - it is not calculated twice."""
+    from manifold import render
+
+    coords = _coords()
+    traces = render._retrieval_traces(coords, False, _COMPARISON)
+    a, b = [t for t in traces if t.name == "retrieved hit"]
+    drawn_a = {(round(float(x), 6), round(float(y), 6)) for x, y in zip(a.x, a.y)}
+    drawn_b = {(round(float(x), 6), round(float(y), 6)) for x, y in zip(b.x, b.y)}
+    shared = {(round(float(coords[i][0]), 6), round(float(coords[i][1]), 6))
+              for i in _COMPARISON["shared_points"]}
+    assert shared <= drawn_a and shared <= drawn_b, (
+        "a shared hit must receive both cohorts' marks")
+    assert b.marker.size > a.marker.size, (
+        "B's square must circumscribe A's ring, or one hides the other")
+
+
+def test_the_square_is_drawn_after_the_ring_it_surrounds():
+    """Trace order is back to front. A 27 px square emitted first would sit
+    under the 20 px ring; emitted last it frames it."""
+    from manifold import render, theme
+
+    traces = render._retrieval_traces(_coords(), False, _COMPARISON)
+    order = [t.marker.symbol for t in traces if t.name == "retrieved hit"]
+    assert order.index(theme.RETRIEVAL_HIT_SYMBOL_B) > \
+        order.index(theme.RETRIEVAL_HIT_SYMBOL)
+    names = [t.name for t in traces]
+    assert names.index("query") > names.index("retrieved hit"), (
+        "members are the thing being asked about and go on top")
+    assert names.index("query halo") < names.index("retrieved hit")
+
+
+def test_rank_numerals_are_dropped_only_when_two_cohorts_are_drawn():
+    """Two competing numeral sets over the same few hundred pixels is
+    illegible, and the hover carries strictly more: a shared hit names both
+    cohorts, both 512-d ranks and both cosines. A single cohort keeps them."""
+    from manifold import render
+
+    coords = _coords()
+    both = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
+            if t.name == "retrieved hit"]
+    assert all("text" not in (t.mode or "") for t in both)
+
+    alone = [t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+             if t.name == "retrieved hit"]
+    assert all("text" in (t.mode or "") for t in alone)
+    assert list(alone[0].text) == ["1", "2", "3"]
+
+
+def test_a_hits_hover_names_the_cohort_that_retrieved_it_only_when_ambiguous():
+    from manifold import render
+
+    coords = _coords()
+    a, b = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
+            if t.name == "retrieved hit"]
+    assert all("Space Flight" in row[1] for row in a.customdata)
+    assert all("Ground Control" in row[1] for row in b.customdata)
+
+    alone = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+                 if t.name == "retrieved hit")
+    assert all(row[1].startswith("512-d rank") for row in alone.customdata), (
+        "one cohort has nothing to disambiguate against")
+
+
+def test_the_halo_fades_as_the_cohort_grows():
+    """The halo was the one part of the overlay that got louder as the cohort
+    got larger: every member of a 38-animal cohort carried a full-width ring at
+    0.50 alpha and the overlap composited into a disc. Total ink is now roughly
+    constant, and the ring narrows once there is more than one member."""
+    from manifold import theme
+
+    alphas = [float(theme.halo_rgba(theme.RETRIEVAL_QUERY_RGB, k).rsplit(",", 1)[1]
+                    .strip(" )")) for k in (1, 2, 4, 10, 38)]
+    assert alphas == sorted(alphas, reverse=True), alphas
+    assert alphas[0] == theme.RETRIEVAL_QUERY_HALO_ALPHA, "k=1 must be unchanged"
+    assert min(alphas) >= 0.14, "a large cohort's halo must not vanish"
+    assert (theme.RETRIEVAL_QUERY_HALO_SIZE_POOLED
+            < theme.RETRIEVAL_QUERY_HALO_SIZE)
+
+
+def test_map_rank_is_measured_from_the_nearest_member_of_its_own_cohort():
+    """It used to be measured from query_points[0], whichever animal came first
+    in metadata order. That was merely unprincipled for one cohort; for the
+    second arm of a comparison it would have ranked B's hits from an A animal."""
+    from manifold import render
+
+    # Two well-separated islands. Points 3 and 4 are cohort B's members and
+    # point 5 is its hit, all on the right; points 0-2 are cohort A on the left.
+    coords = np.array([[0.0, 0.0], [0.1, 0.0], [0.2, 0.0],      # 0-2 left
+                       [10.0, 0.0], [10.1, 0.0], [10.4, 0.0]],  # 3-5 right
+                      dtype=np.float32)
+    ranks = render._map_ranks(coords, hits=[5], members=[3, 4])
+    assert ranks == [2], (
+        "measured from member 4, only points 3 and 4 lie nearer than the hit")
+
+    # The old behaviour: every hit ranked from members[0]. For cohort B that is
+    # an animal in the other cohort entirely, and the whole far island then
+    # counts as nearer.
+    far = render._map_ranks(coords, hits=[5], members=[0])
+    assert far == [5], "measured from the far island, everything is nearer"
+
+
+def test_map_ranks_sweeps_each_winning_member_once():
+    """A full-corpus pass per member would be 38 passes over 942,563 points for
+    the largest cohort. Only the members that actually win a hit are swept."""
+    from manifold import render
+
+    coords = _coords(n=400, seed=3)
+    calls = {"n": 0}
+    real = np.einsum
+
+    def counting(*args, **kwargs):
+        if args and args[0] == "ij,ij->i":
+            calls["n"] += 1
+        return real(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(np, "einsum", counting)
+        ranks = render._map_ranks(coords, hits=[1, 2, 3], members=list(range(20)))
+    assert all(r is not None for r in ranks)
+    assert calls["n"] <= 3, f"swept {calls['n']} times for 3 hits"
+
+
+def test_a_flat_payload_still_renders_as_one_cohort():
+    """`hits-store` is session-persisted, so the map can be handed a payload
+    written before cohorts existed in the overlay. It must draw, not raise."""
+    from manifold import render, theme
+
+    traces = render._retrieval_traces(_coords(), False, _RETRIEVAL)
+    members = [t for t in traces if t.name == "query"]
+    assert len(members) == 1
+    assert members[0].marker.color == theme.RETRIEVAL_QUERY
+
+
+def test_the_hover_says_pooled_member_only_when_something_was_pooled():
+    """For a single-sample or uploaded search the one drawn member *is* the
+    query, so calling it a "pooled member" describes a cohort that does not
+    exist. The phrase is earned by k >= 2, not by the code path."""
+    from manifold import render
+
+    coords = _coords()
+    alone = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+                 if t.name == "retrieved hit")
+    assert all("map rank" in row[2] for row in alone.customdata)
+    assert not any("pooled member" in row[2] for row in alone.customdata)
+
+    pooled = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
+              if t.name == "retrieved hit"]
+    assert all("from the nearest pooled member" in row[2]
+               for t in pooled for row in t.customdata)
