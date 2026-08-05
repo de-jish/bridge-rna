@@ -173,7 +173,7 @@ def _wait_run(page, indicator: str, timeout: int = 300_000) -> float:
     page.wait_for_function(
         f"() => !((document.querySelector('{indicator}')||{{}}).innerText || '').trim()",
         timeout=timeout * PATIENCE)
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(400 * PATIENCE)
     return time.time() - t0
 
 
@@ -209,7 +209,7 @@ def open_mode(page, key: str) -> None:
         tab.click()
         page.wait_for_selector(f"#mode-panel-{key}", state="visible",
                                timeout=30_000 * PATIENCE)
-        page.wait_for_timeout(400)
+        page.wait_for_timeout(400 * PATIENCE)
 
 
 def upload(page, path: Path, timeout: int = 180_000,
@@ -238,7 +238,7 @@ def upload(page, path: Path, timeout: int = 180_000,
     deadline = time.time() + (timeout * PATIENCE) / 1000
     while True:
         page.set_input_files("#upload-counts input[type=file]", str(path))
-        page.wait_for_timeout(settle)
+        page.wait_for_timeout(settle * PATIENCE)
         el = page.locator("#upload-preview")
         if el.count() and (el.inner_text() or "").strip():
             return
@@ -271,7 +271,7 @@ def wait_for_selected_sample(page, sample_id: str, timeout: int = 120_000) -> No
     # rather than instead of it. Replacing the settle with this condition made
     # the second catalog search fire mid-render and answer "Select a sample to
     # start", which is a failure that reads like an empty retrieval.
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(1200 * PATIENCE)
 
 
 def upload_notice(page) -> tuple[str, str]:
@@ -304,12 +304,12 @@ def pick_column(page, column: str) -> None:
     # before its options do, and catching it in between reads as an empty menu.
     page.wait_for_selector(".dash-dropdown-content .dash-options-list-option",
                            timeout=10_000 * PATIENCE)
-    page.wait_for_timeout(250)
+    page.wait_for_timeout(250 * PATIENCE)
     opts = page.locator(".dash-dropdown-content .dash-options-list-option")
     for i in range(opts.count()):
         if opts.nth(i).inner_text().strip() == column:
             opts.nth(i).click()
-            page.wait_for_timeout(400)
+            page.wait_for_timeout(400 * PATIENCE)
             return
     raise AssertionError(
         f"column {column!r} not offered; menu has "
