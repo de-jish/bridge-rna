@@ -59,6 +59,14 @@ EXPOSE 8050
 # One worker, threads for concurrency, and a timeout long enough for the upload
 # path to load a 522 MB checkpoint in its subprocess. wsgi.py explains the
 # single worker: peak RSS was measured at 1,852 MB in one process.
+#
+# --keep-alive must exceed the idle timeout of the proxy in front of this.
+# gunicorn defaults to 2 s, and a proxy that reuses a connection just as
+# gunicorn is closing it gets ECONNRESET and serves a 502. That is not
+# hypothetical here: the first deployed browser run produced exactly one reset
+# among hundreds of good requests, with no worker crash and no traceback, and
+# the casualty was the callback behind the rail's parameter readout, which then
+# sat showing the previous projection's settings.
 CMD ["gunicorn", \
      "--bind", "0.0.0.0:8050", \
      "--workers", "1", \
@@ -66,6 +74,7 @@ CMD ["gunicorn", \
      "--worker-class", "gthread", \
      "--timeout", "300", \
      "--graceful-timeout", "30", \
+     "--keep-alive", "75", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
      "wsgi:application"]

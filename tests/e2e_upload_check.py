@@ -41,6 +41,8 @@ from typing import Any
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+from e2e_target import add_target_args, credentials, target
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 EXAMPLE = REPO / "examples" / "osdr_upload_example.csv"
@@ -272,10 +274,24 @@ def catalog_search(page) -> float:
 
 # --- the run ----------------------------------------------------------------
 
+def _report(c) -> int:
+    print("\n" + "=" * 62)
+    for n in c.notes:
+        print("NOTE: " + n)
+    if c.failures:
+        for f in c.failures:
+            print("FAIL: " + f)
+        print(f"UPLOAD E2E FAILED ({len(c.failures)} checks)")
+        return 1
+    print(f"ALL UPLOAD E2E CHECKS PASSED (screenshots in {SHOTS})")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8063)
     ap.add_argument("--headed", action="store_true")
+    add_target_args(ap)
     ap.add_argument("--cycles", type=int, default=2,
                     help="How many times to run the whole fixture set.")
     args = ap.parse_args()
@@ -290,25 +306,11 @@ def main() -> int:
     fx = build_fixtures(tmp)
     print(f"fixtures in {tmp}")
 
-    server = subprocess.Popen(
-        [PY, "app.py", "--port", str(args.port)], cwd=REPO,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    try:
-        t0 = time.time()
-        while time.time() - t0 < 180:
-            line = server.stdout.readline()
-            if not line:
-                break
-            print("    [server] " + line.rstrip(), flush=True)
-            if "serving on" in line:
-                break
-        else:
-            print("server never announced itself")
-            return 1
-
+    with target(args, PY, REPO, timeout=180) as base:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
-            page = browser.new_page(viewport={"width": 1680, "height": 1010})
+            page = browser.new_page(viewport={"width": 1680, "height": 1010},
+                                    http_credentials=credentials(args))
             console_errors: list[str] = []
             page.on("console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
@@ -318,7 +320,7 @@ def main() -> int:
             print("\n=== 0. the catalog answers, which the uploads must match ===")
             truth: dict[str, list[tuple[str, str]]] = {}
             for sid in (FLT_ID, GC_ID):
-                page.goto(f"http://127.0.0.1:{args.port}/?q={sid}", wait_until="load")
+                page.goto(f"{base}/?q={sid}", wait_until="load")
                 page.wait_for_selector(".sample-preview", timeout=60_000)
                 page.wait_for_timeout(1200)
                 secs = catalog_search(page)
@@ -462,18 +464,23 @@ def main() -> int:
             c.ok(not real, f"no console errors ({len(real)} seen)")
 
             browser.close()
-    finally:
-        server.terminate()
-        try:
-            server.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            server.kill()
 
     # `terminate()` is SIGTERM, which is how a supervisor stops a server and is
     # exactly the shutdown `atexit` does not cover, so the killed server's
     # staging directory is expected to still be there. What must hold is that
     # the next run reaps it - which is the guarantee, checked against a real
     # abandoned directory rather than a synthetic one.
+    #
+    # This reads *this* machine's temp directory, so it is only a statement
+    # about a server this process started. Against a deployment there is no
+    # local server and no local staging directory, and asserting on one would
+    # be a check that passes for the wrong reason.
+    if args.base_url:
+        print("\n  ..   skipping the staging-directory reap check: "
+              "it describes a locally started server, and this run drove "
+              f"{args.base_url}")
+        return _report(c)
+
     time.sleep(1.0)
     sys.path.insert(0, str(REPO))
     from bridge_rna.callbacks import _sweep_abandoned_upload_dirs
@@ -486,16 +493,7 @@ def main() -> int:
          f"the next run reaps the killed server's staging directory "
          f"(reaped {len(reaped)}, {len(still)} left)")
 
-    print("\n" + "=" * 62)
-    for n in c.notes:
-        print("NOTE: " + n)
-    if c.failures:
-        for f in c.failures:
-            print("FAIL: " + f)
-        print(f"UPLOAD E2E FAILED ({len(c.failures)} checks)")
-        return 1
-    print(f"ALL UPLOAD E2E CHECKS PASSED (screenshots in {SHOTS})")
-    return 0
+    return _report(c)
 
 
 if __name__ == "__main__":

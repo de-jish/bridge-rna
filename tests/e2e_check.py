@@ -38,6 +38,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from e2e_target import add_target_args, credentials, target
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 SHOTS = Path(os.environ.get("MANIFOLD_E2E_SHOTS",
@@ -140,52 +142,16 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8062)
     ap.add_argument("--headed", action="store_true")
-    ap.add_argument(
-        "--base-url",
-        help="Check an already-running app at this URL instead of starting one. "
-             "This is how a deployment is verified: the same browser checks, "
-             "run against the hosted URL rather than a local subprocess.")
-    ap.add_argument(
-        "--http-auth", metavar="USER:PASSWORD",
-        help="HTTP basic credentials, for a deployment behind the "
-             "BRIDGE_RNA_BASIC_AUTH guard.")
+    add_target_args(ap)
     args = ap.parse_args()
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
 
-    base = (args.base_url or f"http://127.0.0.1:{args.port}").rstrip("/")
-
-    server = None
-    if not args.base_url:
-        server = subprocess.Popen(
-            [PY, "app.py", "--port", str(args.port)], cwd=REPO,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    try:
-        if server is not None:
-            # Wait for the server to announce itself rather than sleeping blind.
-            t0 = time.time()
-            while time.time() - t0 < 120:
-                line = server.stdout.readline()
-                if not line:
-                    break
-                print("    [server] " + line.rstrip(), flush=True)
-                if "serving on" in line:
-                    break
-            else:
-                print("server never announced itself")
-                return 1
-        else:
-            print(f"    [server] checking the app already running at {base}")
-
-        credentials = None
-        if args.http_auth:
-            user, _, password = args.http_auth.partition(":")
-            credentials = {"username": user, "password": password}
-
+    with target(args, PY, REPO) as base:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
             page = browser.new_page(viewport={"width": 1680, "height": 1000},
-                                    http_credentials=credentials)
+                                    http_credentials=credentials(args))
             console_errors: list[str] = []
             page.on("console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
@@ -397,7 +363,7 @@ def main() -> int:
             # canvas out of the window with it. The page height is the check,
             # because that is the thing that must not move.
             rp = browser.new_page(viewport={"width": 1680, "height": 1010},
-                                  http_credentials=credentials)
+                                  http_credentials=credentials(args))
             rp.on("console", lambda m: console_errors.append(m.text)
                   if m.type == "error" else None)
             rp.on("pageerror", lambda e: console_errors.append(str(e)))
@@ -451,14 +417,6 @@ def main() -> int:
             c.ok(not real, f"no console errors ({len(real)} seen)")
 
             browser.close()
-    finally:
-        # Nothing to tear down when checking an app we did not start.
-        if server is not None:
-            server.terminate()
-            try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                server.kill()
 
     print("\n" + "=" * 62)
     for n in c.notes:

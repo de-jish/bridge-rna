@@ -32,6 +32,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from e2e_target import add_target_args, credentials, target
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 SHOTS = Path(os.environ.get("MANIFOLD_E2E_SHOTS",
@@ -164,30 +166,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8064)
     ap.add_argument("--headed", action="store_true")
+    add_target_args(ap)
     args = ap.parse_args()
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
-    base = f"http://127.0.0.1:{args.port}"
-
-    server = subprocess.Popen(
-        [PY, "app.py", "--port", str(args.port)], cwd=REPO,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    try:
-        t0 = time.time()
-        while time.time() - t0 < 120:
-            line = server.stdout.readline()
-            if not line:
-                break
-            print("    [server] " + line.rstrip(), flush=True)
-            if "serving on" in line:
-                break
-        else:
-            print("server never announced itself")
-            return 1
-
+    with target(args, PY, REPO) as base:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
-            page = browser.new_page(viewport={"width": 1680, "height": 1010})
+            page = browser.new_page(viewport={"width": 1680, "height": 1010},
+                                    http_credentials=credentials(args))
             console_errors: list[str] = []
             page.on("console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
@@ -391,12 +378,6 @@ def main() -> int:
             c.ok(not noise, f"no console errors ({len(noise)}): {noise[:2]}")
 
             browser.close()
-    finally:
-        server.terminate()
-        try:
-            server.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            server.kill()
 
     print(f"\nscreenshots in {SHOTS}")
     if c.failures:
