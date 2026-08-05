@@ -44,6 +44,18 @@ A B-only hit and the second query star both opened "No metadata found", because 
 
 *A refinement test had never tested anything.* `test_adding_a_facet_only_ever_splits` compared a partition with itself: the synthetic fixture corpus gives every study exactly one tissue and one arm, so all four facet combinations produce the same 12 cohorts on it. It ran green from the day it was written. It now runs the chain study -> +tissue -> +arm on the `two_arm_study` frame and asserts the sizes 1 -> 2 -> 6, so it cannot go quiet again.
 
+**An adversarial review of the branch found three defects in it, and they are worth recording because two were introduced by the fix for something else.**
+
+*The second query star crashed the inspector.* The branch added a `query2` case to `build_details_panel` precisely because clicking that star reported "No metadata found" - and the new branch called `_build_query_details(query_b)` with one argument against a signature whose `compact` has no default. TypeError, so the callback errors and the inspector silently keeps showing the previous node, which is worse than the message it replaced. The browser check counted the `query2` node without ever clicking it, so 286 green tests said nothing about it.
+
+*An uploaded search was announced on the map as "0 pooled cohort samples".* Rewriting `_retrieval_overlay` hoisted the `query_label` assignment out of the `if query_points:` guard that used to protect it, so any retrieval whose query has no coordinate - which is every uploaded one, since `UPLOAD|...` matches no `sample_key` - fell into the pooled branch with zero members. A strict regression from `main`, which produced an empty label and let the rail say "an OSDR sample".
+
+*The hover called a single query sample a "pooled member".* The new map-rank suffix was unconditional. It is now earned by k >= 2.
+
+Each has a test that fails without its fix. The lesson worth keeping is the shape of the first two: both are a *new branch added to fix a reported fault*, and neither was exercised by the check that reported the fault - one counted a node without clicking it, the other never ran the upload path against the changed function.
+
+**The map key follows the ticks, not the payload.** Unticking an arm left the key still listing it with a hit count. This map already holds that a key is read as "what am I looking at" rather than "what exists" - it is why the colour legend recounts itself per figure and drops an empty category - so the key now marks a hidden arm as not shown. It needed splitting into its own callback, because it has to read the ticks that `show_retrieval_group` writes.
+
 **The browser suites now count their own checks.** The documented totals were hand-written and had drifted - CLAUDE.md said 173 where REFERENCE.md said 202, and the cohort file's documented 60 was never an actual count of anything. Each `Checks` instance now reports what it ran.
 
 ## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
