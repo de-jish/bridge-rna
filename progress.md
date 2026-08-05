@@ -35,9 +35,21 @@ It accepts 200 MB and starts a torch subprocess for whoever calls it, and the su
 It is installed in `wsgi.py` rather than in `build_app` because a credential belongs to a deployment, not to the application.
 `/healthz` is exempt, since Fly's health check has no credential to present.
 
-**The verification loop reaches the deployment.**
-`tests/e2e_check.py` grew `--base-url` and `--http-auth`, so the same 45 browser checks can drive a hosted URL instead of only a local subprocess.
-All 45 pass against gunicorn behind the guard - first interactive frame 2.1 s, 942,563 glyphs, a real retrieval, no console errors - and the suite is 285 tests, 27 of them new for the guard.
+**The verification loop reaches the deployment, and that is what earned its keep.**
+The three e2e scripts each had their own copy of start-a-server-and-wait; that is now `tests/e2e_target.py`, and all three take `--base-url` and `--http-auth`.
+The suite is 285 tests (27 new for the guard), plus **45 map checks and 60 cohort checks passing against the hosted URL**.
+
+**Four defects existed only on the deployment, and nothing local could have found them.**
+Each was found by running the browser checks against the hosted app, and each is recorded in `docs/deployment.md` with its measurement.
+
+1. **A 502 from gunicorn's 2-second `--keep-alive`.** Shorter than the proxy's idle reuse, so the proxy occasionally wrote to a connection gunicorn was closing. It appeared as exactly one reset among hundreds of good requests, no crash and no traceback, and the casualty was the callback behind the rail's parameter readout - which then sat showing the previous projection's numbers. That is the failure invariant 7 exists to prevent, arriving by a route invariant 7 cannot see: the readout was right and the transport dropped it. `--keep-alive 75`.
+2. **`shared-cpu-2x` made the upload path unusable.** One live embed: 10.4 s on a laptop, **13 m 36 s** on the shared machine for only 1 m 55 s of CPU. 14% utilization on a process pegging both vCPUs is Fly throttling a shared vCPU to its baseline once burst is spent. `performance-2x` runs the same work at 103% utilization in **1 m 35 s**. The map and cached retrieval were fine on the shared machine, so this was easy to ship and never notice.
+3. **The proxy rejected Dash callbacks while an upload ran.** `hard_limit` was 8, mirroring the thread count; an embed holds a thread for minutes while the browser fires short callbacks behind it, and past the hard limit Fly rejects rather than queues. A rejected callback is a figure that never updates, so an uploaded search appeared to return the *previous* column's result - a plausible wrong answer rather than an error. Now 20 / 40, and gunicorn runs 8 threads.
+4. **The 300 s gunicorn timeout sat exactly on the observed in-app embed time** (300.3 s measured), which kills the worker mid-request and leaves the browser holding the old figure. Now 900 s.
+
+Two smaller things worth not relearning.
+`swap_size_mb` was set and then removed because the running machine reported `SwapTotal: 0` - it silently did nothing, and the memory it insured against never appeared.
+And Fly's autostop counts HTTP requests, so it will stop a machine out from under an SSH-run benchmark; the first embed measurement was invalid for that reason and had to be redone with traffic kept flowing.
 
 Design, tradeoffs, and the volume-versus-baked-in argument: `docs/deployment.md`.
 
