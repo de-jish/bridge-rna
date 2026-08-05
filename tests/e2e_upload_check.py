@@ -224,23 +224,30 @@ def upload(page, path: Path, timeout: int = 180_000,
     deployment it does not, and the failure presented as the column picker
     staying hidden forever rather than as an upload error.
 
-    The settle stays a fixed wait rather than a condition, deliberately. The
-    slot holds a preview on success and a banner on rejection, and several
-    fixtures here are *meant* to be rejected, so there is no single "ready"
-    string to wait for - and "the preview is non-empty" is satisfied by the
-    previous upload's own text, which returns before this file is read at all.
+    Waiting for the slot to be merely non-empty is not enough, because the
+    previous upload's own text satisfies that instantly and the run continues
+    with a stale `upload-store` still pointing at the previous file - which the
+    app has by then unlinked, so the search fails with "Uploaded counts file
+    not found" naming the *previous* fixture's path. That is the exact stale-
+    store failure this file exists to catch, scored as a wrong rejection reason.
 
-    What is worth retrying is the one failure that is silent: an entirely empty
-    slot means the component never reacted, and nothing downstream will ever
-    recover from that.
+    So the wait is: the slot names this file, or its text changed. The first
+    covers everything that parses, including the same file uploaded again on a
+    later cycle; the second covers the fixtures that are meant to be rejected
+    at parse time, where the slot holds a banner that never names the file.
     """
     open_mode(page, "upload")
     deadline = time.time() + (timeout * PATIENCE) / 1000
+    before = ""
+    el = page.locator("#upload-preview")
+    if el.count():
+        before = (el.inner_text() or "").strip()
     while True:
         page.set_input_files("#upload-counts input[type=file]", str(path))
         page.wait_for_timeout(settle * PATIENCE)
         el = page.locator("#upload-preview")
-        if el.count() and (el.inner_text() or "").strip():
+        now = (el.inner_text() or "").strip() if el.count() else ""
+        if now and (path.name in now or now != before):
             return
         if time.time() >= deadline:
             raise AssertionError(
