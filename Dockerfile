@@ -60,6 +60,16 @@ EXPOSE 8050
 # path to load a 522 MB checkpoint in its subprocess. wsgi.py explains the
 # single worker: peak RSS was measured at 1,852 MB in one process.
 #
+# Eight threads rather than four, and the upload path is the reason. A live
+# embed holds one thread for minutes while the browser keeps firing short Dash
+# callbacks behind it, so sizing threads to "roughly the core count" starves
+# the interface for the whole duration of an upload. Threads share the worker's
+# heap, so the extra four cost almost nothing - the 1,852 MB is paid once.
+#
+# The timeout is 900 s for the same reason. A live embed was measured at 300 s
+# in-app on this machine, which is exactly where a 300 s timeout kills the
+# worker mid-request and leaves the browser holding the previous figure.
+#
 # --keep-alive must exceed the idle timeout of the proxy in front of this.
 # gunicorn defaults to 2 s, and a proxy that reuses a connection just as
 # gunicorn is closing it gets ECONNRESET and serves a 502. That is not
@@ -70,9 +80,9 @@ EXPOSE 8050
 CMD ["gunicorn", \
      "--bind", "0.0.0.0:8050", \
      "--workers", "1", \
-     "--threads", "4", \
+     "--threads", "8", \
      "--worker-class", "gthread", \
-     "--timeout", "300", \
+     "--timeout", "900", \
      "--graceful-timeout", "30", \
      "--keep-alive", "75", \
      "--access-logfile", "-", \

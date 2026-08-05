@@ -27,10 +27,19 @@ primary_region = 'sjc'  # the closest Fly region to Ames
 
   [http_service.concurrency]
     type = 'requests'
-    # One worker with four threads. Queue beyond that rather than accepting
-    # work the process cannot start on.
-    soft_limit = 4
-    hard_limit = 8
+    # These were 4 and 8, sized to the worker's thread count, and that was
+    # wrong in a way worth recording. A live upload embed holds one thread for
+    # minutes while the browser keeps firing short Dash callbacks, so the
+    # in-flight count sails past eight and the proxy starts *rejecting* rather
+    # than queuing. A rejected callback is a figure that never updates, which
+    # showed up as an uploaded search appearing to return the previous
+    # column's result.
+    #
+    # A limit here should describe when to shed load, not mirror the thread
+    # pool. Dash callbacks are short and numerous; one of them being slow is
+    # not a reason to turn the others away.
+    soft_limit = 20
+    hard_limit = 40
 
   [[http_service.checks]]
     interval = '30s'

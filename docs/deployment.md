@@ -50,7 +50,20 @@ A precompute intermediate that makes a re-embed cheap. The serving app never ope
 A second worker would not share those pages (they are ordinary heap, not the memmap) and would exceed the machine.
 Concurrency comes from threads instead: the workload is numpy and file IO, both of which release the GIL.
 
-**A long timeout.** The default 30 s kills the upload path, which shells out to a subprocess that loads a 522 MB checkpoint before it embeds anything.
+**Eight threads, not four, and a 900 s timeout.** Both are the upload path's doing, and both started out wrong.
+
+A live embed holds one thread for minutes while the browser keeps firing short Dash callbacks behind it.
+Sizing the pool to roughly the core count starves the interface for the whole duration of an upload, and threads share the worker's heap, so the extra four cost almost nothing: the 1,852 MB is paid once.
+
+The timeout matters for the same reason.
+An in-app embed was measured at **300 s** on this machine, which is exactly where the original 300 s timeout kills the worker mid-request and leaves the browser holding the previous figure - a wrong answer rather than an error.
+
+**The proxy's concurrency limits are not the thread count.**
+They were `soft_limit = 4` / `hard_limit = 8`, chosen to mirror the worker, and that was a mistake with a visible symptom.
+While an upload occupies a thread the in-flight request count sails past eight, and past the hard limit the Fly proxy **rejects** rather than queues.
+A rejected Dash callback is a figure that never updates, which presented as an uploaded search returning the *previous* column's result - a plausible-looking wrong answer, which is the worst kind.
+They are 20 and 40 now.
+A concurrency limit should describe when to shed load; one slow callback is not a reason to turn away the short ones around it.
 
 **`--keep-alive 75`, which is not a tuning knob but a bug fix.**
 gunicorn defaults it to 2 seconds, which is shorter than the idle timeout of the proxy in front of it.
