@@ -8,6 +8,7 @@ tree, and every className the Python emits must exist in the stylesheet.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -68,9 +69,51 @@ def mounted_ids(app):
     # The shell itself, built outside a request so it takes the default route.
     trees.append(app.layout() if callable(app.layout) else app.layout)
     for tree in trees:
-        ids |= {getattr(c, "id", None) for c in _walk(tree)}
+        ids |= {_id_key(getattr(c, "id", None)) for c in _walk(tree)}
     ids.discard(None)
     return ids
+
+
+def _id_key(component_id):
+    """A hashable, comparable form of a component id.
+
+    Dash ids are either a string or a dict, and the dict form - pattern-matching
+    ids like ``{"type": "facet-chip", "key": "tissue"}`` - is what the cohort
+    facet chips use. A dict is unhashable, so both of the checks in this file
+    used to raise ``TypeError`` the moment a pattern-matching id entered a view
+    rather than reporting on it. They are exactly the ids most worth checking,
+    since a duplicated or misspelled one fails silently in the browser.
+    """
+    if isinstance(component_id, dict):
+        return tuple(sorted((str(k), str(v)) for k, v in component_id.items()))
+    return component_id
+
+
+# The wildcard sentinels Dash serializes into a pattern-matching id.
+_WILDCARDS = ("ALL", "MATCH", "ALLSMALLER")
+
+
+def _resolve_wildcard(ref, mounted_ids):
+    """Return a mounted id that satisfies a pattern-matching reference, or None.
+
+    `None` also means "this was not a pattern id at all", which lets the caller
+    fall back to a literal comparison.
+    """
+    if not (isinstance(ref, str) and ref.startswith("{")):
+        return None
+    try:
+        pattern = json.loads(ref)
+    except ValueError:
+        return None
+    fixed = {str(k): str(v) for k, v in pattern.items()
+             if not (isinstance(v, list) and v and v[0] in _WILDCARDS)}
+    for mounted in mounted_ids:
+        if not isinstance(mounted, tuple):
+            continue
+        as_dict = dict(mounted)
+        if all(as_dict.get(k) == v for k, v in fixed.items()):
+            return mounted
+    return None
 
 
 def test_app_builds(app):
@@ -82,8 +125,24 @@ def test_every_callback_target_exists_in_some_view(app, mounted_ids):
     referenced = set()
     for cb in app.callback_map.values():
         for item in list(cb["inputs"]) + list(cb.get("state", [])):
-            referenced.add(item["id"])
+            ref = item["id"]
+            # A pattern-matching input arrives as a JSON *string* naming a whole
+            # family, e.g. '{"key":["ALL"],"type":"facet-chip"}'. It is satisfied
+            # when some mounted component matches on every non-wildcard key, so
+            # it is resolved here rather than compared literally - a literal
+            # comparison can never match and would make the check unusable for
+            # exactly the ids it is most valuable on.
+            resolved = _resolve_wildcard(ref, mounted_ids)
+            if resolved is not None:
+                referenced.add(resolved)
+            else:
+                referenced.add(_id_key(ref))
     for key in app.callback_map:
+        # A pattern-matching callback's key is a JSON blob, not `id.prop`, so
+        # the regex below would shred it into fragments that match no component.
+        # Those callbacks are already covered by the `inputs` walk above.
+        if key.lstrip().startswith("{") or '{"' in key:
+            continue
         for part in re.findall(r"([A-Za-z0-9_-]+)\.[A-Za-z]", key):
             referenced.add(part)
 
@@ -105,7 +164,7 @@ def test_no_view_contains_a_duplicate_component_id(name):
     from bridge_rna import layout as rna_layout
 
     tree = rna_layout.build_view() if name == "retrieve" else layout.build_view()
-    ids = [i for i in (getattr(c, "id", None) for c in _walk(tree)) if i]
+    ids = [_id_key(i) for i in (getattr(c, "id", None) for c in _walk(tree)) if i]
     duplicated = [i for i, n in collections.Counter(ids).items() if n > 1]
     assert not duplicated, f"{name} view has duplicate ids: {duplicated}"
 

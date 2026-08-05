@@ -191,7 +191,23 @@ def read_hits(page) -> tuple[list[tuple[str, str]], str]:
     return out, str(info.get("query") or "")
 
 
+def open_mode(page, key: str) -> None:
+    """Bring one query source on screen.
+
+    The rail used to stack the sample picker and the upload dropzone; it is a
+    Sample / Cohort / Upload tablist now, so a check that drives the upload
+    controls has to open Upload first, exactly as a user does. Clicking an
+    already-active tab is harmless, so this is safe to call unconditionally.
+    """
+    tab = page.locator(f"#mode-tab-{key}")
+    if "is-active" not in (tab.get_attribute("class") or ""):
+        tab.click()
+        page.wait_for_selector(f"#mode-panel-{key}", state="visible", timeout=30_000)
+        page.wait_for_timeout(400)
+
+
 def upload(page, path: Path) -> None:
+    open_mode(page, "upload")
     page.set_input_files("#upload-counts input[type=file]", str(path))
     page.wait_for_timeout(1200)
 
@@ -243,11 +259,13 @@ def picked_column(page) -> str:
 
 
 def upload_search(page) -> float:
+    open_mode(page, "upload")
     page.locator("#upload-search-button").click()
     return _wait_run(page, "#upload-running-indicator")
 
 
 def catalog_search(page) -> float:
+    open_mode(page, "sample")
     page.locator("#search-button").click()
     return _wait_run(page, "#query-running-indicator")
 
@@ -301,7 +319,7 @@ def main() -> int:
             truth: dict[str, list[tuple[str, str]]] = {}
             for sid in (FLT_ID, GC_ID):
                 page.goto(f"http://127.0.0.1:{args.port}/?q={sid}", wait_until="load")
-                page.wait_for_selector("#upload-counts input[type=file]", timeout=60_000)
+                page.wait_for_selector(".sample-preview", timeout=60_000)
                 page.wait_for_timeout(1200)
                 secs = catalog_search(page)
                 hits, _ = read_hits(page)

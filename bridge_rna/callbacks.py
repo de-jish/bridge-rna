@@ -17,8 +17,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
+import numpy as np
 import pandas as pd
-from dash import Input, Output, State, html, no_update
+from dash import ALL, Input, Output, State, ctx, html, no_update
 
 from .ai import (
     _call_ai_summary,
@@ -27,16 +28,35 @@ from .ai import (
     _format_osdr_query_text,
     _load_ai_prompt_template,
 )
+from . import cohorts as C
 from .config import GENERIC_ENTREZ_EMAIL, MAX_UPLOAD_BYTES
-from .figures import _empty_network_figure, build_network_figure
+from .figures import (
+    _empty_network_figure,
+    build_comparison_figure,
+    build_network_figure,
+)
 from .geo import _enrich_hits_from_ncbi_eutils
-from .layout import ARCHS4_SAMPLE_COUNT, samples_df
-from .panels import _details_head, build_details_panel, build_status_banner
+from .layout import (
+    ARCHS4_SAMPLE_COUNT,
+    CANVAS_SUBTITLES,
+    QUERY_MODES,
+    build_graph_legend,
+    samples_df,
+)
+from .panels import (
+    _details_head,
+    build_cohort_card,
+    build_details_panel,
+    build_status_banner,
+)
 from .retrieval import (
+    COHORT_MODE,
     TIER_CACHED,
     TIER_SUBPROCESS,
     TIER_UNAVAILABLE,
     UPLOAD_MODE,
+    cached_query_vectors,
+    run_cohort_retrieval,
     run_uploaded_retrieval,
     sample_tier,
     search_hits,
@@ -58,7 +78,76 @@ def _retrieval_phrase(mode: str) -> str:
         "demo": "by embedding the counts matrix from scratch",
         UPLOAD_MODE: "by embedding the uploaded counts matrix live, scored against "
                      f"all {_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
+        COHORT_MODE: "from the pooled mean of the cohort's precomputed "
+                     "embeddings, scored against all "
+                     f"{_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
     }.get(mode, mode)
+
+
+# --- Cohort mode -------------------------------------------------------------
+
+
+def _cohort_query_series(cohort, geometry, excluded: list[str]) -> pd.Series:
+    """A query identity for a pooled cohort, standing where a sample row does.
+
+    A cohort is not in `samples_df` and has no single sample name, so the figure
+    and the inspector need an identity synthesized from the group. It carries
+    `is_cohort` so the inspector renders it as a group rather than as one sample
+    with a blank name, and the member lists travel as newline-joined strings
+    because the store is JSON and this keeps the payload flat.
+
+    `sample_id` is deliberately *not* a member's key. The banner and the query
+    node must never label a pooled result with one animal's name.
+    """
+    grouped = ", ".join(C.FACETS_BY_KEY[k].label for k in cohort.facets)
+    outliers = [m for m, flag in zip(geometry.members, geometry.outliers) if flag]
+    return pd.Series({
+        "sample_id": cohort.cohort_id,
+        "sample_name": cohort.describe(),
+        "cohort_label": cohort.label,
+        "study_id": cohort.study,
+        "tissue": cohort.values.get("tissue", ""),
+        "condition": cohort.values.get("spaceflight", ""),
+        "is_cohort": "1",
+        "grouped_by": grouped,
+        "stability": f"{geometry.stability:.2f} at k = {geometry.size}",
+        "resultant": f"{geometry.resultant:.4f}",
+        "members": "\n".join(geometry.members),
+        "excluded": "\n".join(excluded),
+        "outliers": "\n".join(outliers),
+    })
+
+
+def _geometry_for(members: list[str]) -> tuple[Any, list[str]]:
+    """Cohort geometry over the members that have a cached vector.
+
+    Returns `(geometry, missing)`. A member with no cached embedding cannot be
+    pooled, and silently averaging the rest would make the interface state a
+    size it did not use.
+    """
+    rows, missing = cached_query_vectors(members)
+    usable = [m for m in members if m not in set(missing)]
+    if rows.shape[0] == 0:
+        return None, missing
+    return C.cohort_geometry(usable, rows), missing
+
+
+def _cohort_options(study: str, facets: list[str]) -> list[dict[str, Any]]:
+    """This study's cohorts, with size, and singletons disabled with the reason.
+
+    Same treatment the sample picker gives an unretrievable sample: shown,
+    disabled, and saying why, rather than hidden. A cohort that vanishes looks
+    like a bug in the grouping; a disabled one is a fact about the study.
+    """
+    opts = []
+    for c in C.build_cohorts(facets=facets, study=study):
+        singleton = c.size < C.MIN_COHORT_SIZE
+        suffix = ("  ·  1 sample, nothing to pool" if singleton
+                  else f"  ·  {c.size} samples"
+                       + ("  ·  low N" if c.tier == C.TIER_LOW_N else ""))
+        opts.append({"label": f"{c.label}{suffix}", "value": c.cohort_id,
+                     "disabled": singleton})
+    return opts
 
 
 def _uploaded_query_series(filename: str, column: str) -> pd.Series:
@@ -442,6 +531,379 @@ def register(app) -> None:
         return network, payload, status
 
 
+    # --- Cohort mode ------------------------------------------------------
+
+    @app.callback(
+        Output("query-mode-store", "data"),
+        *[Output(f"mode-tab-{m['key']}", "className") for m in QUERY_MODES],
+        *[Output(f"mode-tab-{m['key']}", "aria-selected") for m in QUERY_MODES],
+        *[Output(f"mode-panel-{m['key']}", "style") for m in QUERY_MODES],
+        *[Output(f"action-slot-{m['key']}", "style") for m in QUERY_MODES],
+        Output("mode-hint", "children"),
+        Output("study-group", "style"),
+        Output("network-graph", "figure", allow_duplicate=True),
+        *[Input(f"mode-tab-{m['key']}", "n_clicks") for m in QUERY_MODES],
+        State("hits-store", "data"),
+        # The layout already renders Sample selected and the other two hidden,
+        # so there is nothing for the initial call to do - and doing it anyway
+        # was a real bug rather than a wasted round trip. Restyling the action
+        # slots on load remounted the buttons inside them, and a Dash callback
+        # fires when an input component newly appears, so both the cohort and
+        # the upload search callbacks ran at page load with `n_clicks: 0`.
+        # The canvas greeted every visitor with "Cohort retrieval failed".
+        prevent_initial_call=True,
+    )
+    def switch_query_mode(*args):
+        """Show one query source at a time, and only that one.
+
+        The rail used to stack the sample picker and the upload dropzone, which
+        left the reader to work out which one the Search button was armed with.
+        Only one query can run, so only one source is on screen, and the button
+        that runs it is the only button in the action slot.
+
+        Everything is derived from `QUERY_MODES` rather than hand-listed, so a
+        fifth source is one entry there and no edits here.
+        """
+        hits_payload = args[-1]
+        triggered = _safe_str(ctx.triggered_id)
+        active = next((m["key"] for m in QUERY_MODES
+                       if f"mode-tab-{m['key']}" == triggered),
+                      QUERY_MODES[0]["key"])
+        hint = next(m["hint"] for m in QUERY_MODES if m["key"] == active)
+        shown, hidden = {}, {"display": "none"}
+
+        # The empty canvas has to invite the thing the active mode can actually
+        # do. Left alone it kept saying "Select an OSDR sample" while Cohort mode
+        # was open, which is the smallest version of the same fault as a status
+        # banner naming the wrong path. A drawn network is never replaced -
+        # switching modes to look at the controls must not throw away a result.
+        canvas = no_update
+        if not hits_payload:
+            canvas = _empty_network_figure({
+                "sample": "Select an OSDR sample, then run a search.",
+                "cohort": "Define a cohort, then pool and search it.",
+                "upload": "Upload a counts file, then embed and search it.",
+            }[active])
+
+        return (
+            active,
+            *["mode-tab" + (" is-active" if m["key"] == active else "")
+              for m in QUERY_MODES],
+            *["true" if m["key"] == active else "false" for m in QUERY_MODES],
+            *[shown if m["key"] == active else hidden for m in QUERY_MODES],
+            *[shown if m["key"] == active else hidden for m in QUERY_MODES],
+            hint,
+            # Upload has no study; Sample and Cohort share one.
+            hidden if active == "upload" else shown,
+            canvas,
+        )
+
+    @app.callback(
+        Output("cohort-facets-store", "data"),
+        Output({"type": "facet-chip", "key": ALL}, "className"),
+        Output({"type": "facet-chip", "key": ALL}, "aria-pressed"),
+        Input({"type": "facet-chip", "key": ALL}, "n_clicks"),
+        State("cohort-facets-store", "data"),
+    )
+    def toggle_facet(_clicks, current: list[str] | None):
+        """Add or remove one facet from the cohort definition.
+
+        `normalize_facets` is what actually decides the set, so the pinned study
+        cannot be removed even by a crafted request, and the order is always the
+        registry's rather than click order.
+        """
+        chosen = set(C.normalize_facets(current))
+        clicked = ctx.triggered_id
+        if isinstance(clicked, dict) and clicked.get("type") == "facet-chip":
+            key = clicked.get("key")
+            if key in C.FACETS_BY_KEY and key not in C.PINNED_FACETS:
+                chosen.symmetric_difference_update({key})
+        active = C.normalize_facets(chosen)
+        return (
+            list(active),
+            ["facet-chip" + (" is-on" if f.key in active else "")
+             + (" is-pinned" if f.pinned else "") for f in C.FACETS],
+            ["true" if f.key in active else "false" for f in C.FACETS],
+        )
+
+    @app.callback(
+        Output("cohort-facet-summary", "children"),
+        Input("cohort-facets-store", "data"),
+    )
+    def describe_cohort_definition(facets: list[str] | None):
+        """What the current definition produces, over the whole corpus.
+
+        Corpus-wide rather than per-study on purpose: this line reports the
+        consequence of the *definition*, and a definition is not a property of
+        whichever study happens to be selected. The per-study consequence is
+        already visible in the cohort dropdown right below it.
+        """
+        if not C.cohorts_available():
+            return html.Span(
+                "Cohorts need cache/osdr_metadata.parquet. Run "
+                "precompute/embed_osdr.py.", className="facet-summary-warn")
+        groups = [c for c in C.build_cohorts(facets=facets)]
+        poolable = [c for c in groups if c.size >= C.MIN_COHORT_SIZE]
+        if not poolable:
+            return html.Span("This definition produces no cohort with two or "
+                             "more samples.", className="facet-summary-warn")
+        sizes = [c.size for c in poolable]
+        pooled = sum(sizes)
+        return [
+            html.Strong(f"{len(poolable)} cohorts"),
+            f" across {len({c.study for c in poolable})} studies · "
+            f"{min(sizes)} to {max(sizes)} samples each · "
+            f"{pooled:,} of {len(C.cohort_metadata()):,} samples grouped",
+        ]
+
+    @app.callback(
+        Output("cohort-dropdown", "options"),
+        Output("cohort-dropdown", "value"),
+        Input("study-dropdown", "value"),
+        Input("cohort-facets-store", "data"),
+        State("cohort-dropdown", "value"),
+    )
+    def update_cohort_options(study: str, facets: list[str] | None,
+                              current: str | None):
+        """List this study's cohorts, keeping the selection where it survives.
+
+        Reticking a facet redefines every cohort, so most selections cannot
+        survive it. The one that can is an unchanged id, and holding onto it
+        means widening from tissue+arm to arm alone does not throw away the
+        cohort you were looking at when it happens to be the same group.
+        """
+        opts = _cohort_options(_safe_str(study), facets or list(C.DEFAULT_FACETS))
+        enabled = [o for o in opts if not o["disabled"]]
+        if current and any(o["value"] == current for o in enabled):
+            return opts, current
+        return opts, (enabled[0]["value"] if enabled else None)
+
+    @app.callback(
+        Output("cohort-members", "options"),
+        Output("cohort-members", "value"),
+        Input("cohort-dropdown", "value"),
+        State("cohort-facets-store", "data"),
+    )
+    def update_cohort_members(cohort_id: str | None, facets: list[str] | None):
+        """List the cohort's members, every one of them ticked to begin with.
+
+        Each row carries its leave-one-out cosine: the member's agreement with
+        the centroid of *the others*, which is the statistic that can actually
+        surface an outlier. Scoring against the full centroid would let an
+        outlier drag the reference towards itself and hide inside it.
+        """
+        cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
+        if cohort is None:
+            return [], []
+        geometry, _missing = _geometry_for(list(cohort.members))
+        if geometry is None:
+            return [], []
+        options = []
+        for name, loo, is_outlier in zip(geometry.members, geometry.loo_cosines,
+                                         geometry.outliers):
+            short = name.split("|", 1)[-1]
+            tag = "  ·  furthest from the rest" if is_outlier else ""
+            options.append({
+                "label": f"{short}  ·  {loo:.4f}{tag}",
+                "value": name,
+            })
+        return options, list(geometry.members)
+
+    @app.callback(
+        Output("cohort-card", "children"),
+        Output("cohort-members-summary", "children"),
+        Output("cohort-search-button", "disabled"),
+        Input("cohort-members", "value"),
+        Input("cohort-dropdown", "value"),
+        State("cohort-facets-store", "data"),
+    )
+    def update_cohort_card(included: list[str] | None, cohort_id: str | None,
+                           facets: list[str] | None):
+        """Restate size, stability and tightness for what is actually ticked.
+
+        This reads the *included* members rather than the cohort's full
+        membership, because excluding two of six changes every number on the
+        card. A card that kept quoting the cohort's nominal size while the pool
+        shrank underneath it would be the same failure as the status banner that
+        announced cached results as subprocess output.
+        """
+        cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
+        if cohort is None:
+            return (html.Div("Select a cohort to see how tightly it groups.",
+                             className="cohort-card cohort-card--empty"),
+                    "Members", True)
+        members = [m for m in (included or []) if m in set(cohort.members)]
+        excluded = [m for m in cohort.members if m not in set(members)]
+        if len(members) < C.MIN_COHORT_SIZE:
+            note = ("Tick at least two samples to pool."
+                    if excluded else
+                    "Pooling needs at least two samples.")
+            return (html.Div(note, className="cohort-card cohort-card--empty"),
+                    f"Members ({len(members)} of {cohort.size})", True)
+        geometry, _missing = _geometry_for(members)
+        if geometry is None:
+            return (html.Div("These samples have no precomputed embeddings.",
+                             className="cohort-card cohort-card--empty"),
+                    "Members", True)
+        summary = (f"Members ({len(members)})" if not excluded
+                   else f"Members ({len(members)} of {cohort.size}, "
+                        f"{len(excluded)} excluded)")
+        return build_cohort_card(cohort, geometry), summary, False
+
+    @app.callback(
+        Output("cohort-compare-dropdown", "options"),
+        Output("cohort-compare-dropdown", "value"),
+        Output("cohort-compare-hint", "children"),
+        Input("cohort-dropdown", "value"),
+        State("cohort-facets-store", "data"),
+    )
+    def update_compare_options(cohort_id: str | None, facets: list[str] | None):
+        """Offer only siblings that differ in exactly one facet.
+
+        That restriction is what makes the comparison mean anything. Two cohorts
+        differing only in the spaceflight arm produce an overlap number that is
+        about the arm; two differing in tissue *and* arm produce a number nobody
+        can attribute to either.
+        """
+        cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
+        if cohort is None:
+            return [], None, ""
+        siblings = C.sibling_cohorts(cohort)
+        if not siblings:
+            return ([], None,
+                    "No sibling cohort in this study differs by exactly one "
+                    "facet, so there is nothing to compare against.")
+        opts = []
+        for s in siblings:
+            facet = C.contrast_facet(cohort, s)
+            label = C.FACETS_BY_KEY[facet].label if facet else "differs"
+            opts.append({"label": f"{s.label}  ·  {s.size} samples  ·  differs "
+                                  f"by {label.lower()}",
+                         "value": s.cohort_id})
+        return (opts, None,
+                "Runs the second cohort as its own pooled query and reports how "
+                "much of the top-k the two share. Not a difference vector.")
+
+    @app.callback(
+        Output("network-graph", "figure", allow_duplicate=True),
+        Output("hits-store", "data", allow_duplicate=True),
+        Output("search-status", "children", allow_duplicate=True),
+        Input("cohort-search-button", "n_clicks"),
+        State("cohort-dropdown", "value"),
+        State("cohort-members", "value"),
+        State("cohort-compare-dropdown", "value"),
+        State("cohort-facets-store", "data"),
+        State("topk-slider", "value"),
+        State("entrez-email-input", "value"),
+        State("biopython-toggle", "value"),
+        running=[
+            (Output("cohort-search-button", "disabled"), True, False),
+            (Output("cohort-running-indicator", "children"),
+             "Pooling the cohort and retrieving neighbors...", ""),
+        ],
+        prevent_initial_call=True,
+    )
+    def run_cohort_search(
+        n_clicks: int,
+        cohort_id: str | None,
+        included: list[str] | None,
+        compare_id: str | None,
+        facets: list[str] | None,
+        topk: int,
+        entrez_email: str | None,
+        biopython_toggle: list[str] | None,
+    ):
+        # Belt and braces against the remount case above: a search runs when
+        # somebody clicks Search, and a click means n_clicks is at least one.
+        if not n_clicks:
+            return no_update, no_update, no_update
+
+        cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
+        if cohort is None:
+            return (_empty_network_figure("Select a cohort, then run a search."),
+                    no_update,
+                    build_status_banner("Select a cohort to start.", kind="info"))
+
+        members = [m for m in (included or []) if m in set(cohort.members)]
+        excluded = [m for m in cohort.members if m not in set(members)]
+        enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
+        email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
+
+        try:
+            hits_df, rows = run_cohort_retrieval(members, topk=int(topk))
+            geometry = C.cohort_geometry(members, rows)
+            if enable_biopython and _safe_str(entrez_email):
+                hits_df = _enrich_hits_from_ncbi_eutils(hits_df, email_value)
+
+            other = C.find_cohort(_safe_str(compare_id), facets=facets)
+            other_hits, other_geometry = None, None
+            if other is not None:
+                other_hits, other_rows = run_cohort_retrieval(
+                    list(other.members), topk=int(topk))
+                other_geometry = C.cohort_geometry(list(other.members), other_rows)
+        except Exception as exc:
+            detail = getattr(exc, "detail", "") or _safe_str(exc)
+            return (
+                _empty_network_figure("Cohort retrieval failed - see status."),
+                no_update,
+                build_status_banner(
+                    _last_nonempty_line(_safe_str(exc)) or "Cohort retrieval failed.",
+                    kind="error", detail=detail),
+            )
+
+        query = _cohort_query_series(cohort, geometry, excluded)
+        payload: dict[str, Any] = {
+            "sample_id": cohort.cohort_id,
+            "entrez_email": email_value,
+            "biopython_enabled": bool(enable_biopython),
+            "mode": COHORT_MODE,
+            "hits": hits_df.to_dict(orient="records"),
+            "query": _query_dict(query),
+            # The map draws every pooled member rather than one query point,
+            # because a cohort has no single position in the space.
+            "member_ids": list(geometry.members),
+        }
+
+        how = _retrieval_phrase(COHORT_MODE)
+        enriched = bool(enable_biopython and _safe_str(entrez_email))
+        excluded_note = (f" {len(excluded)} excluded." if excluded else "")
+
+        if other_hits is None:
+            network = build_network_figure(query=query, hits_df=hits_df)
+            message = (
+                f"Retrieved {len(hits_df)} hits for {geometry.size} pooled "
+                f"samples ({cohort.describe()}) {how}."
+                + excluded_note
+                + (" Plus GEO and PubMed enrichment." if enriched else "")
+            )
+            return network, payload, build_status_banner(message, kind="good")
+
+        # Two cohorts, two independent pooled queries, one network.
+        other_query = _cohort_query_series(other, other_geometry, [])
+        shared = set(hits_df["gsm"]) & set(other_hits["gsm"])
+        union = set(hits_df["gsm"]) | set(other_hits["gsm"])
+        overlap = len(shared) / len(union) if union else 0.0
+        facet = C.contrast_facet(cohort, other)
+        facet_label = C.FACETS_BY_KEY[facet].label.lower() if facet else "one facet"
+
+        network = build_comparison_figure(
+            query_a=query, hits_a=hits_df, query_b=other_query, hits_b=other_hits)
+        payload["comparison"] = {
+            "query_b": _query_dict(other_query),
+            "hits_b": other_hits.to_dict(orient="records"),
+            "shared": sorted(shared),
+            "overlap": overlap,
+            "facet": facet_label,
+        }
+        message = (
+            f"Two pooled queries differing by {facet_label}: "
+            f"{cohort.label} ({geometry.size} samples) and {other.label} "
+            f"({other_geometry.size}). They share {len(shared)} of "
+            f"{len(union)} retrieved samples, a Jaccard overlap of "
+            f"{overlap:.2f}." + excluded_note
+        )
+        return network, payload, build_status_banner(message, kind="good")
+
     @app.callback(
         Output("upload-store", "data"),
         Output("upload-preview", "children"),
@@ -536,13 +998,19 @@ def register(app) -> None:
         prevent_initial_call=True,
     )
     def run_uploaded_search(
-        _: int,
+        n_clicks: int,
         upload_store: dict[str, Any] | None,
         sample_column: str | None,
         topk: int,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
     ):
+        # See run_cohort_search: this one was firing at page load too, and
+        # announcing "Upload a counts file first" before anyone had done
+        # anything at all.
+        if not n_clicks:
+            return no_update, no_update, no_update
+
         if not upload_store or not upload_store.get("path"):
             return no_update, no_update, build_status_banner(
                 "Upload a counts file first.", kind="info")
@@ -637,6 +1105,30 @@ def register(app) -> None:
         summary = _call_ai_summary(prompt)
         return summary, ""
 
+
+    @app.callback(
+        Output("graph-legend", "children"),
+        Output("canvas-subtitle", "children"),
+        Input("hits-store", "data"),
+    )
+    def describe_the_canvas(hits_payload: dict[str, Any] | None):
+        """Keep the legend and the subtitle describing what is actually drawn.
+
+        A comparison draws no GSE nodes and two query stars whose colours mean
+        something; a single-sample network draws one star and a GSE column. The
+        strip above the plot said the second thing in both cases, which is the
+        same class of error as the status banner that announced every cached
+        result as subprocess output: the interface asserting something about
+        itself that is not true.
+        """
+        payload = hits_payload or {}
+        if payload.get("comparison"):
+            kind = "comparison"
+        elif payload.get("mode") == COHORT_MODE:
+            kind = "cohort"
+        else:
+            kind = "sample"
+        return build_graph_legend(kind), CANVAS_SUBTITLES[kind]
 
     @app.callback(
         Output("see-on-map", "style"),

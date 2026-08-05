@@ -792,3 +792,291 @@ summary:focus-visible,
   font-size: var(--text-xs, 11.5px);
   color: var(--text-secondary);
 }
+
+/* ==========================================================================
+   Cohort mode: the query-source switch, the facet chips, the confidence card
+
+   One rule governs the whole block, and it is the rail's existing one: the
+   fact that qualifies a control sits directly under that control. The cohort
+   count hangs under the facet chips, the confidence card hangs under the
+   cohort picker, and neither drifts into a summary panel somewhere else.
+   ========================================================================== */
+
+/* --- Sample / Cohort / Upload --------------------------------------------- */
+
+/* A recessed track with one raised segment. The rail's other controls are
+   raised surfaces on a white panel, so inverting that here is what makes the
+   switch read as a switch and not as three buttons that happen to be adjacent. */
+.mode-switch {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.mode-tab {
+  padding: 7px 4px;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+.mode-tab:hover:not(.is-active) { color: var(--text-primary); background: rgba(255, 255, 255, 0.6); }
+.mode-tab.is-active {
+  color: var(--accent);
+  background: var(--bg-panel);
+  border-color: var(--border-subtle);
+  box-shadow: 0 1px 2px rgba(26, 36, 50, 0.06), 0 1px 1px rgba(26, 36, 50, 0.04);
+}
+.mode-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Names what the selected source does, so the switch is not three nouns with
+   no consequence attached. --text-secondary rather than --text-muted: at this
+   size --text-muted measures 2.90:1 on white, which fails AA. */
+.mode-hint {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin: -2px 0 var(--space-1);
+}
+
+.control-group--query { gap: var(--space-3); }
+.mode-panel { display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* --- Group by: the facet chips -------------------------------------------- */
+
+.facet-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.facet-chip {
+  padding: 4px 9px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.facet-chip:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--text-primary); }
+.facet-chip.is-on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+}
+/* Study cannot be unticked: pooling across studies would average across the
+   strongest batch boundary in the corpus. It is shown as part of the definition
+   rather than as a dead control, so it keeps the "on" fill and loses only the
+   pointer and the hover response. The reason is on the title attribute. */
+.facet-chip.is-pinned {
+  cursor: default;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+  opacity: 1;
+}
+.facet-chip.is-pinned::after {
+  content: "";
+  display: inline-block;
+  width: 4px; height: 4px;
+  margin-left: 6px;
+  vertical-align: 1px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.facet-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.facet-summary {
+  margin-top: 7px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.facet-summary strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.facet-summary-warn { color: var(--status-warn); }
+
+/* --- The confidence card --------------------------------------------------- */
+
+.cohort-card-slot { margin-top: -2px; }
+.cohort-card {
+  padding: var(--space-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.cohort-card--empty {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.cohort-card-note { line-height: 1.45; }
+
+.cohort-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: var(--space-3);
+}
+.cohort-card-k {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.cohort-card-k-label { font-size: 11.5px; color: var(--text-secondary); }
+
+.cohort-stat + .cohort-stat { margin-top: var(--space-3); }
+.cohort-stat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.cohort-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+/* Mono for the measurements only. "Result stability" in a numeral font would
+   be noise; 0.74 and R 0.9994 want to sit on one grid. */
+.cohort-stat-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.cohort-stat-note {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.cohort-stat--minor .cohort-stat-value { color: var(--text-secondary); }
+
+/* Same track treatment as the map's coverage bar, for the same reason: the
+   unfilled part is the message, so the track needs enough contrast to be read
+   as a track rather than as background. */
+.cohort-meter {
+  height: 4px;
+  margin-top: 7px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: #d7e0ed;
+  box-shadow: inset 0 0 0 1px rgba(20, 41, 74, 0.07);
+}
+.cohort-meter-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent-teal);
+  transition: width 180ms ease;
+}
+/* Amber, not red: a four-sample cohort is working correctly, not failing. */
+.cohort-meter-fill.is-low { background: var(--accent-warm); }
+
+.cohort-flag {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) 10px;
+  background: var(--status-warn-soft);
+  border: 1px solid #f0dfb4;
+  border-radius: var(--radius-sm);
+}
+.cohort-flag-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--status-warn);
+}
+.cohort-flag-body { font-size: 11px; line-height: 1.45; color: #7d5a12; }
+
+/* --- The member list ------------------------------------------------------- */
+
+.cohort-members { margin-top: -2px; }
+.cohort-members-summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+.cohort-members-summary::-webkit-details-marker { display: none; }
+.cohort-members-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-muted);
+  transition: transform 140ms ease;
+}
+.cohort-members[open] .cohort-members-summary::before { content: "▾"; }
+.cohort-members-summary:hover { color: var(--text-primary); }
+.cohort-members-body {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* The list can run to 38 rows, which would push the search button off the rail. */
+.member-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.member-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+/* --- The cohort inspector -------------------------------------------------- */
+
+.cohort-member-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.cohort-member {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.cohort-member:last-child { border-bottom: none; }
+.cohort-member-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  word-break: break-all;
+  color: var(--text-primary);
+}
+.cohort-member.is-outlier .cohort-member-name { color: var(--status-warn); }
+.cohort-member-tag {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--status-warn);
+  white-space: nowrap;
+}
+.cohort-member-list--excluded .cohort-member-name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
