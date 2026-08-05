@@ -231,10 +231,10 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 286 tests, about twenty-five seconds
+.venv/bin/python -m pytest tests/ -q             # 290 tests, about twenty-five seconds
 .venv/bin/python tests/e2e_check.py              # 45 browser checks; needs the built cache
-.venv/bin/python tests/e2e_upload_check.py       # 97 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 60 checks of cohort retrieval
+.venv/bin/python tests/e2e_upload_check.py       # 68 checks of the upload path
+.venv/bin/python tests/e2e_cohort_check.py       # 92 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.

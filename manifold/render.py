@@ -418,6 +418,9 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         scores = cohort.get("hit_scores") or []
         name = str(cohort.get("label") or "")
         ranks = _map_ranks(coords, hits, members)
+        # Only say "pooled member" when something was actually pooled. For a
+        # single-sample or uploaded search the one member *is* the query.
+        origin = (" from the nearest pooled member" if len(members) > 1 else "")
         rows = []
         for i, point in enumerate(hits):
             gsm = str(labels[i]) if i < len(labels) else ""
@@ -428,8 +431,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                 gsm,
                 f"{who}512-d rank {i + 1} of {len(hits)} retrieved"
                 f"  ·  cosine {score}",
-                (f"map rank {mr:,} of {n:,} from the nearest pooled member"
-                 if mr is not None else ""),
+                f"map rank {mr:,} of {n:,}{origin}" if mr is not None else "",
             ])
         # Numerals are dropped in a comparison: two competing rank sets over the
         # same few hundred pixels is illegible, and the hover says strictly more

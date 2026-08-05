@@ -759,21 +759,23 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**286 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-05 by running the suite.
+**290 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-05 by running the suite.
 
 | file | tests |
 | --- | --- |
+| `tests/test_app.py` | 63 |
+| `tests/test_render.py` | 55 |
 | `tests/test_tissue.py` | 46 |
-| `tests/test_app.py` | 46 |
-| `tests/test_render.py` | 42 |
-| `tests/test_cohorts.py` | 34 |
+| `tests/test_cohorts.py` | 36 |
 | `tests/test_retrieval.py` | 22 |
 | `tests/test_data.py` | 22 |
 | `tests/test_colorby.py` | 18 |
 | `tests/test_projections.py` | 15 |
 | `tests/test_upload_ingestion.py` | 13 |
 
-Plus **202 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 89 in `tests/e2e_cohort_check.py`.
+The rows sum to the headline; regenerate both with `pytest tests/ -q --collect-only`.
+
+Plus **205 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 92 in `tests/e2e_cohort_check.py`.
 These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.

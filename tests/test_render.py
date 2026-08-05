@@ -720,3 +720,21 @@ def test_a_flat_payload_still_renders_as_one_cohort():
     members = [t for t in traces if t.name == "query"]
     assert len(members) == 1
     assert members[0].marker.color == theme.RETRIEVAL_QUERY
+
+
+def test_the_hover_says_pooled_member_only_when_something_was_pooled():
+    """For a single-sample or uploaded search the one drawn member *is* the
+    query, so calling it a "pooled member" describes a cohort that does not
+    exist. The phrase is earned by k >= 2, not by the code path."""
+    from manifold import render
+
+    coords = _coords()
+    alone = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+                 if t.name == "retrieved hit")
+    assert all("map rank" in row[2] for row in alone.customdata)
+    assert not any("pooled member" in row[2] for row in alone.customdata)
+
+    pooled = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
+              if t.name == "retrieved hit"]
+    assert all("from the nearest pooled member" in row[2]
+               for t in pooled for row in t.customdata)

@@ -527,6 +527,18 @@ def main() -> int:
                  "unticking an arm removes it from the map")
             c.ok(any(h["hasText"] for h in solo.get("hits", [])),
                  "and the rank numerals come back, with one list to number")
+            # This map already holds that a key is read as "what am I looking
+            # at" rather than "what exists", which is why the colour legend
+            # recounts itself per figure. A key still counting hits for an arm
+            # that is not drawn would be the same error by another route.
+            key = page.locator(".bm-retrieval-key").inner_text()
+            c.ok("not shown" in key,
+                 f"the key reports the hidden arm as hidden: {key[:80]!r}")
+            c.ok(page.locator(".bm-retrieval-key-row.is-hidden").count() == 1,
+                 "with exactly one row marked hidden")
+            solo_badges = page.locator(".bm-plot-badges").inner_text().replace("\n", " ")
+            c.ok("2 cohorts" not in solo_badges,
+                 f"and the badge stops claiming two: {solo_badges[:80]!r}")
             shot(page, "08-one-arm")
 
             # The ticks are the user's, and only a new retrieval may reset them.

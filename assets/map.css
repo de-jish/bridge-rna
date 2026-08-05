@@ -142,6 +142,11 @@
 .bm-retrieval-swatch.is-a { background: #0bab9f; }
 .bm-retrieval-swatch.is-b { background: #ffc233; }
 .bm-retrieval-key-count { color: var(--text-secondary); }
+/* An arm the user has unticked stays in the key, so the colour it owns is
+   still named, but it recedes and says it is not drawn. Dropping the row would
+   leave a gold glyph on screen a moment later with nothing to look it up in. */
+.bm-retrieval-key-row.is-hidden { opacity: 0.45; }
+.bm-retrieval-key-row.is-hidden b { font-weight: 500; }
 .bm-retrieval-key-note {
   margin-top: 6px;
   font-size: 11.5px; line-height: 1.45;

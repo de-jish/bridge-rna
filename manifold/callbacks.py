@@ -120,6 +120,12 @@ def _retrieval_overlay(hits_payload: dict | None,
 
     if len(cohorts) > 1:
         query_label = " vs ".join(c["label"] or "cohort" for c in cohorts)
+    elif not query_points:
+        # Nothing of the query is on this map: an uploaded sample has no
+        # `sample_key`, so it has no coordinate. The label stays empty and the
+        # rail says "an OSDR sample" rather than announcing "0 pooled cohort
+        # samples", which would be false twice over.
+        query_label = ""
     elif len(query_points) == 1:
         query_label = cohorts[0]["label"]
     else:
@@ -364,7 +370,6 @@ def register(app):
 
     @app.callback(
         Output("retrieval-group", "style"),
-        Output("retrieval-summary", "children"),
         Output("frame-retrieval", "style"),
         Output("show-retrieval", "options"),
         Output("show-retrieval", "value"),
@@ -391,9 +396,11 @@ def register(app):
         per cohort, each carrying that cohort's own name. It is the same control
         rather than a new one, so nothing else on the rail moves, and unticking
         one is the escape hatch when two large cohorts crowd the same region.
+
+        The key *under* the ticks is a separate callback, because it describes
+        what is drawn and therefore has to depend on the ticks - which this one
+        writes, so it cannot also read them.
         """
-        # A dimensionality switch changes only the frame button; leave the ticks
-        # exactly as the user set them.
         freeze = ctx.triggered_id == "dims"
         single = [{"label": " Show it on the map", "value": "on"}]
 
@@ -402,42 +409,75 @@ def register(app):
 
         overlay = _retrieval_overlay(hits_payload)
         if overlay is None:
-            return ({"display": "none"}, "", {"display": "none"},
+            return ({"display": "none"}, {"display": "none"},
                     *ticks(single, ["on"]))
 
         frame_style = {} if dims == "2d" else {"display": "none"}
-        cohorts = overlay["cohorts"]
-        if len(cohorts) < 2:
-            n = len(overlay["hit_points"])
-            query = overlay["query_label"] or "an OSDR sample"
-            summary = [
+        if len(overlay["cohorts"]) < 2:
+            return {}, frame_style, *ticks(single, ["on"])
+        options = [
+            {"label": f"  {c['label'] or 'cohort'}", "value": key}
+            for c, key in zip(overlay["cohorts"], ("on", ROLE_B))
+        ]
+        return {}, frame_style, *ticks(options, ["on", ROLE_B])
+
+    @app.callback(
+        Output("retrieval-summary", "children"),
+        Input("hits-store", "data"),
+        Input("show-retrieval", "value"),
+    )
+    def describe_the_retrieval(hits_payload, show_retrieval):
+        """What is on the map, stated under the control that decides it.
+
+        It reads the ticks rather than the payload, so a hidden arm is reported
+        as hidden. This map already holds that a key is read as "what am I
+        looking at" rather than "what exists" - it is why the colour legend
+        recounts itself per figure and drops a category with nothing drawn - and
+        a two-cohort key listing an arm that is not on screen would be the same
+        error by another route.
+        """
+        full = _retrieval_overlay(hits_payload)
+        if full is None:
+            return ""
+
+        roles = _roles_from_checklist(show_retrieval)
+        if len(full["cohorts"]) < 2:
+            n = len(full["hit_points"])
+            query = full["query_label"] or "an OSDR sample"
+            return [
                 html.B(query.split("|")[-1]),
                 f" and its {n} nearest ARCHS4 neighbour{'s' if n != 1 else ''}, "
                 "drawn where they sit in the space.",
             ]
-            return {}, summary, frame_style, *ticks(single, ["on"])
 
-        n_shared = len(overlay["shared_points"])
-        options = [
-            {"label": f"  {c['label'] or 'cohort'}", "value": key}
-            for c, key in zip(cohorts, ("on", ROLE_B))
-        ]
-        rows = [
-            html.Div(className="bm-retrieval-key-row", children=[
-                html.Span(className=f"bm-retrieval-swatch is-{c['role']}"),
-                html.B(c["label"] or "cohort"),
-                html.Span(f" · {len(c['hit_points'])} hits",
-                          className="bm-retrieval-key-count"),
-            ])
-            for c in cohorts
-        ]
-        rows.append(html.Div(
-            f"Retrieved by both: {n_shared}. Those carry both marks, a ring "
-            "inside a square. Each glyph is a pooled member; the query itself "
-            "is a mean of them and has no position here.",
-            className="bm-retrieval-key-note"))
-        return ({}, html.Div(rows, className="bm-retrieval-key"), frame_style,
-                *ticks(options, ["on", ROLE_B]))
+        drawn = _retrieval_overlay(hits_payload, roles) if roles else None
+        shown = {c["role"] for c in (drawn or {}).get("cohorts", [])}
+        rows = []
+        for c in full["cohorts"]:
+            hidden = c["role"] not in shown
+            rows.append(html.Div(
+                className="bm-retrieval-key-row" + (" is-hidden" if hidden else ""),
+                children=[
+                    html.Span(className=f"bm-retrieval-swatch is-{c['role']}"),
+                    html.B(c["label"] or "cohort"),
+                    html.Span(
+                        " · not shown" if hidden
+                        else f" · {len(c['hit_points'])} hits",
+                        className="bm-retrieval-key-count"),
+                ]))
+
+        if len(shown) < 2:
+            rows.append(html.Div(
+                "Tick both arms to see which samples they share.",
+                className="bm-retrieval-key-note"))
+        else:
+            n_shared = len(full["shared_points"])
+            rows.append(html.Div(
+                f"Retrieved by both: {n_shared}. Those carry both marks, a ring "
+                "inside a square. Each glyph is a pooled member; the query "
+                "itself is a mean of them and has no position here.",
+                className="bm-retrieval-key-note"))
+        return html.Div(rows, className="bm-retrieval-key")
 
     @app.callback(
         Output("viewport-store", "data"),

@@ -863,3 +863,59 @@ def test_the_router_writes_back_the_route_it_painted(app):
                       for o in (cb["output"] if isinstance(cb["output"], list)
                                 else [cb["output"]]))]
     assert len(writers) == 1, "route-store must have exactly one writer"
+
+
+def test_an_uploaded_retrieval_is_not_labelled_as_a_pooled_cohort(corpus):
+    """An uploaded sample has no `sample_key`, so it has no coordinate on this
+    map. Reporting that as "0 pooled cohort samples" would be false twice over,
+    and it is what the rail said once the label moved out of its guard: the
+    branch tested how many members were *locatable*, not whether anything was
+    pooled."""
+    overlay = callbacks._retrieval_overlay({
+        "sample_id": "UPLOAD|my_counts.csv::SampleA",
+        "mode": "uploaded",
+        "hits": [{"gsm": "GSM1", "score": 0.9, "archs4_index": 0}],
+        "query": {"sample_name": "SampleA"},
+    })
+    assert overlay is not None, "an uploaded search still draws its hits"
+    assert overlay["query_points"] == []
+    assert overlay["query_label"] == "", (
+        "an empty label is what lets the rail fall back to 'an OSDR sample'")
+
+
+def test_the_second_query_star_opens_the_second_cohort(corpus):
+    """The comparison figure draws a `query2` node and every node it draws is
+    clickable. This branch was added because clicking it reported "No metadata
+    found"; it then raised TypeError instead, which is worse - the callback
+    errors and the inspector silently keeps showing the previous node."""
+    import pandas as pd
+    from bridge_rna import panels
+
+    a = pd.Series({"sample_id": "COHORT|a", "cohort_label": "Liver · Flight",
+                   "is_cohort": "1", "study_id": "OSD-137", "grouped_by": "Study",
+                   "stability": "0.72 at k = 6", "members": "OSD-137|x\nOSD-137|y",
+                   "excluded": "", "outliers": ""})
+    b = pd.Series({**a.to_dict(), "sample_id": "COHORT|b",
+                   "cohort_label": "Liver · Ground"})
+    hits = pd.DataFrame([{"gsm": "GSM1", "score": 0.9, "gse": "GSE1"}])
+
+    panel = panels.build_details_panel(
+        query=a, selected_payload={"kind": "query2", "node_id": "COHORT|b"},
+        hits_df=hits, query_b=b)
+    # ensure_ascii would escape the middot in a cohort label, so the
+    # assertions below could never match and would pass vacuously.
+    text = json.dumps(panel, default=str, ensure_ascii=False)
+    assert "Liver · Ground" in text, "the second star must open the second cohort"
+    assert "Liver · Flight" not in text, "and not the first"
+
+
+def test_a_comparison_without_a_second_query_says_so_rather_than_raising(corpus):
+    import pandas as pd
+    from bridge_rna import panels
+
+    a = pd.Series({"sample_id": "S1", "sample_name": "S1"})
+    panel = panels.build_details_panel(
+        query=a, selected_payload={"kind": "query2", "node_id": "nope"},
+        hits_df=pd.DataFrame([{"gsm": "GSM1", "score": 0.9}]), query_b=None)
+    assert "no second cohort" in json.dumps(panel, default=str,
+                                            ensure_ascii=False)

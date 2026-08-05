@@ -439,7 +439,9 @@ def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | Non
                 html.P("This retrieval carries no second cohort.",
                        className="details-empty"),
             ]
-        return _build_query_details(query_b)
+        # `compact` has no default, and False is what the `query` branch above
+        # resolves to whenever a node was actually clicked.
+        return _build_query_details(query_b, compact=False)
 
     if node_kind == "gse":
         df = hits_df[hits_df["gse"] == node_id]
