@@ -72,6 +72,11 @@ A cohort of three is flagged in amber with the measured number for that size, ev
 An optional comparison runs a second cohort as its own separate query, so you can ask how much of the Earth that a study's flight animals resemble is also resembled by its ground controls.
 It is deliberately not a flight-minus-ground difference vector: a difference of two directions is not a transcriptome, and an earlier attempt at exactly that turned out to be measuring something else entirely.
 
+Both cohorts are drawn on the map, which is where that comparison is actually settled.
+The overlap the panel reports is a number about two *sets* of hits, and two arms can share no hits at all while sitting in the same neighbourhood, each picking different samples out of the same crowd.
+Each cohort's pooled animals are drawn in its own colour, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
+You can untick either arm when the picture gets crowded.
+
 Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md).
 
 ### The map

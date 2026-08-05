@@ -6,6 +6,46 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-05, later (cohort UX narrowed, and the comparison reaches the map)
+
+Four changes, two of them removals, plus two bugs that the work uncovered rather than caused.
+
+**The facet registry is down to three: study, tissue, spaceflight arm.**
+Sex, strain, genotype, habitat, mission duration and diet are deleted.
+They were offered because `cache/osdr_metadata.parquet` already carried them, which is not a reason.
+Every one of them could only ever *split* a cohort, and `STABILITY_BY_K` is a function of size (0.51 at k=3 against 0.81 at k=10), so the six controls did nothing but trade away the quantity pooling exists to buy - in exchange for a contrast the two-arm comparison answers attributably.
+Nine chips of which six were off also read as a definition you are expected to tune rather than as the curated ISA-Tab grouping OSDR publishes.
+Re-adding one is a single line in `FACETS`; nothing else hard-codes a facet, which the deletion confirmed by touching no other source file.
+
+**`R̄` is gone from the cohort card and the inspector.**
+Across all 212 real cohorts its median is 0.9991 and it is no lower at k=2 than at k=30, so it never separated a group worth trusting from one that was not, while a number pinned within a thousandth of its maximum sitting beside one that genuinely varies is read as a grade.
+`resultant_length` is deleted rather than left unused; the measurement stays in `docs/cohort_pooling.md`.
+The **per-member** leave-one-out cosine and the outlier flag stay: that statistic varies within a cohort, names an individual animal, and is what the exclude checkbox acts on.
+
+**A comparison now draws both cohorts on the map.**
+It drew cohort A alone and said nothing about the other arm, which was an omission rather than a limitation - B's hits already carried `archs4_index`, and only its member list was missing from the payload.
+Three independent design passes (scientific honesty, visual legibility, the researcher's actual task) reached the same answer, and the same encoding.
+**Hue for members, ring shape for hits, rings always white.**
+Lifting the network's blue/warm/teal onto the map is dead on arrival: against the worst categorical tissue hue on `PLOT_BG` they measure 1.03, 1.00 and 1.07 to 1, which is the finding `theme.py` already records as the reason the ring is white.
+Gold `#ffc233` against teal `#0bab9f` is dE2000 43.4 normal and 31.7 at worst under simulated CVD, against the palette's 8.4 bar, and hue is safe on a member because a member is a filled mark whose white outline carries its contrast.
+Both hit symbols are in `Scatter3d`'s vocabulary, so 2-D and 3-D encode a hit identically.
+**A shared hit is emergent, never computed**: it is in both hit lists, so it gets both traces and draws as a ring inside a square, and the map's shared count therefore cannot drift from the banner's.
+The "Show it on the map" tick became one tick per cohort with a colour key under it, and framing follows the ticks.
+Rejected with reasons in `docs/cohort_retrieval.md` section 9: a convex-hull footprint (claims territory the cohort does not occupy, and invites area comparison across projections that preserve neither), connecting polylines (already rejected for the single-cohort overlay, and the reason survives doubling), a dedicated shared hue.
+
+**Three pre-existing defects fixed on the way.**
+The halo scaled with membership - every member carried a 46 px ring at 0.50 alpha, so a 38-animal cohort composited into a teal disc; alpha is now `0.50/sqrt(k)` floored at 0.14.
+Map rank was measured from `query_points[0]`, whichever animal came first in metadata order, and is now measured from the nearest member of the cohort that retrieved the hit.
+A B-only hit and the second query star both opened "No metadata found", because the inspector looked node ids up in cohort A's hits alone; the map offer counted A's hits alone too.
+
+**Two bugs the browser sweep found, both real and both user-facing.**
+
+*The router repainted every view on arrival, and raced the user.* `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` was not enough. Rebuilding the retrieval view reads the OSDR catalog, so the response landed a few hundred milliseconds after load and overwrote whatever had happened meanwhile: clicking Cohort on arrival opened the cohort panel and then closed it again, **6 times out of 6**, while the click's own callback had run and returned the right answer. `route-store` records what was painted, `app.navigation_for` is the decision, and it is split out of the callback so it can be tested without Dash plumbing. This also removes a full view rebuild from every navigation.
+
+*A refinement test had never tested anything.* `test_adding_a_facet_only_ever_splits` compared a partition with itself: the synthetic fixture corpus gives every study exactly one tissue and one arm, so all four facet combinations produce the same 12 cohorts on it. It ran green from the day it was written. It now runs the chain study -> +tissue -> +arm on the `two_arm_study` frame and asserts the sizes 1 -> 2 -> 6, so it cannot go quiet again.
+
+**The browser suites now count their own checks.** The documented totals were hand-written and had drifted - CLAUDE.md said 173 where REFERENCE.md said 202, and the cohort file's documented 60 was never an actual count of anything. Each `Checks` instance now reports what it ran.
+
 ## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
 
 `docs/cohort_pooling.md` had specified and measured this feature on 2026-07-30 and left it unbuilt.
