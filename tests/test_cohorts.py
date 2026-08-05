@@ -70,27 +70,47 @@ def test_members_are_partitioned_without_overlap_or_loss():
     assert len(seen) == len(C.cohort_metadata()), "a sample landed in none"
 
 
-def test_adding_a_facet_only_ever_splits():
+def test_adding_a_facet_only_ever_splits(two_arm_study):
     """Narrowing the definition must refine the partition, never reshuffle it.
 
     Every cohort under the finer definition has to sit inside one cohort of the
     coarser one. If that ever fails, the grouping is not a facet intersection
     and the count under the chips is describing something else.
 
-    The strictly-finer assertion is not decoration. This test named a facet that
-    was later deleted, and `normalize_facets` drops an unknown key silently, so
-    the two definitions collapsed to the same 83 cohorts and every containment
-    check passed trivially while the invariant went unchecked.
+    It runs on `two_arm_study` rather than on the synthetic corpus, and the
+    strictly-finer assertions are why. The synthetic corpus gives every study
+    exactly one tissue and one arm, so *every* definition produces the same 12
+    cohorts on it and the containment loop below passes without comparing
+    anything. That was true of this test from the day it was written; it named a
+    facet that has since been deleted, which would have been a second way to go
+    vacuous, but it was already not testing the invariant it is named for.
+    `two_arm_study` crosses two tissues with three arms, so each step of the
+    chain genuinely divides.
     """
-    coarse_cohorts = C.build_cohorts(["study", "tissue"])
-    fine_cohorts = C.build_cohorts(["study", "tissue", "spaceflight"])
-    assert len(fine_cohorts) > len(coarse_cohorts), (
-        "the finer definition must actually be finer, or this test is vacuous")
+    chain = [["study"], ["study", "tissue"], ["study", "tissue", "spaceflight"]]
+    partitions = [C.build_cohorts(keys, metadata=two_arm_study) for keys in chain]
+    assert [len(p) for p in partitions] == [1, 2, 6], (
+        "each step must actually divide, or the containment check is vacuous")
 
-    coarse = {m: c.cohort_id for c in coarse_cohorts for m in c.members}
-    for fine in fine_cohorts:
-        parents = {coarse[m] for m in fine.members}
-        assert len(parents) == 1, f"{fine.cohort_id} straddles {parents}"
+    for coarser, finer in zip(partitions, partitions[1:]):
+        parent_of = {m: c.cohort_id for c in coarser for m in c.members}
+        for fine in finer:
+            parents = {parent_of[m] for m in fine.members}
+            assert len(parents) == 1, f"{fine.cohort_id} straddles {parents}"
+
+
+def test_every_sample_keeps_its_cohort_when_a_facet_is_dropped():
+    """The corpus-wide half of the invariant above, on the real fixture corpus.
+
+    Widening can only merge, so no sample may leave the company of a sample it
+    was already grouped with. This is checkable even though the fixture corpus
+    cannot express a split.
+    """
+    fine = {m: c.cohort_id for c in C.build_cohorts() for m in c.members}
+    for wide in C.build_cohorts(["study"]):
+        assert {fine[m] for m in wide.members}, wide.cohort_id
+        assert all(m in fine for m in wide.members), (
+            "widening dropped a sample that the default definition grouped")
 
 
 def test_widening_to_study_alone_gives_one_cohort_per_study():
