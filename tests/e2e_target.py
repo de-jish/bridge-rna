@@ -76,3 +76,18 @@ def target(args, py: str, repo, announce: str = "serving on", timeout: int = 120
             server.wait(timeout=15)
         except subprocess.TimeoutExpired:
             server.kill()
+
+
+def patience(args) -> int:
+    """How much longer to wait for a remote target than for a local one.
+
+    The waits in these scripts were sized against a subprocess on the same
+    machine, where a page paints in milliseconds. A deployment answers over a
+    network, may be cold-starting a stopped machine, and runs its heavy work on
+    a smaller CPU - Bridge RNA's live embed is seconds locally and minutes
+    hosted. Every one of those is a constant factor on the same waits, not a
+    different set of them, so one multiplier is the honest knob.
+
+    It is 1 locally, so a local run behaves exactly as it always has.
+    """
+    return 5 if getattr(args, "base_url", None) else 1

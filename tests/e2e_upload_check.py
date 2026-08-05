@@ -41,7 +41,7 @@ from typing import Any
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
-from e2e_target import add_target_args, credentials, target
+from e2e_target import add_target_args, credentials, patience, target
 
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
@@ -155,6 +155,9 @@ def build_fixtures(dest: Path) -> dict[str, Path]:
 
 # --- browser helpers --------------------------------------------------------
 
+PATIENCE = 1  # set from the target in main(); 1 locally
+
+
 def _wait_run(page, indicator: str, timeout: int = 300_000) -> float:
     """Wait out one Dash `running=` cycle on `indicator`, returning its seconds.
 
@@ -166,10 +169,10 @@ def _wait_run(page, indicator: str, timeout: int = 300_000) -> float:
     t0 = time.time()
     page.wait_for_function(
         f"() => (document.querySelector('{indicator}')||{{}}).innerText",
-        timeout=30_000)
+        timeout=30_000 * PATIENCE)
     page.wait_for_function(
         f"() => !((document.querySelector('{indicator}')||{{}}).innerText || '').trim()",
-        timeout=timeout)
+        timeout=timeout * PATIENCE)
     page.wait_for_timeout(400)
     return time.time() - t0
 
@@ -204,7 +207,8 @@ def open_mode(page, key: str) -> None:
     tab = page.locator(f"#mode-tab-{key}")
     if "is-active" not in (tab.get_attribute("class") or ""):
         tab.click()
-        page.wait_for_selector(f"#mode-panel-{key}", state="visible", timeout=30_000)
+        page.wait_for_selector(f"#mode-panel-{key}", state="visible",
+                               timeout=30_000 * PATIENCE)
         page.wait_for_timeout(400)
 
 
@@ -231,7 +235,7 @@ def upload(page, path: Path, timeout: int = 180_000,
     recover from that.
     """
     open_mode(page, "upload")
-    deadline = time.time() + timeout / 1000
+    deadline = time.time() + (timeout * PATIENCE) / 1000
     while True:
         page.set_input_files("#upload-counts input[type=file]", str(path))
         page.wait_for_timeout(settle)
@@ -261,7 +265,7 @@ def wait_for_selected_sample(page, sample_id: str, timeout: int = 120_000) -> No
     page.wait_for_function(
         "() => ((document.querySelector('#sample-dropdown .dash-dropdown-value')"
         f"||{{}}).innerText||'').includes('{wanted}')",
-        timeout=timeout)
+        timeout=timeout * PATIENCE)
     # The control showing the sample and the app being ready to search on it
     # are different callbacks, and this one is *in addition to* the settle
     # rather than instead of it. Replacing the settle with this condition made
@@ -299,7 +303,7 @@ def pick_column(page, column: str) -> None:
     # Wait for an option, not just for the portal: the container mounts a frame
     # before its options do, and catching it in between reads as an empty menu.
     page.wait_for_selector(".dash-dropdown-content .dash-options-list-option",
-                           timeout=10_000)
+                           timeout=10_000 * PATIENCE)
     page.wait_for_timeout(250)
     opts = page.locator(".dash-dropdown-content .dash-options-list-option")
     for i in range(opts.count()):
@@ -354,6 +358,9 @@ def main() -> int:
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
 
+    global PATIENCE
+    PATIENCE = patience(args)
+
     if not EXAMPLE.exists():
         print(f"missing {EXAMPLE}")
         return 1
@@ -377,7 +384,7 @@ def main() -> int:
             truth: dict[str, list[tuple[str, str]]] = {}
             for sid in (FLT_ID, GC_ID):
                 page.goto(f"{base}/?q={sid}", wait_until="load")
-                page.wait_for_selector(".sample-preview", timeout=60_000)
+                page.wait_for_selector(".sample-preview", timeout=60_000 * PATIENCE)
                 wait_for_selected_sample(page, sid)
                 secs = catalog_search(page)
                 hits, _ = read_hits(page)
