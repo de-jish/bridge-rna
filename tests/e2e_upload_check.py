@@ -208,9 +208,65 @@ def open_mode(page, key: str) -> None:
         page.wait_for_timeout(400)
 
 
-def upload(page, path: Path) -> None:
+def upload(page, path: Path, timeout: int = 180_000,
+           settle: int = 1200) -> None:
+    """Put a file in the dropzone and wait until the app says it read it.
+
+    The retry is not defensive padding. `dcc.Upload` lazy-loads its own
+    JavaScript bundle, and setting the file input before that bundle lands is a
+    silent no-op: no request is made, no preview appears, and the run continues
+    against a file the app never saw. Locally the bundle arrives in
+    milliseconds and a fixed 1.2 s sleep hid this completely; against a
+    deployment it does not, and the failure presented as the column picker
+    staying hidden forever rather than as an upload error.
+
+    The settle stays a fixed wait rather than a condition, deliberately. The
+    slot holds a preview on success and a banner on rejection, and several
+    fixtures here are *meant* to be rejected, so there is no single "ready"
+    string to wait for - and "the preview is non-empty" is satisfied by the
+    previous upload's own text, which returns before this file is read at all.
+
+    What is worth retrying is the one failure that is silent: an entirely empty
+    slot means the component never reacted, and nothing downstream will ever
+    recover from that.
+    """
     open_mode(page, "upload")
-    page.set_input_files("#upload-counts input[type=file]", str(path))
+    deadline = time.time() + timeout / 1000
+    while True:
+        page.set_input_files("#upload-counts input[type=file]", str(path))
+        page.wait_for_timeout(settle)
+        el = page.locator("#upload-preview")
+        if el.count() and (el.inner_text() or "").strip():
+            return
+        if time.time() >= deadline:
+            raise AssertionError(
+                f"the app never acknowledged the uploaded file {path.name}")
+
+
+def wait_for_selected_sample(page, sample_id: str, timeout: int = 120_000) -> None:
+    """Wait until a `/?q=` link has settled on *this* sample.
+
+    `.sample-preview` mounts before the dropdowns are populated, so a fixed
+    pause after navigation is a race: the search fires with nothing selected
+    and the banner answers "Select a sample to start", which reads like a
+    retrieval that returned nothing rather than one that never ran.
+
+    It has to match the requested sample rather than merely being non-empty.
+    The page is reused across navigations, so the previous sample's name is
+    already sitting in the control and would satisfy any weaker condition
+    instantly - which is the same stale-state trap this file exists to catch,
+    reintroduced in the harness that checks for it.
+    """
+    wanted = sample_id.split("|", 1)[-1].replace("\\", "\\\\").replace("'", "\\'")
+    page.wait_for_function(
+        "() => ((document.querySelector('#sample-dropdown .dash-dropdown-value')"
+        f"||{{}}).innerText||'').includes('{wanted}')",
+        timeout=timeout)
+    # The control showing the sample and the app being ready to search on it
+    # are different callbacks, and this one is *in addition to* the settle
+    # rather than instead of it. Replacing the settle with this condition made
+    # the second catalog search fire mid-render and answer "Select a sample to
+    # start", which is a failure that reads like an empty retrieval.
     page.wait_for_timeout(1200)
 
 
@@ -322,7 +378,7 @@ def main() -> int:
             for sid in (FLT_ID, GC_ID):
                 page.goto(f"{base}/?q={sid}", wait_until="load")
                 page.wait_for_selector(".sample-preview", timeout=60_000)
-                page.wait_for_timeout(1200)
+                wait_for_selected_sample(page, sid)
                 secs = catalog_search(page)
                 hits, _ = read_hits(page)
                 truth[sid] = hits
