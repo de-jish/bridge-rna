@@ -119,6 +119,51 @@ It is applied in `wsgi.py` rather than in `build_app`, keeping the test suite an
 The summary button therefore reports that it could not reach a provider, which is honest degradation rather than a broken feature, and it is the same message a local run without Ollama produces.
 Pointing the deployment at a real provider is a matter of setting `AI_SUMMARY_PROVIDER=bedrock` plus `BEDROCK_API_URL` and `BEDROCK_API_KEY` as Fly secrets; no image change is needed.
 
+## Verifying a deployment
+
+All three browser suites take `--base-url` and `--http-auth`, so the checks that verify a local run verify the hosted one:
+
+```bash
+.venv/bin/python tests/e2e_check.py        --base-url https://bridge-rna.fly.dev --http-auth user:password
+.venv/bin/python tests/e2e_cohort_check.py --base-url https://bridge-rna.fly.dev --http-auth user:password
+.venv/bin/python tests/e2e_upload_check.py --base-url https://bridge-rna.fly.dev --http-auth user:password
+```
+
+This is not a formality, and it is worth being blunt about why.
+**Every defect in this document was found by running these against the deployment, and not one of them was visible locally.**
+A proxy sits between the browser and gunicorn, the CPU is different, and the machine may be asleep; none of that exists when the checks drive a subprocess on the same laptop.
+
+`e2e_target.patience()` multiplies every wait by 5 for a remote target and by 1 locally.
+That single knob is the honest shape of the difference: a page paints in milliseconds locally and over a network hosted, an embed is 10 seconds locally and minutes hosted, and a stopped machine adds a cold start on top. These are constant factors on the same waits, not different waits.
+
+Two harness bugs it exposed are worth remembering, because both are the same mistake and both produced *plausible wrong answers* rather than errors.
+
+A dropdown's displayed value updates in the browser immediately, while the callback carrying that choice to the server has not landed.
+So "the column picker holds the GC column" passed while the search still ran on the previous column, and the uploaded result looked like a correct answer to the wrong question.
+
+And waiting for the upload slot to be merely non-empty is satisfied by the *previous* upload's text, so the run continued with a stale `upload-store` pointing at a file the app had already unlinked.
+That surfaced as a rejection with the wrong reason - "Uploaded counts file not found", naming the previous fixture.
+
+The lesson both times: **wait for a condition that names the thing you just did.** A condition that the previous step also satisfies is not a wait at all, and on a fast local machine it looks exactly like one.
+
+### Where this stands, honestly
+
+`e2e_check.py` (45) and `e2e_cohort_check.py` (60) pass against the deployment reliably.
+
+`e2e_upload_check.py` does not yet pass end to end against it *reliably*, and the reason is latency rather than correctness.
+One full run got through 23 consecutive checks with no failures, including the check that matters most - both columns of the example file embedded live and each matching the catalog path exactly:
+
+```
+FLT column   5 hits, 248.1 s, matches OSD-100|Mmus_C57-6J_EYE_FLT_Rep1_M23
+GC  column   5 hits, 272.6 s, matches OSD-100|Mmus_C57-6J_EYE_GC_Rep1_M33
+```
+
+That is the equality the whole file is built around, and it holds on the deployment.
+Later runs of the same suite failed elsewhere, differently each time, against a machine that had auto-stopped and cold-started in between.
+
+So: **the upload feature is verified on the deployment; the upload suite is not yet a reliable gate for it.**
+Anyone picking this up should start from the cheap fix - pin a machine warm (`min_machines_running = 1`) for the duration of the run - before adding any more patience to the harness. Four to five minutes per uploaded search against a suite that performs a dozen of them is the real constraint, and no wait multiplier removes it.
+
 ## Deploying
 
 ```bash

@@ -32,7 +32,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from e2e_target import add_target_args, credentials, target
+from e2e_target import add_target_args, credentials, patience, target
 
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
@@ -97,6 +97,9 @@ MAP_QUERY_JS = """() => {
 }"""
 
 
+PATIENCE = 1  # set from the target in main(); 1 locally
+
+
 class Checks:
     def __init__(self):
         self.failures: list[str] = []
@@ -112,7 +115,7 @@ class Checks:
 
 
 def shot(page, name: str) -> None:
-    page.wait_for_timeout(250)
+    page.wait_for_timeout(250 * PATIENCE)
     page.screenshot(path=str(SHOTS / f"{name}.png"))
 
 
@@ -120,15 +123,16 @@ def open_mode(page, key: str) -> None:
     tab = page.locator(f"#mode-tab-{key}")
     if "is-active" not in (tab.get_attribute("class") or ""):
         tab.click()
-        page.wait_for_selector(f"#mode-panel-{key}", state="visible", timeout=30_000)
-        page.wait_for_timeout(500)
+        page.wait_for_selector(f"#mode-panel-{key}", state="visible",
+                               timeout=30_000 * PATIENCE)
+        page.wait_for_timeout(500 * PATIENCE)
 
 
 def choose(page, dropdown_id: str, text: str, exact: bool = False) -> None:
     page.locator(f"#{dropdown_id}").click()
-    page.wait_for_timeout(400)
+    page.wait_for_timeout(400 * PATIENCE)
     page.locator(".dash-dropdown-content").get_by_text(text, exact=exact).first.click()
-    page.wait_for_timeout(1800)
+    page.wait_for_timeout(1800 * PATIENCE)
 
 
 def banner(page) -> str:
@@ -153,12 +157,13 @@ def run_cohort_search(page, timeout: int = 180_000) -> float:
     page.locator("#cohort-search-button").click()
     page.wait_for_function(
         "prev => { const el = document.querySelector('#search-status');"
-        " return el && el.innerText !== prev; }", arg=before, timeout=timeout)
-    page.wait_for_function(NETWORK_READY_JS, timeout=timeout)
+        " return el && el.innerText !== prev; }", arg=before,
+        timeout=timeout * PATIENCE)
+    page.wait_for_function(NETWORK_READY_JS, timeout=timeout * PATIENCE)
     page.wait_for_function(
         "() => { const el = document.querySelector('#cohort-running-indicator');"
-        " return el && !el.innerText.trim(); }", timeout=timeout)
-    page.wait_for_timeout(900)
+        " return el && !el.innerText.trim(); }", timeout=timeout * PATIENCE)
+    page.wait_for_timeout(900 * PATIENCE)
     return time.time() - t0
 
 
@@ -170,6 +175,9 @@ def main() -> int:
     args = ap.parse_args()
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
+
+    global PATIENCE
+    PATIENCE = patience(args)
     with target(args, PY, REPO) as base:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
@@ -183,8 +191,8 @@ def main() -> int:
             # ---- 1. the rail opens on Sample and stays quiet ----------------
             print("\n=== 1. a cold load runs nothing ===")
             page.goto(f"{base}/", wait_until="load")
-            page.wait_for_selector(".sample-preview", timeout=60_000)
-            page.wait_for_timeout(1500)
+            page.wait_for_selector(".sample-preview", timeout=60_000 * PATIENCE)
+            page.wait_for_timeout(1500 * PATIENCE)
 
             c.ok(page.locator(".mode-tab").count() == 3,
                  "the rail offers three query sources")
@@ -256,7 +264,7 @@ def main() -> int:
                  "tightness is present but secondary")
 
             page.locator(".cohort-members-summary").click()
-            page.wait_for_timeout(700)
+            page.wait_for_timeout(700 * PATIENCE)
             rows = page.locator(".member-list label")
             c.ok(rows.count() >= 2, f"the member list opens: {rows.count()} rows")
             c.ok(re.search(r"0\.\d{4}", rows.first.inner_text()) is not None,
@@ -268,7 +276,13 @@ def main() -> int:
             secs = run_cohort_search(page)
             msg = banner(page)
             c.note(f"the pooled search took {secs:.1f}s")
-            c.ok(secs < 30, f"a pooled query costs one memmap pass ({secs:.1f}s)")
+            # The claim is algorithmic - one pass over the memmap regardless of
+            # cohort size, not k passes - and 30 s is how that reads on a warm
+            # local SSD. Hosted, the same single pass streams 963 MB through a
+            # container filesystem with a cold page cache and took 50 s, so the
+            # constant scales with the target while the claim does not.
+            c.ok(secs < 30 * PATIENCE,
+                 f"a pooled query costs one memmap pass ({secs:.1f}s)")
             c.ok("pooled mean" in msg,
                  f"the banner names the path that answered: {msg[:90]!r}")
             c.ok("pooled samples" in msg, "and says how many samples went in")
@@ -291,7 +305,7 @@ def main() -> int:
             pos = page.evaluate(QUERY_NODE_JS)
             if c.ok(pos is not None, "the query node is locatable"):
                 page.mouse.click(pos["x"], pos["y"])
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1500 * PATIENCE)
             details = page.locator("#details-panel").inner_text()
             c.ok("POOLED OSDR COHORT" in details.upper(),
                  "the inspector opens it as a cohort, not as one blank sample")
@@ -307,14 +321,14 @@ def main() -> int:
             print("\n=== 6. excluding a member changes the numbers ===")
             before = page.locator("#cohort-card").inner_text().split("\n")[0]
             page.locator(".member-list input[type=checkbox]").first.uncheck()
-            page.wait_for_timeout(1800)
+            page.wait_for_timeout(1800 * PATIENCE)
             after = page.locator("#cohort-card").inner_text().split("\n")[0]
             c.ok(before != after,
                  f"the card restates the pooled size: {before!r} -> {after!r}")
             c.ok("excluded" in page.locator("#cohort-members-summary").inner_text(),
                  "and the disclosure says one was excluded")
             page.locator(".member-list input[type=checkbox]").first.check()
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(1500 * PATIENCE)
 
             # ---- 7. two arms -----------------------------------------------
             print("\n=== 7. comparing two arms ===")
@@ -359,8 +373,8 @@ def main() -> int:
             page.wait_for_function(
                 "() => { const gd = document.querySelector('.js-plotly-plot');"
                 " return gd && gd._fullData && gd._fullData.some("
-                "t => t.name === 'query'); }", timeout=180_000)
-            page.wait_for_timeout(3000)
+                "t => t.name === 'query'); }", timeout=180_000 * PATIENCE)
+            page.wait_for_timeout(3000 * PATIENCE)
             drawn = page.evaluate(MAP_QUERY_JS) or {}
             c.ok(drawn.get("query", 0) >= 2,
                  f"every pooled member is drawn, not one: {drawn}")
