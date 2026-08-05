@@ -1,0 +1,32 @@
+# Runtime dependencies for a hosted Bridge RNA.
+#
+#     pip install -r requirements-deploy.txt
+#
+# This is requirements.txt minus the precompute stack. `umap-learn`,
+# `openTSNE`, `pynndescent` and `scikit-learn` are only imported by
+# precompute/, which never runs in the container - the map is drawn from
+# coordinate parquets that were fit offline. Keeping them out is not only a
+# size saving: tests/test_app.py already pins that the serving app does not
+# import the scientific stack, and this file is that boundary made physical.
+#
+# Versions match requirements.txt exactly; see the reasoning for each pin there.
+
+# --- Serving app (retrieval + manifold) -------------------------------------
+dash==4.4.0
+plotly==6.8.0
+numpy==2.4.6
+pandas==3.0.3
+pyarrow==20.0.0
+requests==2.34.2
+
+# --- Retrieval ---------------------------------------------------------------
+# torch is reached only by the upload path, and only through a subprocess. The
+# container has no GPU, so the Dockerfile installs it from the CPU wheel index;
+# the default index would pull the CUDA build and several gigabytes with it.
+torch==2.12.1
+biopython>=1.85,<2
+
+# --- WSGI server -------------------------------------------------------------
+# app.py's app.run() is Flask's development server. gunicorn is what actually
+# serves the deployment; see wsgi.py for why it runs a single worker.
+gunicorn==23.0.0

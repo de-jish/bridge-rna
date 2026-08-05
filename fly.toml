@@ -1,0 +1,53 @@
+# Fly.io deployment for Bridge RNA. Reasoning is in docs/deployment.md.
+
+app = 'bridge-rna'
+primary_region = 'sjc'  # the closest Fly region to Ames
+
+[build]
+
+[env]
+  # The app reads artifacts relative to the repository root, which is /app here.
+  BRIDGE_RNA_ROOT = '/app'
+  # Ollama does not exist in this container, so the summary button reports that
+  # it could not reach a provider. Set AI_SUMMARY_PROVIDER=bedrock plus the
+  # BEDROCK_* secrets to point it at a real one; no image change is needed.
+  AI_SUMMARY_PROVIDER = 'ollama'
+
+[http_service]
+  internal_port = 8050
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  # Idle machines stop and the next request starts one, which costs roughly
+  # fifteen seconds on a cold hit and most of the monthly bill otherwise.
+  # Before a live demo, pin one warm:  fly scale count 1 --region sjc
+  # and set min_machines_running = 1 here.
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'requests'
+    # One worker with four threads. Queue beyond that rather than accepting
+    # work the process cannot start on.
+    soft_limit = 4
+    hard_limit = 8
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '60s'
+    method = 'GET'
+    path = '/healthz'
+
+[[vm]]
+  size = 'shared-cpu-2x'
+  # Peak resident memory measured at 1,852 MB with every coordinate set, the
+  # tissue color-by and a cached retrieval live in one process. The headroom is
+  # for the upload path's torch subprocess running alongside the web worker.
+  memory = '4gb'
+  cpus = 2
+  processes = ['app']
+
+# The upload subprocess loads a 522 MB checkpoint; swap turns a transient spike
+# into slowness rather than an OOM kill of the whole machine.
+swap_size_mb = 1024
