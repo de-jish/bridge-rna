@@ -52,7 +52,42 @@ Concurrency comes from threads instead: the workload is numpy and file IO, both 
 
 **A long timeout.** The default 30 s kills the upload path, which shells out to a subprocess that loads a 522 MB checkpoint before it embeds anything.
 
-The machine is `shared-cpu-2x` with 4096 MB, which leaves headroom above the measured 1.85 GB peak for the upload subprocess running alongside the web worker.
+**`--keep-alive 75`, which is not a tuning knob but a bug fix.**
+gunicorn defaults it to 2 seconds, which is shorter than the idle timeout of the proxy in front of it.
+The proxy then occasionally reuses a connection at the moment gunicorn is closing it, gets `ECONNRESET`, and serves a 502.
+
+This is recorded because it was found the hard way and because of what it looked like.
+The first browser run against the deployed app failed two checks the local run passes: the rail's parameter readout showed UMAP's settings while PCA was selected, and the console carried a 502 plus a callback error.
+The evidence pointed at the connection rather than the app - exactly one reset among hundreds of successful requests, no worker crash, no OOM, no traceback - and it was not reproducible locally, where the browser talks to gunicorn directly with no proxy in between.
+
+The lesson generalizes past this one flag.
+A stale parameter readout is precisely the failure invariant 7 exists to prevent, and it arrived anyway, by a route invariant 7 cannot see: the readout was correct and the transport dropped it.
+An invariant enforced in the application does not survive the network on its own, which is the argument for checking the deployment rather than only the code.
+
+The machine is `performance-2x` with 4096 MB, which leaves headroom above the measured 1.85 GB peak for the upload subprocess, itself measured at 1,036 MB resident.
+
+### The CPU must be dedicated, and the upload path is what decides it
+
+This started as `shared-cpu-2x` and had to change, on a measurement rather than a hunch.
+
+| | one live embed of `examples/osdr_upload_example.csv` |
+| --- | --- |
+| laptop | 10.4 s wall, 28 s CPU |
+| `shared-cpu-2x` | **13 m 36 s wall**, 1 m 55 s CPU |
+| `performance-2x` | **1 m 35 s wall**, 1 m 38 s CPU |
+
+The shared machine's numbers are the tell: 115 seconds of CPU spread across 816 seconds of wall clock is **14% utilization** on a process that is pegging both vCPUs.
+That is Fly throttling a shared vCPU down to its sustained baseline once the burst credits are spent, and no amount of application tuning touches it.
+On dedicated CPU the same work runs at 103% utilization, which is the same job no longer being held back.
+
+The map and cached retrieval were tolerable on the shared machine, so it would have been easy to ship it and never notice.
+A thirteen-minute upload is not a slow feature, it is a broken one - it exceeds the gunicorn timeout, the browser's patience, and any reviewer's.
+
+Two things are worth knowing before someone tries to tune this further.
+The container needs about 3.5x the CPU-seconds the laptop does for identical output (98 s against 28 s), which is Apple Silicon's matrix units against a generic x86 build, not a misconfiguration.
+And the embed only uses about one core even when two are available, so `performance-4x` would buy very little; the work does not parallelize past what it already uses.
+
+`swap_size_mb` was set at first and then removed, because it silently did nothing - the running machine reported `SwapTotal: 0` - and the memory it was insuring against never materialized: 1.9 GB stayed available with the embed at full size. A setting that has no effect is worse than no setting, because it reads as protection that is not there.
 
 ## Access control
 

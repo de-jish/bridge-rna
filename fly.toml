@@ -40,14 +40,17 @@ primary_region = 'sjc'  # the closest Fly region to Ames
     path = '/healthz'
 
 [[vm]]
-  size = 'shared-cpu-2x'
+  # Dedicated CPU, not shared, and the upload path is what forces it. A
+  # shared-cpu-2x was measured serving one live embed in 13m36s wall for 1m55s
+  # of CPU - 14% utilization, which is Fly throttling a shared vCPU to its
+  # sustained baseline once burst credits are gone. The same embed is 10.4s on
+  # a laptop. The map and cached retrieval were tolerable there; the embed was
+  # not, and a 13-minute upload is a broken feature rather than a slow one.
+  size = 'performance-2x'
   # Peak resident memory measured at 1,852 MB with every coordinate set, the
   # tissue color-by and a cached retrieval live in one process. The headroom is
-  # for the upload path's torch subprocess running alongside the web worker.
+  # for the upload path's torch subprocess, measured at 1,036 MB resident
+  # alongside it.
   memory = '4gb'
   cpus = 2
   processes = ['app']
-
-# The upload subprocess loads a 522 MB checkpoint; swap turns a transient spike
-# into slowness rather than an OOM kill of the whole machine.
-swap_size_mb = 1024
