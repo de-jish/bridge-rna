@@ -42,6 +42,13 @@ SHOTS = Path(os.environ.get("MANIFOLD_E2E_SHOTS",
 # Liver in Basal Control, Ground Control and Space Flight, six animals each.
 STUDY = "OSD-137"
 
+# Other studies to sweep, each paired with a different retrieval depth, so the
+# feature is exercised across studies, cohort shapes and top-k rather than only
+# against the one study whose two-arm contrast the comparison needs. Each of
+# these carries at least one cohort of two or more under the default
+# definition; the picker opens on its largest, which is what gets searched.
+SWEEP = [("OSD-101", 5), ("OSD-104", 12), ("OSD-168", 25)]
+
 NETWORK_READY_JS = """() => {
   const gd = document.querySelector('#network-graph .js-plotly-plot');
   if (!gd || !gd._fullData || !gd._fullData.length) return false;
@@ -94,12 +101,38 @@ MAP_QUERY_JS = """() => {
   return {halo: halo, query: query};
 }"""
 
+# The retrieval overlay in full, one entry per trace, so a check can ask which
+# cohort a glyph belongs to rather than only how many were drawn. Points are
+# rounded and stringified so a shared hit - which receives both cohorts' marks
+# at identical coordinates - can be found by set intersection.
+MAP_OVERLAY_JS = """() => {
+  const gd = document.querySelector('.js-plotly-plot');
+  if (!gd || !gd._fullData) return null;
+  const out = {members: [], hits: []};
+  for (const t of gd._fullData) {
+    if (t.name !== 'query' && t.name !== 'retrieved hit') continue;
+    const pts = [];
+    for (let i = 0; i < (t.x || []).length; i++) {
+      pts.push(t.x[i].toFixed(4) + ',' + t.y[i].toFixed(4));
+    }
+    const entry = {colour: t.marker.color, symbol: t.marker.symbol,
+                   size: t.marker.size, n: pts.length, points: pts,
+                   hasText: (t.mode || '').indexOf('text') >= 0};
+    (t.name === 'query' ? out.members : out.hits).push(entry);
+  }
+  return out;
+}"""
+
 
 class Checks:
     def __init__(self):
         self.failures: list[str] = []
+        self.ran = 0
 
     def ok(self, cond: bool, msg: str) -> bool:
+        # Counted, because the documented totals used to be hand-written and
+        # drifted: the number in the docs was never the number this file ran.
+        self.ran += 1
         print(("  OK   " if cond else "  FAIL ") + msg, flush=True)
         if not cond:
             self.failures.append(msg)
@@ -131,6 +164,58 @@ def choose(page, dropdown_id: str, text: str, exact: bool = False) -> None:
 
 def banner(page) -> str:
     return page.locator("#search-status").inner_text().replace("\n", " ")
+
+
+def _topk_handle(page):
+    """Dash 4 renders dcc.Slider as a radix slider plus a *hidden* number input.
+
+    So the number box cannot be filled - Playwright refuses to type into an
+    invisible element, correctly - and the handle is driven by keyboard instead,
+    which is exact where dragging by pixel offset is not.
+    """
+    return page.locator("#topk-slider [role=slider]").first
+
+
+def topk_value(page) -> int:
+    return int(_topk_handle(page).get_attribute("aria-valuenow"))
+
+
+def set_topk(page, k: int) -> None:
+    handle = _topk_handle(page)
+    handle.focus()
+    current = topk_value(page)
+    key = "ArrowRight" if k > current else "ArrowLeft"
+    for _ in range(abs(k - current)):
+        page.keyboard.press(key)
+    page.wait_for_timeout(800)
+    got = topk_value(page)
+    if got != k:
+        raise AssertionError(f"could not set top-k to {k}, stuck at {got}")
+
+
+def offer_count(text: str) -> int:
+    """The number in "See N hits on the map"."""
+    m = re.search(r"(\d+)", text or "")
+    return int(m.group(1)) if m else 0
+
+
+def shared_count(page) -> int:
+    """How many hits the status banner says both cohorts retrieved.
+
+    Read this while still on the retrieval view. The router destroys a view when
+    you leave it, so `#search-status` does not exist once the map is open - only
+    `hits-store`, which lives on the shell, survives the trip.
+    """
+    m = re.search(r"share (\d+) of", banner(page))
+    return int(m.group(1)) if m else -1
+
+
+def wait_for_map(page) -> None:
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('.js-plotly-plot');"
+        " return gd && gd._fullData && gd._fullData.some("
+        "t => t.name === 'query'); }", timeout=180_000)
+    page.wait_for_timeout(3000)
 
 
 def run_cohort_search(page, timeout: int = 180_000) -> float:
@@ -370,27 +455,126 @@ def main() -> int:
             c.ok("Two pooled cohorts" in subtitle, "so does the subtitle")
             shot(page, "06-comparison")
 
-            # ---- 8. the map draws every pooled member -----------------------
-            print("\n=== 8. the map draws the whole cohort ===")
+            # ---- 8. the map draws BOTH cohorts ------------------------------
+            # Section 7 left a comparison in the store, so this is the two-arm
+            # case. It used to draw cohort A alone and say nothing about the
+            # other, which is the failure this section exists to prevent.
+            print("\n=== 8. the map draws both cohorts ===")
+            # Read off the retrieval view before the router destroys it.
+            n_shared = shared_count(page)
+            c.ok(n_shared >= 0, f"the banner reports a shared count: {n_shared}")
             c.ok(page.locator("#see-on-map").is_visible(),
                  "the map is offered once there is something to show")
+            offer = page.locator("#see-on-map").inner_text()
+            c.ok(offer_count(offer) > topk_value(page),
+                 f"the offer counts both cohorts' hits: {offer!r}")
             page.locator("#see-on-map").click()
-            page.wait_for_function(
-                "() => { const gd = document.querySelector('.js-plotly-plot');"
-                " return gd && gd._fullData && gd._fullData.some("
-                "t => t.name === 'query'); }", timeout=180_000)
-            page.wait_for_timeout(3000)
+            wait_for_map(page)
             drawn = page.evaluate(MAP_QUERY_JS) or {}
-            c.ok(drawn.get("query", 0) >= 2,
-                 f"every pooled member is drawn, not one: {drawn}")
+            c.ok(drawn.get("query", 0) >= 4,
+                 f"both cohorts' members are drawn: {drawn}")
             c.ok(drawn.get("halo", 0) == drawn.get("query", 0),
                  "each member gets its halo")
+
+            ov = page.evaluate(MAP_OVERLAY_JS) or {}
+            members, hits = ov.get("members", []), ov.get("hits", [])
+            c.ok(len(members) == 2, f"two member traces, one per cohort: {len(members)}")
+            c.ok(len({m["colour"] for m in members}) == 2,
+                 f"the two cohorts' members differ by hue: "
+                 f"{[m['colour'] for m in members]}")
+            c.ok(len({m["symbol"] for m in members}) == 1,
+                 "and not by symbol, which already means member-versus-hit")
+            c.ok(len(hits) == 2, f"two hit traces, one per cohort: {len(hits)}")
+            c.ok(len({h["symbol"] for h in hits}) == 2,
+                 f"hits differ by ring shape: {[h['symbol'] for h in hits]}")
+            c.ok(len({str(h["colour"]).lower() for h in hits}) == 1,
+                 "and every ring stays white, which is what keeps it visible "
+                 "over any tissue colour")
+            c.ok(not any(h["hasText"] for h in hits),
+                 "rank numerals are dropped when two rank sets would compete")
+
+            if c.ok(len(hits) == 2, "both hit traces are readable"):
+                shared_drawn = set(hits[0]["points"]) & set(hits[1]["points"])
+                c.ok(len(shared_drawn) == n_shared,
+                     f"a hit both cohorts retrieved carries both marks: "
+                     f"{len(shared_drawn)} drawn against {n_shared} reported")
+
             badges = page.locator(".bm-plot-badges").inner_text().replace("\n", " ")
-            c.ok("Showing retrieval" in badges, f"the map says so: {badges[:70]!r}")
+            c.ok("2" in badges and "cohorts" in badges,
+                 f"the badge counts both: {badges[:90]!r}")
+            c.ok("retrieved by both" in badges,
+                 "and names the number the comparison is about")
+
+            key = page.locator(".bm-retrieval-key").inner_text()
+            c.ok(page.locator(".bm-retrieval-swatch").count() == 2,
+                 "the rail key carries one swatch per cohort")
+            c.ok("ring inside a square" in key,
+                 f"and says what a shared hit looks like: {key[:80]!r}")
             shot(page, "07-cohort-on-map")
 
-            # ---- 9. nothing broke on the way out ---------------------------
-            print("\n=== 9. console ===")
+            # ---- 8b. one tick per cohort -----------------------------------
+            print("\n=== 8b. unticking an arm ===")
+            ticks = page.locator("#show-retrieval input[type=checkbox]")
+            c.ok(ticks.count() == 2,
+                 f"the single show-it tick became one per cohort: {ticks.count()}")
+            labels = page.locator("#show-retrieval").inner_text()
+            c.ok("Show it on the map" not in labels,
+                 f"each tick carries its cohort's own name: {labels[:70]!r}")
+            ticks.nth(1).uncheck()
+            page.wait_for_timeout(2500)
+            solo = page.evaluate(MAP_OVERLAY_JS) or {}
+            c.ok(len(solo.get("members", [])) == 1,
+                 "unticking an arm removes it from the map")
+            c.ok(any(h["hasText"] for h in solo.get("hits", [])),
+                 "and the rank numerals come back, with one list to number")
+            shot(page, "08-one-arm")
+            ticks.nth(1).check()
+            page.wait_for_timeout(2500)
+            c.ok(len((page.evaluate(MAP_OVERLAY_JS) or {}).get("members", [])) == 2,
+                 "and reticking brings it back")
+
+            # ---- 9. several cohorts, several depths -------------------------
+            print("\n=== 9. other studies, cohorts and depths ===")
+
+            # The regression this sweep found: walking back from the map and
+            # clicking Cohort straight away opened the cohort panel and then
+            # closed it again. The router was repainting the whole view on top
+            # of a correct answer, so the click was thrown away with it. No
+            # settle here on purpose - the settle is what used to hide it.
+            page.goto(f"{base}/")
+            page.wait_for_selector(".sample-preview", timeout=60_000)
+            page.locator("#mode-tab-cohort").click()
+            page.wait_for_timeout(2500)
+            c.ok("is-active" in (page.locator("#mode-tab-cohort")
+                                 .get_attribute("class") or ""),
+                 "arriving from the map and clicking Cohort stays on Cohort")
+            c.ok(page.locator("#cohort-search-button").is_visible(),
+                 "and the Search button comes with it")
+
+            for study, topk in SWEEP:
+                page.goto(f"{base}/")
+                page.wait_for_selector(".sample-preview", timeout=60_000)
+                open_mode(page, "cohort")
+                choose(page, "study-dropdown", study, exact=True)
+                set_topk(page, topk)
+                label = page.locator("#cohort-dropdown").inner_text()
+                secs = run_cohort_search(page)
+                msg = banner(page)
+                c.ok("pooled mean" in msg,
+                     f"{study} at k={topk} answered from the pooled path "
+                     f"({secs:.1f}s): {label.strip()[:44]!r}")
+                nodes = page.evaluate(NODES_JS) or {}
+                c.ok(nodes.get("gsm", 0) == topk,
+                     f"and drew exactly {topk} hits, saw {nodes.get('gsm')}")
+                page.locator("#see-on-map").click()
+                wait_for_map(page)
+                drawn = page.evaluate(MAP_QUERY_JS) or {}
+                c.ok(drawn.get("query", 0) >= 2,
+                     f"and the whole cohort reached the map: {drawn}")
+            shot(page, "09-sweep")
+
+            # ---- 10. nothing broke on the way out --------------------------
+            print("\n=== 10. console ===")
             noise = [e for e in console_errors
                      if "favicon" not in e.lower()
                      and "ResizeObserver" not in e]
@@ -406,11 +590,11 @@ def main() -> int:
 
     print(f"\nscreenshots in {SHOTS}")
     if c.failures:
-        print(f"\n{len(c.failures)} FAILED:")
+        print(f"\n{len(c.failures)} of {c.ran} FAILED:")
         for f in c.failures:
             print("  - " + f)
         return 1
-    print("\nall cohort checks passed")
+    print(f"\nall {c.ran} cohort checks passed")
     return 0
 
 

@@ -21,7 +21,7 @@ import argparse
 import os
 import sys
 
-from dash import Dash, Input, Output, dcc, html
+from dash import Dash, Input, Output, State, dcc, html, no_update
 
 from bridge_rna import callbacks as rna_callbacks
 from bridge_rna import layout as rna_layout
@@ -43,6 +43,16 @@ DEFAULT_ROUTE = ROUTES[0]
 def _route_for(pathname: str | None) -> dict:
     path = (pathname or "/").rstrip("/") or "/"
     return next((r for r in ROUTES if r["path"] == path), DEFAULT_ROUTE)
+
+
+def navigation_for(pathname: str | None, painted: str | None) -> dict | None:
+    """The route to swap to, or None when the view on screen already serves it.
+
+    Split out of the router callback so the decision can be tested without Dash
+    plumbing, and because it is the whole of what that callback decides.
+    """
+    route = _route_for(pathname)
+    return None if route["key"] == painted else route
 
 
 def _manifold_available() -> bool:
@@ -200,6 +210,10 @@ def build_app() -> Dash:
                 # result across a reload, which matters more now that a
                 # retrieval is a half-second rather than a coffee break.
                 dcc.Store(id="hits-store", storage_type="session"),
+                # Which view the server actually painted into `page-content`
+                # above. The router compares against this so it can decline to
+                # repaint a view that is already on screen - see `render_page`.
+                dcc.Store(id="route-store", data=route["key"]),
             ],
         )
 
@@ -208,14 +222,38 @@ def build_app() -> Dash:
     @app.callback(
         Output("page-content", "children"),
         Output("app-header-slot", "children"),
+        Output("route-store", "data"),
         Input("url", "pathname"),
+        State("route-store", "data"),
         # The initial view is already in the served layout; without this the
         # router would rebuild it on load and pay the cost this design avoids.
         prevent_initial_call=True,
     )
-    def render_page(pathname: str | None):
-        route = _route_for(pathname)
-        return view_for(route), header(route["key"])
+    def render_page(pathname: str | None, painted: str | None):
+        """Swap the view, and *only* when the view actually has to change.
+
+        `prevent_initial_call` is not enough on its own, and the gap it leaves
+        was a live bug rather than a wasted round trip. `dcc.Location` publishes
+        `pathname` once it mounts, which Dash sees as a change, so this callback
+        ran on every page load and rebuilt the view the server had already
+        painted. Rebuilding the retrieval view is not free - it reads the OSDR
+        catalog and renders the sample preview - so its response landed a few
+        hundred milliseconds after load, on top of whatever the user had done in
+        the meantime.
+
+        What that looked like: arrive on the retrieval view, click Cohort, watch
+        the cohort panel open and then close itself, leaving Sample mode and no
+        Search button. Reproduced 6 times out of 6, and the click was innocent -
+        its own callback ran and returned the right thing, then this one
+        overwrote the whole subtree it had just updated.
+
+        So the route the server painted is recorded in `route-store`, and a
+        pathname that resolves to that same route is not a navigation.
+        """
+        route = navigation_for(pathname, painted)
+        if route is None:
+            return no_update, no_update, no_update
+        return view_for(route), header(route["key"]), route["key"]
 
     # Cap the request body so an oversized counts upload fails at the server with
     # a 413 rather than being silently truncated into a malformed matrix.

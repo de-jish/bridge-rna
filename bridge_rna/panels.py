@@ -420,12 +420,26 @@ def _build_query_details(query: pd.Series, compact: bool) -> list[Any]:
     return [p for p in parts if p is not None]
 
 
-def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | None, hits_df: pd.DataFrame) -> list[Any]:
+def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | None,
+                        hits_df: pd.DataFrame,
+                        query_b: pd.Series | None = None) -> list[Any]:
     node_kind = _safe_str(selected_payload.get("kind")) if selected_payload else ""
     node_id = _safe_str(selected_payload.get("node_id")) if selected_payload else ""
 
     if not selected_payload or node_kind == "query":
         return _build_query_details(query, compact=not selected_payload)
+
+    # The comparison figure draws a second query star, tagged `query2`. Without
+    # this it fell through to the GSM lookup, found nothing, and reported "No
+    # metadata found" for a node the figure had just drawn.
+    if node_kind == "query2":
+        if query_b is None:
+            return [
+                _details_head("Details", "No metadata"),
+                html.P("This retrieval carries no second cohort.",
+                       className="details-empty"),
+            ]
+        return _build_query_details(query_b)
 
     if node_kind == "gse":
         df = hits_df[hits_df["gse"] == node_id]

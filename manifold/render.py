@@ -323,28 +323,33 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     when a rank-1 hit can easily land further away on screen than a rank-5 one.
     Where the hits fall is worth seeing precisely because it is *not* the
     ranking - it is what the projection did with it.
-    """
-    hits = [int(i) for i in retrieval.get("hit_points", [])]
-    query = retrieval.get("query_point")
-    n = len(coords)
-    hits = [i for i in hits if 0 <= i < n]
-    labels = retrieval.get("hit_labels") or []
-    scores = retrieval.get("hit_scores") or []
-    has_query = query is not None and 0 <= int(query) < n
-    traces = []
 
-    # Where each hit sits in the map's *own* ordering, by distance from the
-    # query in projection space. This is the number that keeps the picture
-    # honest: the retrieval ranks by cosine in 512 dimensions and the map is a
-    # 2-D shadow of that space, so the two orderings disagree, often wildly.
-    # Showing both ranks side by side in the hover states the disagreement
-    # instead of leaving a reader to infer rank from what is nearest.
-    map_ranks: list[int | None] = [None] * len(hits)
-    if has_query and hits:
-        q = coords[int(query)]
-        d2 = np.einsum("ij,ij->i", coords - q, coords - q)
-        for i, point in enumerate(hits):
-            map_ranks[i] = int((d2 < d2[point]).sum())
+    **Two cohorts can be drawn at once**, when a comparison was run. Which
+    cohort a *member* belongs to is carried by fill hue; which cohort retrieved
+    a *hit* is carried by ring shape, never by hue. That split is measured, not
+    stylistic: no hue clears 3:1 against the worst categorical tissue bucket
+    (the comparison network's own three measure 1.00 to 1.07), which is the
+    same finding that made the ring white in the first place, while a member is
+    a filled mark whose white outline already guarantees its contrast. A hit
+    retrieved by both cohorts receives both traces and therefore draws as a
+    ring inscribed in a square, so the shared set is emergent rather than
+    computed and cannot disagree with the number the status banner quotes.
+    """
+    n = len(coords)
+    cohorts = retrieval.get("cohorts")
+    if not cohorts:
+        # A payload written before cohorts existed, or by a caller assembling
+        # the flat keys directly. Treat it as the single query it describes.
+        cohorts = [{"role": "a", "label": retrieval.get("query_label") or "",
+                    "hit_points": retrieval.get("hit_points") or [],
+                    "hit_labels": retrieval.get("hit_labels") or [],
+                    "hit_scores": retrieval.get("hit_scores") or [],
+                    "query_points": (retrieval.get("query_points")
+                                     or ([retrieval["query_point"]]
+                                         if retrieval.get("query_point") is not None
+                                         else []))}]
+    comparing = len(cohorts) > 1
+    traces = []
 
     # Non-gl traces: at most k + 2 points, and Scattergl does not centre
     # `markers+text` reliably.
@@ -355,6 +360,8 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     # whole figure callback down with a 500 the first time 3-D was opened with
     # a retrieval showing. `diamond` is the closest available mark that is
     # still not a plain circle, so the query stays distinguishable from a hit.
+    # Both hit symbols below are in Scatter3d's vocabulary, so a hit encodes
+    # identically in 2-D and 3-D.
     query_symbol = "diamond" if is_3d else "star"
     # `cliponaxis` is a 2-D-only property and is likewise a hard error in 3-D.
     text_extras = {} if is_3d else {"cliponaxis": False}
@@ -371,46 +378,72 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
             out["z"] = coords[arr, 2]
         return out
 
-    # A pooled cohort is several query points, not one. The centroid it was
-    # actually queried with has no position here - no projection was fit on it -
-    # so drawing one would be inventing a coordinate. Every member is drawn
-    # instead, which is both honest and more informative: how tightly the
-    # members sit together is exactly the question the cohort card answers
-    # numerically.
-    queries = [int(i) for i in (retrieval.get("query_points") or [])
-               if 0 <= int(i) < n]
-    if not queries and has_query:
-        queries = [int(query)]
+    def _style(role):
+        if role == "b":
+            return (theme.RETRIEVAL_QUERY_B, theme.RETRIEVAL_QUERY_B_RGB,
+                    theme.RETRIEVAL_HIT_SYMBOL_B, theme.RETRIEVAL_HIT_SIZE_B)
+        return (theme.RETRIEVAL_QUERY, theme.RETRIEVAL_QUERY_RGB,
+                theme.RETRIEVAL_HIT_SYMBOL, theme.RETRIEVAL_HIT_SIZE)
 
-    if queries:
+    prepared = []
+    for cohort in cohorts:
+        hits = [int(i) for i in cohort.get("hit_points") or [] if 0 <= int(i) < n]
+        members = [int(i) for i in cohort.get("query_points") or []
+                   if 0 <= int(i) < n]
+        prepared.append((cohort, hits, members, _style(cohort.get("role", "a"))))
+
+    # --- Layer 1: halos, behind everything -----------------------------------
+    for _cohort, _hits, members, (_colour, rgb, _sym, _size) in prepared:
+        if not members:
+            continue
         # A wide, faint ring so the query is findable in 942,563 points without
-        # a glyph big enough to misrepresent where the sample actually is.
+        # a glyph big enough to misrepresent where the sample actually is. It
+        # narrows and fades as the cohort grows, so a 38-animal cohort reads as
+        # a constellation rather than compositing into one disc.
+        pooled = len(members) > 1
+        halo = (theme.RETRIEVAL_QUERY_HALO_SIZE_POOLED if pooled
+                else theme.RETRIEVAL_QUERY_HALO_SIZE)
+        rgba = theme.halo_rgba(rgb, len(members))
         traces.append(Scatter(
-            **_xyz(queries), mode="markers", name="query halo",
-            marker=dict(size=theme.RETRIEVAL_QUERY_HALO_SIZE * scale, symbol="circle-open",
-                        color=theme.RETRIEVAL_QUERY_HALO,
-                        line=dict(width=1.5, color=theme.RETRIEVAL_QUERY_HALO)),
+            **_xyz(members), mode="markers", name="query halo",
+            marker=dict(size=halo * scale, symbol="circle-open", color=rgba,
+                        line=dict(width=1.5, color=rgba)),
             hoverinfo="skip", showlegend=False))
 
-    if hits:
+    # --- Layer 2: hit rings, larger symbol last so it cannot occlude ---------
+    for cohort, hits, members, (_colour, _rgb, symbol, size) in prepared:
+        if not hits:
+            continue
+        labels = cohort.get("hit_labels") or []
+        scores = cohort.get("hit_scores") or []
+        name = str(cohort.get("label") or "")
+        ranks = _map_ranks(coords, hits, members)
         rows = []
         for i, point in enumerate(hits):
             gsm = str(labels[i]) if i < len(labels) else ""
             score = f"{float(scores[i]):.4f}" if i < len(scores) else "-"
-            mr = map_ranks[i]
+            mr = ranks[i]
+            who = f"{name}  ·  " if comparing and name else ""
             rows.append([
                 gsm,
-                f"512-d rank {i + 1} of {len(hits)} retrieved  ·  cosine {score}",
-                f"map rank {mr:,} of {n:,}" if mr is not None else "",
+                f"{who}512-d rank {i + 1} of {len(hits)} retrieved"
+                f"  ·  cosine {score}",
+                (f"map rank {mr:,} of {n:,} from the nearest pooled member"
+                 if mr is not None else ""),
             ])
-        numerals = [str(i + 1) if i < theme.RETRIEVAL_MAX_NUMERALS else ""
-                    for i in range(len(hits))]
+        # Numerals are dropped in a comparison: two competing rank sets over the
+        # same few hundred pixels is illegible, and the hover says strictly more
+        # (a shared hit names both cohorts, both ranks and both cosines).
+        marker_mode = "markers" if comparing else "markers+text"
+        numerals = ([] if comparing else
+                    [str(i + 1) if i < theme.RETRIEVAL_MAX_NUMERALS else ""
+                     for i in range(len(hits))])
         traces.append(Scatter(
-            **_xyz(hits), mode="markers+text", name="retrieved hit",
+            **_xyz(hits), mode=marker_mode, name="retrieved hit",
             text=numerals, textposition="top center",
             textfont=dict(size=9, color=theme.RETRIEVAL_HIT_RING,
                           family="JetBrains Mono, SF Mono, monospace"),
-            marker=dict(size=theme.RETRIEVAL_HIT_SIZE * scale, symbol="circle-open",
+            marker=dict(size=size * scale, symbol=symbol,
                         color=theme.RETRIEVAL_HIT_RING,
                         line=dict(width=theme.RETRIEVAL_HIT_LINE,
                                   color=theme.RETRIEVAL_HIT_RING)),
@@ -419,24 +452,66 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                            "<br>%{customdata[2]}<extra></extra>"),
             showlegend=False, **text_extras))
 
-    if queries:
-        label = str(retrieval.get("query_label") or "OSDR query")
-        pooled = len(queries) > 1
+    # --- Layer 3: the members themselves, on top ----------------------------
+    for cohort, _hits, members, (colour, _rgb, _sym, _size) in prepared:
+        if not members:
+            continue
+        label = str(cohort.get("label") or "OSDR query")
+        pooled = len(members) > 1
         # Members shrink a little when there are several, so a 38-animal cohort
         # reads as a constellation rather than as a blot.
         size = theme.RETRIEVAL_QUERY_SIZE * scale * (0.7 if pooled else 1.0)
         traces.append(Scatter(
-            **_xyz(queries), mode="markers", name="query",
-            marker=dict(size=size, symbol=query_symbol,
-                        color=theme.RETRIEVAL_QUERY,
+            **_xyz(members), mode="markers", name="query",
+            marker=dict(size=size, symbol=query_symbol, color=colour,
                         line=dict(width=2, color="#ffffff")),
-            customdata=[[label]] * len(queries),
+            customdata=[[label]] * len(members),
             hovertemplate=("<b>%{customdata[0]}</b><br>"
                            + ("one of the pooled cohort samples"
                               if pooled else "the query sample")
                            + "<extra></extra>"),
             showlegend=False))
     return traces
+
+
+def _map_ranks(coords, hits: list[int], members: list[int]) -> list:
+    """Where each hit sits in the map's *own* ordering, per hit.
+
+    This is the number that keeps the picture honest: the retrieval ranks by
+    cosine in 512 dimensions and the map is a 2-D shadow of that space, so the
+    two orderings disagree, often wildly. Showing both ranks side by side in the
+    hover states the disagreement instead of leaving a reader to infer rank from
+    what is nearest.
+
+    Each hit is ranked from **the nearest member of the cohort that retrieved
+    it**. The previous version measured every hit from `query_points[0]`, which
+    for a pooled cohort is whichever animal came first in metadata order - an
+    arbitrary choice that was merely unprincipled for one cohort and would be
+    plainly wrong for the second arm of a comparison.
+
+    Cost is one full-corpus pass per *winning* member rather than per member:
+    the nearest member is found first from a `len(hits) x len(members)` block,
+    which is tiny, and only the members that actually win are then swept.
+    """
+    if not hits or not members:
+        return [None] * len(hits)
+    h = coords[np.asarray(hits), :]
+    m = coords[np.asarray(members), :]
+    # (hits, members) squared distances, then the winning member per hit.
+    d = ((h[:, None, :] - m[None, :, :]) ** 2).sum(axis=2)
+    nearest = np.asarray(members)[d.argmin(axis=1)]
+
+    ranks: list[int | None] = [None] * len(hits)
+    sweep: dict[int, np.ndarray] = {}
+    for i, point in enumerate(hits):
+        origin = int(nearest[i])
+        d2 = sweep.get(origin)
+        if d2 is None:
+            delta = coords - coords[origin]
+            d2 = np.einsum("ij,ij->i", delta, delta)
+            sweep[origin] = d2
+        ranks[i] = int((d2 < d2[point]).sum())
+    return ranks
 
 
 def build_figure(method, dims, color_by, layers, budget, viewport,
@@ -535,8 +610,18 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
         for trace in _retrieval_traces(coords, is_3d, retrieval):
             fig.add_trace(trace)
         n_hits = len(retrieval.get("hit_points", []))
-        badges.append(
-            f"Showing retrieval: <b>{n_hits}</b> hit{'s' if n_hits != 1 else ''}")
+        cohorts = retrieval.get("cohorts") or []
+        if len(cohorts) > 1:
+            # The badge reports what is drawn right now, so it has to count both
+            # arms and say how many marks carry both rings - the number the
+            # whole comparison is about.
+            n_shared = len(retrieval.get("shared_points") or [])
+            badges.append(
+                f"Showing <b>2</b> cohorts · <b>{n_hits}</b> hits · "
+                f"<b>{n_shared}</b> retrieved by both")
+        else:
+            badges.append(
+                f"Showing retrieval: <b>{n_hits}</b> hit{'s' if n_hits != 1 else ''}")
 
     fig.update_layout(**theme.base_figure_layout(is_3d))
     return fig, legend_data, badges

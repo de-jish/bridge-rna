@@ -79,9 +79,13 @@ FITS_JS = ("() => document.scrollingElement.scrollHeight"
 class Checks:
     def __init__(self):
         self.failures: list[str] = []
+        self.ran = 0
         self.notes: list[str] = []
 
     def ok(self, cond: bool, msg: str) -> bool:
+        # Counted, because the documented totals used to be hand-written and
+        # drifted: the number in the docs was never the number this file ran.
+        self.ran += 1
         print(("  OK   " if cond else "  FAIL ") + msg, flush=True)
         if not cond:
             self.failures.append(msg)
@@ -492,9 +496,9 @@ def main() -> int:
     if c.failures:
         for f in c.failures:
             print("FAIL: " + f)
-        print(f"UPLOAD E2E FAILED ({len(c.failures)} checks)")
+        print(f"UPLOAD E2E FAILED ({len(c.failures)} of {c.ran} checks)")
         return 1
-    print(f"ALL UPLOAD E2E CHECKS PASSED (screenshots in {SHOTS})")
+    print(f"ALL {c.ran} UPLOAD E2E CHECKS PASSED (screenshots in {SHOTS})")
     return 0
 
 
