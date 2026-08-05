@@ -42,20 +42,40 @@ def _retrieval_overlay(hits_payload: dict | None) -> dict | None:
             labels.append(str(hit.get("gsm") or ""))
             scores.append(float(hit.get("score") or 0.0))
 
-    query_point, query_label = None, ""
-    sample_id = str(hits_payload.get("sample_id") or "")
-    if sample_id:
+    # A pooled cohort has no single position in the space - its query vector is
+    # a mean, and no projection was fit on it - so what gets drawn is every
+    # member. `member_ids` is the cohort payload's own field; `sample_id` is the
+    # single-sample one, and a cohort's `sample_id` is a cohort id that matches
+    # no sample_key, so the two never collide.
+    keys = [str(k) for k in (hits_payload.get("member_ids") or []) if str(k)]
+    if not keys:
+        keys = [str(hits_payload.get("sample_id") or "")]
+    keys = [k for k in keys if k]
+
+    query_points: list[int] = []
+    query_label = ""
+    if keys:
         meta = data.osdr_metadata()
         if "sample_key" in meta.columns:
-            match = meta.index[meta["sample_key"].astype(str) == sample_id]
-            if len(match):
-                query_point = n_archs4 + int(match[0])
-                query_label = sample_id
+            sample_keys = meta["sample_key"].astype(str)
+            row_of = {k: i for i, k in enumerate(sample_keys)}
+            for k in keys:
+                row = row_of.get(k)
+                if row is not None:
+                    query_points.append(n_archs4 + int(row))
+            if query_points:
+                query_label = (keys[0] if len(query_points) == 1
+                               else f"{len(query_points)} pooled cohort samples")
 
-    if not points and query_point is None:
+    if not points and not query_points:
         return None
     return {"hit_points": points, "hit_labels": labels, "hit_scores": scores,
-            "query_point": query_point, "query_label": query_label}
+            # `query_point` stays for the single-sample case: `_frame_for` and
+            # the renderer's map-rank calculation both need one origin, and a
+            # cohort's first member is as good an origin as any for framing.
+            "query_point": query_points[0] if query_points else None,
+            "query_points": query_points,
+            "query_label": query_label}
 
 
 def _viewport_from_relayout(relayout: dict | None):

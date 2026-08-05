@@ -721,16 +721,21 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**160 tests, all passing, in about 1.0 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-07-22 by running the suite.
+**258 tests, all passing, in about 26 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-05 by running the suite.
 
 | file | tests |
 | --- | --- |
 | `tests/test_tissue.py` | 46 |
-| `tests/test_render.py` | 34 |
-| `tests/test_app.py` | 27 |
+| `tests/test_app.py` | 46 |
+| `tests/test_render.py` | 42 |
+| `tests/test_cohorts.py` | 34 |
+| `tests/test_retrieval.py` | 22 |
 | `tests/test_data.py` | 22 |
 | `tests/test_colorby.py` | 18 |
-| `tests/test_projections.py` | 13 |
+| `tests/test_projections.py` | 15 |
+| `tests/test_upload_ingestion.py` | 13 |
+
+Plus **202 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 97 in `tests/e2e_upload_check.py`, 60 in `tests/e2e_cohort_check.py`.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
 The runtime fell by 88% mostly because the fixture no longer builds an approximate-nearest-neighbour index, which was 43% of the old wall clock; it rose again to ~1.0 s because `test_projections.py` runs several 512-dimensional eigendecompositions.
@@ -774,3 +779,81 @@ The metadata fetch runs third because it joins onto artifacts `build_projections
 
 Flags that appear in older prose and no longer exist: `--skip-hnsw`, `--density-only`, `--pca-fit-sample`, `--umap-fit-sample`, `--pca-components`.
 The current `build_projections.py` takes `--umap-neighbors`, `--tsne-perplexity`, `--tsne-jobs`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--skip-tsne`, `--densmap`, and `--dens-lambda`.
+
+## 13. Cohort retrieval, measured (2026-08-05)
+
+Produced by `precompute/validate_cohorts.py` against the real 963 MB ARCHS4 memmap and the real 2,108 cached OSDR embeddings, over **all 212 cohorts** rather than a sample.
+The whole run is 9,270 query vectors scored in **one 73-second pass** over the memmap, using the same running-top-k streaming technique as `validate_artifacts.py --mixing`.
+Full narrative in `docs/cohort_retrieval.md`; the prior measurement that specified the feature is `docs/cohort_pooling.md`.
+
+### Cohort structure under the default definition `(study, tissue, spaceflight)`
+
+| | |
+| --- | --- |
+| Cohorts with 2 or more members | **212** across 70 studies |
+| Cohorts including singletons | 215 (3 singletons) |
+| Size | median **10**, mean 9.9, max 38 |
+| Samples grouped | **2,105 of 2,108** |
+
+### Leave-one-out stability, pooled against single-sample
+
+| depth | pooled | member vs member | gain |
+| --- | --- | --- | --- |
+| top-5 | **0.738** | **0.161** | 4.6x |
+| top-20 | 0.778 | 0.214 | 3.6x |
+| top-100 | 0.826 | 0.302 | 2.7x |
+
+### The two nulls
+
+| grouping | top-5 stability | margin over it |
+| --- | --- | --- |
+| real cohort | **0.738** | - |
+| k random OSDR samples (structure-free) | 0.331 | **+0.407** |
+| k random samples from the same study | 0.683 | **+0.055** |
+
+The within-study margin is the demanding one and is small.
+It is consistent with the earlier finding that same-study membership alone closes 84% of the distance to a real cohort, and it means a pooled query is a cleaner measurement of "this study's samples" than of "this biology".
+It does not undermine the 4.6x gain over a single sample, which is the claim the interface makes.
+
+### Stability versus cohort size (the curve behind the confidence readout)
+
+| k | cohorts | stability | sd |
+| --- | --- | --- | --- |
+| 2 | 5 | 0.34 | 0.20 |
+| 3 | 22 | 0.51 | 0.27 |
+| 4 | 8 | 0.55 | 0.17 |
+| 5-9 | 70 | 0.72 | 0.18 |
+| 10-14 | 70 | 0.81 | 0.12 |
+| 15+ | 37 | 0.86 | 0.11 |
+
+`bridge_rna.cohorts.LOW_N_THRESHOLD` is **5**, the first bucket to reach 0.70.
+
+Two properties of this table are deliberate and are pinned by `tests/test_cohorts.py`.
+It is bucketed rather than per-size because two cohorts per size produced 0.38 at k=5 beside 0.90 at k=6, which is an artifact of the draw.
+The 5-9 row is two buckets merged, because 5-6 scored 0.736 and 7-9 scored 0.696 - an inversion of 0.04 against a within-bucket sd of 0.18 - and a bigger cohort must never be reported as less trustworthy than a smaller one.
+
+### Spherical mean against raw mean
+
+| | |
+| --- | --- |
+| `cos(spherical, raw)` | median **0.9999995**, worst 0.99951 |
+| identical top-5 | 112 of 212 cohorts |
+| L2-norm spread within a cohort | ~1.09x (corpus-wide: 3.9x) |
+
+The normalization changes almost nothing on this corpus, as predicted, and is kept because it becomes the correct estimator the moment Tissue is unticked.
+
+### The identity check, and the float32 floor it exposed
+
+Pooling a single sample normalizes it twice, once in `cohort_query_vector` and once in the scan.
+
+| | |
+| --- | --- |
+| query-vector difference | **7.45e-9** (one float32 ulp), cosine 1.0 |
+| max score difference | **1.19e-7** (float32 eps at magnitude 1) |
+| first differing rank | **23** |
+| score gap at that rank | **exactly 0.0** |
+| identical through | rank 20 in order; rank 50 as a set |
+
+The two runs permute an exact tie rather than disagreeing.
+The gate is therefore float32 score agreement plus an identical top-20 in order, not an identical top-100 - demanding more would demand precision float32 does not have.
+This is the same phenomenon as the rejected kNN tissue-transfer candidate, where the winner beat the runner-up by a median 0.00089 cosine and was "essentially arbitrary", and it is the reason cohort pooling exists.

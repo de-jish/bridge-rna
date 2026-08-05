@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `app.py` is the single entry point and owns the header and the router. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 224 tests pass in about twenty-five seconds, plus 45 browser checks in `tests/e2e_check.py` and 97 in `tests/e2e_upload_check.py`.
+**Current state: built, run on the real corpus, and tested.** 258 tests pass in about twenty-five seconds, plus 202 browser checks: 45 in `tests/e2e_check.py`, 97 in `tests/e2e_upload_check.py`, and 60 in `tests/e2e_cohort_check.py`.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -38,6 +38,27 @@ Verified: embedding an OSDR sample's own counts through this path reproduces its
 Input is mouse Ensembl-indexed counts (OSDR is Mus musculus); a file mapping zero orthologs is rejected, never embedded into a meaningless vector.
 **No metadata is required or accepted** on this path, and none would change anything: the query vector is a pure function of one counts column, so tissue, flight-vs-ground, and accession would only fill the inspector and the summary prompt, never a hit or a score.
 Design doc: `docs/file_ingestion.md`. Format contract and a real working input: `examples/README.md` and `examples/osdr_upload_example.csv`.
+
+**A fifth path pools a whole experimental group into one query: cohort retrieval (mode `"cohort"`).**
+A spaceflight study does not have one sample, it has a group, and a single-sample top-5 is not a stable measurement: two replicates from the same cage share only **0.161** of their top-5 hits, because the entire top-500 of a 940,455-sample index spans a cosine range comparable to the gap between two animals in the same cage.
+Pooling raises leave-one-out top-5 agreement to **0.738**, a **4.6x** gain, and that - not outlier protection - is the case for the feature.
+`bridge_rna/cohorts.py` is the only file that knows what a cohort is, and it deliberately touches no embedding and no memmap: it is metadata grouping plus 512-d arithmetic, testable against the fixture corpus on a machine with neither artifact.
+`bridge_rna.retrieval.run_cohort_retrieval` is the seam, and it reuses the cached path's scan, `_annotate_from_cache` and `archs4_index` join unchanged, so a cohort hit carries the same schema as a single-sample one and costs one memmap pass at any k.
+Design and every measurement: `docs/cohort_retrieval.md`; the prior measurement that specified it: `docs/cohort_pooling.md`.
+
+Four things about it are load-bearing.
+
+**A cohort is `(study, tissue, spaceflight arm)` by default, and study is pinned.** That is OSDR's own curated ISA-Tab factor grouping: 212 cohorts with two or more members across 70 studies, median size 10, max 38, covering 2,105 of 2,108 embedded samples. Six more facets (sex, strain, genotype, habitat, duration, diet) can be added and tissue or arm removed, but **study can never be unticked**, because random samples from one study already reach 0.9805 mean pairwise cosine against 0.9933 for a real cohort - pooling across studies would average across the corpus's strongest batch boundary. The arm is the raw OSDR value rather than the binary Flight/Ground collapse, because a basal animal was sacrificed at experiment start and a vivarium animal never entered flight hardware.
+
+**Each member is L2-normalized before averaging.** This is invariant 2 applied one level up: the raw norm is a transcriptome-concentration axis spanning 3.9x, not a nuisance scale, so averaging raw vectors would let the most concentrated members cast the loudest votes. It is also the maximum-likelihood vMF mean direction, which makes ranking by the pooled vector exactly ranking by the unweighted mean of the members' own cosines - one animal, one vote. Measured, it changes almost nothing *here* (median cos 0.9999995 against the raw mean, since within-cohort norm spread is 1.09x) and it is kept because it becomes correct the moment anyone unticks Tissue.
+
+**The confidence readout quotes a measured number, and it is a property of k rather than of tightness.** `STABILITY_BY_K` is a bucketed curve measured over all 212 cohorts (0.34 / 0.51 / 0.55 / 0.72 / 0.81 / 0.86 at k = 2 / 3 / 4 / 5-9 / 10-14 / 15+), and `LOW_N_THRESHOLD` is 5 because that is the first bucket to reach 0.70. Two corrections are baked in and must not be undone: per-size figures are noise at this sample size (the first sweep produced 0.38 at k=5 beside 0.90 at k=6), and adjacent buckets that invert are **merged**, because a bigger cohort must never be reported as less trustworthy than a smaller one. `R̄` is shown too but deliberately second and quieter: it is ~0.999 for nearly every real cohort, so leading with it would imply a tight cohort of two is a trustworthy one.
+
+**The two-arm comparison runs two independent pooled queries and reports their overlap. It is never a difference vector.** `centroid(flight) - centroid(ground)` is not a transcriptome, so cosine-ranking an index of profiles against it is a category error, and the corpus-level version was already built and rejected (r = -0.990 with PC1, beaten by one in ten random relabelings). Only siblings differing in **exactly one facet** are offered, so the reported Jaccard overlap is attributable to that facet.
+
+The map draws **every pooled member**, not one point: a cohort's query vector is a mean, no projection was fit on it, and inventing a coordinate for it would be a lie. `manifold/callbacks._retrieval_overlay` reads `member_ids` from the payload for that.
+
+`precompute/validate_cohorts.py` is the honesty gate and must keep passing: identity, leave-one-out stability, a structure-free null, a within-study null, the stability curve, and spherical-versus-raw normalization. It scores 9,270 query vectors in one 73-second memmap pass. Its identity check is worth reading before touching the estimator: pooling one sample perturbs the query vector by one float32 ulp, which is enough to permute ranks at an **exactly 0.0** score gap, so the gate is float32 score agreement plus an identical top-20 rather than an identical top-100.
 
 An uploaded file is **staged**, not merely written: `bridge_rna.callbacks._upload_dir` owns one directory per process, a session's previous file is unlinked when its next upload arrives, and a directory abandoned by a killed process is reaped by the next run. The reaping is PID-tagged rather than signal-based because `atexit` does not run on SIGTERM or SIGKILL and a signal handler is not available either - uploads arrive on Dash's request threads, and `signal.signal` may only be called from the main one. Before this, every upload leaked its counts matrix into the system temp directory forever.
 
@@ -98,6 +119,8 @@ build_projections.py -> pca/umap/tsne coord pqs   + archs4_metadata + projection
 fetch_archs4_meta.py -> archs4_metadata parquet
    (HTTP JSON API, ~35 s, no HDF5 download)
 validate_artifacts.py -> exit code, gates a build
+validate_cohorts.py  -> exit code, gates cohort pooling
+   (6 checks over all 212 cohorts, one memmap pass)
 ```
 
 The **map view** opens no embeddings, computes no statistics, and never touches a Git LFS object.
@@ -109,6 +132,9 @@ The whole live cache measures 217.8 MB, of which the app opens 80.8 MB; the rest
 
 ```
 app.py                   the only entry point: header, router, both views on :8050
+bridge_rna/cohorts.py    what a cohort is: facets, grouping, the vMF estimator,
+                         R-bar, leave-one-out cosines, low-N tiering. Opens no
+                         embedding and no memmap.
 bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, geo,
                          figures, retrieval, panels, layout, callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable
@@ -278,9 +304,10 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 224 tests, about twenty-five seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 258 tests, about twenty-five seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 45 browser checks, about three minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 97 upload checks, about eight minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 60 cohort checks, about two minutes
 ```
 
 **The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.

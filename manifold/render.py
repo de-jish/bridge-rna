@@ -371,11 +371,22 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
             out["z"] = coords[arr, 2]
         return out
 
-    if has_query:
+    # A pooled cohort is several query points, not one. The centroid it was
+    # actually queried with has no position here - no projection was fit on it -
+    # so drawing one would be inventing a coordinate. Every member is drawn
+    # instead, which is both honest and more informative: how tightly the
+    # members sit together is exactly the question the cohort card answers
+    # numerically.
+    queries = [int(i) for i in (retrieval.get("query_points") or [])
+               if 0 <= int(i) < n]
+    if not queries and has_query:
+        queries = [int(query)]
+
+    if queries:
         # A wide, faint ring so the query is findable in 942,563 points without
         # a glyph big enough to misrepresent where the sample actually is.
         traces.append(Scatter(
-            **_xyz([int(query)]), mode="markers", name="query halo",
+            **_xyz(queries), mode="markers", name="query halo",
             marker=dict(size=theme.RETRIEVAL_QUERY_HALO_SIZE * scale, symbol="circle-open",
                         color=theme.RETRIEVAL_QUERY_HALO,
                         line=dict(width=1.5, color=theme.RETRIEVAL_QUERY_HALO)),
@@ -408,15 +419,22 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                            "<br>%{customdata[2]}<extra></extra>"),
             showlegend=False, **text_extras))
 
-    if has_query:
+    if queries:
         label = str(retrieval.get("query_label") or "OSDR query")
+        pooled = len(queries) > 1
+        # Members shrink a little when there are several, so a 38-animal cohort
+        # reads as a constellation rather than as a blot.
+        size = theme.RETRIEVAL_QUERY_SIZE * scale * (0.7 if pooled else 1.0)
         traces.append(Scatter(
-            **_xyz([int(query)]), mode="markers", name="query",
-            marker=dict(size=theme.RETRIEVAL_QUERY_SIZE * scale, symbol=query_symbol,
+            **_xyz(queries), mode="markers", name="query",
+            marker=dict(size=size, symbol=query_symbol,
                         color=theme.RETRIEVAL_QUERY,
                         line=dict(width=2, color="#ffffff")),
-            customdata=[[label]],
-            hovertemplate="<b>%{customdata[0]}</b><br>the query sample<extra></extra>",
+            customdata=[[label]] * len(queries),
+            hovertemplate=("<b>%{customdata[0]}</b><br>"
+                           + ("one of the pooled cohort samples"
+                              if pooled else "the query sample")
+                           + "<extra></extra>"),
             showlegend=False))
     return traces
 

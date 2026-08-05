@@ -1,8 +1,12 @@
-"""Retrieval: one OSDR sample in, its nearest ARCHS4 analogs out.
+"""Retrieval: an OSDR query in, its nearest ARCHS4 analogs out.
 
-There are three paths to a query embedding, tried in this order, and the app
-always reports which one ran because they differ in speed and in how much
-metadata comes back with the answer.
+Five paths produce a query vector and the app always reports which one ran,
+because they differ in speed and in how much metadata comes back. The three
+below are the ones `search_hits` chooses between for a single catalog sample,
+tried in this order; the other two are chosen by the user rather than by
+fallback - `run_uploaded_retrieval` for a file the corpus has never seen, and
+`run_cohort_retrieval` for a whole experimental group pooled into one vector.
+All five end in the same cosine scan.
 
 1. **cached** - the manifold precompute already embedded all 2,108 eligible
    OSDR samples (`cache/osdr_sample_embeddings.float32.npy`), using a
@@ -101,6 +105,29 @@ def cached_query_vector(sample_id: str) -> np.ndarray | None:
     vectors, index = cached
     row = index.get(_safe_str(sample_id))
     return None if row is None else vectors[row]
+
+
+def cached_query_vectors(sample_ids: list[str] | tuple[str, ...]
+                         ) -> tuple[np.ndarray, list[str]]:
+    """The precomputed vectors for several OSDR samples, and the ones missing.
+
+    Returns `(rows, missing)` where `rows` is `(k, 512)` in the order the ids
+    were given, minus any that have no cached vector. The missing list is
+    returned rather than swallowed because a cohort silently pooling five of its
+    six members would produce a different answer than the one the interface
+    claims to have computed.
+    """
+    found: list[np.ndarray] = []
+    missing: list[str] = []
+    for sid in sample_ids:
+        vec = cached_query_vector(sid)
+        if vec is None:
+            missing.append(_safe_str(sid))
+        else:
+            found.append(vec)
+    rows = (np.stack(found).astype(np.float32) if found
+            else np.zeros((0, 0), dtype=np.float32))
+    return rows, missing
 
 
 def cached_query_coverage() -> tuple[int, bool]:
@@ -681,6 +708,54 @@ def run_uploaded_retrieval(
     if enable_biopython_metadata and _safe_str(entrez_email):
         hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
     return hits
+
+
+# --- The fifth query-vector source: a whole experimental group ---------------
+
+COHORT_MODE = "cohort"
+
+
+def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...],
+                         topk: int) -> tuple[pd.DataFrame, np.ndarray]:
+    """Pool a cohort's cached vectors into one query, then run the cached scan.
+
+    The pooled vector is the only new thing. The cosine scan, the offline
+    annotation from `archs4_metadata.parquet`, and the `archs4_index` column are
+    the same code the cached path uses, so a cohort's hits carry the identical
+    schema - gse / title / tissue / species and a map position - as one sample's.
+    That is the same relationship file ingestion has to the cached path, and it
+    is why nothing downstream of the hits frame needs to know a cohort produced
+    it.
+
+    Costs one memmap pass regardless of cohort size, because k vectors are
+    averaged before the scan rather than scanned separately. So a 38-animal
+    cohort costs the same ~0.5 s as one sample.
+
+    Returns `(hits, rows)`; the members' stacked vectors come back so the caller
+    can compute the cohort's geometry without loading them twice.
+    """
+    from .cohorts import cohort_query_vector
+
+    ids = [_safe_str(s) for s in sample_ids if _safe_str(s)]
+    if not ids:
+        raise RetrievalError("No samples were selected to pool.")
+
+    rows, missing = cached_query_vectors(ids)
+    if missing:
+        raise RetrievalError(
+            f"{len(missing)} of the {len(ids)} selected samples have no "
+            "precomputed embedding, so the cohort cannot be pooled as described. "
+            "Re-run precompute/embed_osdr.py.",
+            detail="Missing: " + ", ".join(missing[:20]),
+        )
+
+    q_vec = cohort_query_vector(rows)
+    index_vecs, _, _ = _load_archs4_index()
+    idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk)
+    hits = _annotate_from_cache(idx, score)
+    hits["archs4_index"] = idx.astype(int)
+    hits = hits.sort_values("score", ascending=False).reset_index(drop=True)
+    return hits, rows
 
 
 def search_hits(

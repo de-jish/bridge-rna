@@ -6,6 +6,40 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
+
+`docs/cohort_pooling.md` had specified and measured this feature on 2026-07-30 and left it unbuilt.
+It is built now: a fifth query-vector source that pools an experimental group into one query, a Sample / Cohort / Upload switch on the retrieval rail, an optional two-arm comparison, and `precompute/validate_cohorts.py` as the honesty gate.
+Design and every measurement: `docs/cohort_retrieval.md`.
+
+**A cohort is study x tissue x spaceflight arm by default, and the user can retune it.**
+That is the ISA-Tab factor grouping OSDR already curates: 212 cohorts with two or more members across 70 studies, median 10, max 38, grouping 2,105 of the 2,108 embedded samples.
+Nine facets are offered as chips and six more can be added (sex, strain, genotype, habitat, duration, diet).
+**Study is pinned and cannot be unticked**, because random samples from one study already reach 0.9805 mean pairwise cosine against 0.9933 for a real cohort, so pooling across studies would average across the corpus's strongest batch boundary.
+
+**The case for the feature is stability, not outlier protection, and it is now measured over all 212 cohorts rather than a sample.**
+Pooled leave-one-out top-5 agreement is **0.738** against **0.161** for a single sample, a **4.6x** gain.
+Against a structure-free null (k random OSDR samples) at 0.331, the cohort definition is worth **+0.407**.
+Against a within-study null at 0.683, tissue and arm are worth **+0.055** on top of the study, which is the uncomfortable number and is stated in the docs rather than buried: a pooled query is a cleaner measurement of "this study's samples" than of "this biology".
+
+**Three findings from building it that were corrections rather than choices.**
+
+*The identity check failed, and the reason was better than the check.* Pooling one sample normalizes it twice, so its query vector differs from the plain cached one by 7.45e-9 - a single float32 ulp, cosine 1.0 - and scores differ by 1.19e-7. That is enough to reorder: the first differing rank is 23, where the score gap to rank 24 is **exactly 0.0**. The two runs permute an exact tie. The gate is now float32 score agreement plus an identical top-20 in order, and the divergence depth is printed rather than hidden.
+
+*The stability-versus-k curve was noise at first.* Two cohorts per size gave 0.38 at k=5 beside 0.90 at k=6. Re-run over every cohort and bucketed, it is 0.34 / 0.51 / 0.55 / 0.72 / 0.81 / 0.86 for k = 2 / 3 / 4 / 5-9 / 10-14 / 15+. Even then 5-6 and 7-9 inverted by 0.04 against a within-bucket sd of 0.18, so `validate_cohorts.py` merges adjacent buckets that invert - a bigger cohort must never be reported as less trustworthy than a smaller one. `LOW_N_THRESHOLD` is 5 because that is the first bucket to reach 0.70, and a test pins the shipped curve monotone.
+
+*Two Dash callbacks were firing at page load.* Restyling the action slots on the initial call remounted the buttons inside them, and Dash fires a callback when an input component newly appears - so the cohort and upload searches both ran at `n_clicks: 0` and the canvas greeted every visitor with "Cohort retrieval failed". Fixed by giving the mode switch `prevent_initial_call` (the layout already renders the right initial state) plus an `n_clicks` guard in both callbacks. The browser suite now checks for it by name.
+
+**Interface.** The rail's two stacked query sources became a three-way tablist, so it is shorter than before rather than longer. The confidence card leads with **result stability** (a property of k, and the number that says how far to trust the list) and puts `R̄` second and quieter (a property of the group, almost always ~0.999, so leading with it would imply a tight cohort of two is a trustworthy one). Low N is amber, not red, and names the measured number rather than the word "low". The member list shows each sample's leave-one-out cosine and lets you exclude one; nothing is ever auto-dropped. Excluding a member restates every number on the card.
+
+**The comparison runs two independent pooled queries, never a difference vector.** `centroid(flight) - centroid(ground)` is not a transcriptome, and the corpus-level version of it was already built and rejected (r = -0.990 with PC1). Only siblings differing in exactly one facet are offered, so the reported Jaccard overlap is attributable. Measured live: OSD-137 Liver Basal Control against Liver Ground Control share 2 of 8 retrieved samples, overlap 0.25.
+
+**The map draws every pooled member, not one point.** A cohort's query vector is a mean and no projection was fit on it, so there is no coordinate to draw for it; inventing one would be a lie. `_retrieval_overlay` carries `member_ids` and the renderer draws all of them, slightly smaller so a 38-animal cohort reads as a constellation.
+
+**Testing.** 258 unit tests (34 new), 202 browser checks (60 new in `tests/e2e_cohort_check.py`), and 6 corpus-scale checks in `precompute/validate_cohorts.py`, which scores 9,270 query vectors in one 73-second memmap pass. Two existing test helpers needed real fixes rather than workarounds: `tests/test_app.py` raised `TypeError` on pattern-matching dict ids and could not check them at all, and `tests/e2e_upload_check.py` had to learn to open the Upload tab.
+
+**Open.** The within-study margin of +0.055 is small and worth revisiting if the cohort definition is ever extended. `sibling_cohorts` offers tissue contrasts as well as arm contrasts, which is correct but was not the original intent, and it is worth watching whether users read a tissue overlap the same way.
+
 ## 2026-07-30 (file ingestion verified in a browser loop; two defects fixed; cohort pooling measured)
 
 Three things, in order.

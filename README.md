@@ -53,6 +53,26 @@ It takes about half a second when the vector is already cached, and about 22 sec
 Every Earth hit's row in the embedding index is also its point on the map, and every OSDR sample is keyed by the same `accession|sample name` string in both halves.
 That shared key is why a retrieval you run on one page can be redrawn in place on the other, with no lookup table between them.
 
+### Querying with a whole experimental group
+
+A spaceflight study does not have one sample, it has a group, and one sample is not a stable question to ask.
+Two mice from the same cage, the same tissue and the same flight condition share only **16%** of their five nearest Earth analogs, and often none at all.
+That is not a defect in either query: the entire top-500 of a 940,455-sample index spans a range of similarity comparable to the gap between two animals in the same cage, so the ordering of the list is decided below the noise floor of the biology.
+
+**Cohort** mode asks the question the study is actually powered to answer.
+It groups the samples the way OSDR already curates them, by study, tissue and flight condition, averages the group's embeddings into one query, and searches with that.
+Measured over all 212 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.74**, a 4.6-fold gain, and it costs no more than a single-sample search.
+
+You can change what counts as one cohort: split further by sex, strain, genotype, habitat, mission duration or diet, or widen by dropping tissue or condition.
+Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
+
+The panel says how far to trust each result rather than leaving you to guess.
+A cohort of three is flagged in amber with the measured number for that size, every member is listed with how far it sits from the rest, and you can exclude one and watch the numbers restate.
+An optional comparison runs a second cohort as its own separate query, so you can ask how much of the Earth that a study's flight animals resemble is also resembled by its ground controls.
+It is deliberately not a flight-minus-ground difference vector: a difference of two directions is not a transcriptome, and an earlier attempt at exactly that turned out to be measuring something else entirely.
+
+Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md).
+
 ### The map
 
 The map is the same space projected down to two and three dimensions.
@@ -205,12 +225,25 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q     # runs in about two seconds
-.venv/bin/python tests/e2e_check.py      # drives a real browser; needs the built cache
+.venv/bin/python -m pytest tests/ -q             # 258 tests, about twenty-five seconds
+.venv/bin/python tests/e2e_check.py              # 45 browser checks; needs the built cache
+.venv/bin/python tests/e2e_upload_check.py       # 97 checks of the upload path
+.venv/bin/python tests/e2e_cohort_check.py       # 60 checks of cohort retrieval
 ```
 
-The suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.
-`e2e_check.py` boots the real app against the real `cache/` and asserts on what the page reports about itself, down to each budget tier drawing exactly the point count it advertises.
+The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.
+The three browser suites boot the real app against the real `cache/` and assert on what the page reports about itself, down to each budget tier drawing exactly the point count it advertises.
+
+Two scripts check the science rather than the software, against the real corpus:
+
+```bash
+.venv/bin/python precompute/validate_artifacts.py --mixing --quality
+.venv/bin/python precompute/validate_cohorts.py   # 6 checks over all 212 cohorts
+```
+
+`validate_cohorts.py` is the honesty gate behind Cohort mode.
+It measures how much a pooled result survives dropping one animal, and holds that against two nulls: a pooled query over random samples, and a pooled query over random samples from the same study.
+The second one is the demanding test, and its result is reported in the docs rather than buried: most of what makes a cohort coherent is the study it came from, so a pooled query is a cleaner measurement of one study's samples than of the biology in general.
 
 ## Project layout
 

@@ -271,6 +271,161 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
+                            query_b: pd.Series, hits_b: pd.DataFrame) -> go.Figure:
+    """Two pooled cohorts, two independent queries, one picture of their overlap.
+
+    The single-query network puts one query on the left and fans its hits to the
+    right. This puts one cohort at each corner of the left edge and splits the
+    hit column into three bands: what only the first retrieved, what both did,
+    and what only the second did. The height of the middle band *is* the answer
+    to the question the comparison asks - do these two arms land in the same
+    part of Earth's transcriptome space.
+
+    The GSE column is dropped here. With two queries it would triple the edges
+    for a grouping that is not what this view is asking about, and the study
+    behind any hit is one click away in the inspector.
+
+    Nothing about this figure is a difference vector. Each cohort was scored
+    against ARCHS4 on its own, and what is drawn is set overlap between two real
+    result lists.
+    """
+    a_ids = list(dict.fromkeys(hits_a["gsm"].astype(str).tolist()))
+    b_ids = list(dict.fromkeys(hits_b["gsm"].astype(str).tolist()))
+    shared = [g for g in a_ids if g in set(b_ids)]
+    a_only = [g for g in a_ids if g not in set(shared)]
+    b_only = [g for g in b_ids if g not in set(shared)]
+
+    score_a = {str(g): float(s) for g, s in zip(hits_a["gsm"], hits_a["score"])}
+    score_b = {str(g): float(s) for g, s in zip(hits_b["gsm"], hits_b["score"])}
+    meta = {}
+    for df in (hits_a, hits_b):
+        for _, r in df.iterrows():
+            meta.setdefault(_safe_str(r["gsm"]), r)
+
+    # One vertical rhythm across all three bands, so band height reads as count.
+    step = 1.0
+    total = len(a_only) + len(shared) + len(b_only)
+    gap = step * 1.4  # a visible break between bands
+    height = (total - 1) * step + 2 * gap if total else 0.0
+    top = height / 2.0
+
+    positions: dict[str, float] = {}
+    y = top
+    for g in a_only:
+        positions[g] = y
+        y -= step
+    y -= gap
+    for g in shared:
+        positions[g] = y
+        y -= step
+    y -= gap
+    for g in b_only:
+        positions[g] = y
+        y -= step
+
+    # Each query sits level with the centre of the hits it alone retrieved, so
+    # the edges fan rather than cross.
+    def _centre(group: list[str], fallback: float) -> float:
+        ys = [positions[g] for g in group]
+        return sum(ys) / len(ys) if ys else fallback
+
+    qa_y = _centre(a_only + shared, top)
+    qb_y = _centre(b_only + shared, -top)
+
+    fig = go.Figure()
+
+    def _edges(ids: list[str], qy: float, colour: str, scores: dict[str, float]):
+        for g in ids:
+            fig.add_trace(go.Scatter(
+                x=[0.0, 1.0], y=[qy, positions[g]], mode="lines",
+                line={"width": _edge_width([scores.get(g, 0.95)])[0] * 0.6,
+                      "color": colour},
+                hoverinfo="skip", showlegend=False))
+
+    _edges(a_only + shared, qa_y, GRAPH_THEME["edge"], score_a)
+    _edges(b_only + shared, qb_y, GRAPH_THEME["edge_gse"], score_b)
+
+    def _hover(g: str) -> str:
+        r = meta.get(g)
+        bits = [g]
+        if r is not None:
+            bits += [p for p in (_safe_str(r.get("source_name", "")),
+                                 _safe_str(r.get("tissue", ""))) if p]
+        if g in score_a:
+            bits.append(f"{_safe_str(query_a.get('cohort_label'))}: "
+                        f"{score_a[g]:.4f}")
+        if g in score_b:
+            bits.append(f"{_safe_str(query_b.get('cohort_label'))}: "
+                        f"{score_b[g]:.4f}")
+        return "<br>".join(bits)
+
+    bands = [
+        (a_only, _safe_str(query_a.get("cohort_label")) or "First cohort only",
+         GRAPH_THEME["gsm"], 15),
+        (shared, "Retrieved by both", GRAPH_THEME["query"], 19),
+        (b_only, _safe_str(query_b.get("cohort_label")) or "Second cohort only",
+         GRAPH_THEME["gse"], 15),
+    ]
+    for ids, name, colour, size in bands:
+        if not ids:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[1.0] * len(ids), y=[positions[g] for g in ids],
+            mode="markers", name=name,
+            marker={"size": size, "color": colour, "symbol": "circle",
+                    "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]}},
+            customdata=[["gsm", g, _hover(g)] for g in ids],
+            hovertemplate="%{customdata[2]}<extra></extra>",
+            showlegend=True))
+
+    for query, qy, colour, kind in (
+        (query_a, qa_y, GRAPH_THEME["gsm"], "query"),
+        (query_b, qb_y, GRAPH_THEME["gse"], "query2"),
+    ):
+        label = _safe_str(query.get("cohort_label")) or _safe_str(query.get("sample_name"))
+        fig.add_trace(go.Scatter(
+            x=[0.0], y=[qy], mode="markers+text", text=[label],
+            textposition="middle left",
+            textfont={"family": GRAPH_THEME["font_sans"], "size": 11,
+                      "color": GRAPH_THEME["text_secondary"]},
+            marker={"size": 28, "color": colour, "symbol": "star",
+                    "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]}},
+            customdata=[[kind, _safe_str(query.get("sample_id")),
+                         f"{_safe_str(query.get('sample_name'))}<br>"
+                         f"{len(_safe_str(query.get('members')).splitlines())} "
+                         "samples pooled"]],
+            hovertemplate="%{customdata[2]}<extra></extra>",
+            cliponaxis=False, showlegend=False))
+
+    widest = max((len(_safe_str(q.get("cohort_label")))
+                  for q in (query_a, query_b)), default=0)
+    pad = widest / 60.0 + 0.08
+
+    fig.update_layout(
+        margin={"l": 48, "r": 48, "t": 16, "b": 16},
+        paper_bgcolor=GRAPH_THEME["paper_bg"],
+        plot_bgcolor=GRAPH_THEME["plot_bg"],
+        font={"family": GRAPH_THEME["font_sans"], "color": GRAPH_THEME["text_primary"]},
+        xaxis={"visible": False, "range": [-pad, 1.35]},
+        yaxis={"visible": False},
+        clickmode="event",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.0,
+                "xanchor": "left", "x": 0.0,
+                "font": {"size": 11, "color": GRAPH_THEME["text_secondary"]},
+                "bgcolor": "rgba(0,0,0,0)"},
+        hoverlabel={
+            "font": {"family": GRAPH_THEME["font_sans"], "size": 12,
+                     "color": GRAPH_THEME["text_primary"]},
+            "bgcolor": "#ffffff",
+            "bordercolor": GRAPH_THEME["grid"],
+        },
+        autosize=True,
+        height=None,
+    )
+    return fig
+
+
 def build_bar_figure(hits_df: pd.DataFrame) -> go.Figure:
     display = hits_df.sort_values("score", ascending=True)
     labels = [f"{g} ({s})" for g, s in zip(display["gsm"], display["gse"].replace("", "no GSE"))]

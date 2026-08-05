@@ -174,6 +174,203 @@ def build_status_banner(message: str, kind: str = "info", detail: str | None = N
     return html.Div(children, className=f"status-banner status-{kind}")
 
 
+# --- The cohort card: how much to trust this pooled query --------------------
+
+
+def build_cohort_card(cohort, geometry) -> Any:
+    """Size, stability and tightness for the cohort currently selected.
+
+    Two numbers, deliberately labelled as different things.
+
+    **Stability** is the headline, and it is a property of *k*: the measured
+    agreement between this cohort's top-5 and the top-5 it would have produced
+    with any one animal left out. It is the number that says how far to trust
+    the list, and it is quoted rather than reduced to a word, because "low
+    confidence" tells a researcher nothing they can act on while "3 samples,
+    0.51" tells them exactly how far down the list to stop reading.
+
+    **Tightness** is `R̄`, and it is a property of the *group*: how nearly the
+    members point the same way. It sits second and quieter because it is almost
+    always ~0.999 and therefore almost never the thing that should change a
+    decision. Leading with it would imply a tight cohort is a trustworthy one,
+    and a tight cohort of two is not.
+    """
+    from .cohorts import (
+        LOW_N_THRESHOLD,
+        SINGLE_SAMPLE_STABILITY,
+        STABILITY_BY_K,
+        TIER_LOW_N,
+        TIER_SINGLETON,
+    )
+
+    k = geometry.size
+    tier = geometry.tier
+    if tier == TIER_SINGLETON:
+        return html.Div(
+            className="cohort-card cohort-card--empty",
+            children=html.Div(
+                "Pooling needs at least two samples. Select a larger cohort, or "
+                "use Sample mode for a single one.",
+                className="cohort-card-note"),
+        )
+
+    stability = geometry.stability
+    low = tier == TIER_LOW_N
+    best = STABILITY_BY_K[max(STABILITY_BY_K)]
+
+    rows: list[Any] = [
+        html.Div(
+            className="cohort-stat",
+            children=[
+                html.Div(
+                    className="cohort-stat-head",
+                    children=[
+                        html.Span("Result stability", className="cohort-stat-label"),
+                        html.Span(f"{stability:.2f}", className="cohort-stat-value"),
+                    ],
+                ),
+                html.Div(
+                    className="cohort-meter",
+                    children=html.Div(
+                        className="cohort-meter-fill" + (" is-low" if low else ""),
+                        style={"width": f"{max(0.0, min(1.0, stability)) * 100:.1f}%"},
+                    ),
+                ),
+                html.Div(
+                    f"Measured share of the top 5 that survives dropping any one "
+                    f"of these {k} samples. One sample alone scores "
+                    f"{SINGLE_SAMPLE_STABILITY:.2f}.",
+                    className="cohort-stat-note"),
+            ],
+        ),
+        html.Div(
+            className="cohort-stat cohort-stat--minor",
+            children=[
+                html.Div(
+                    className="cohort-stat-head",
+                    children=[
+                        html.Span("Group tightness", className="cohort-stat-label"),
+                        html.Span(f"R̄ {geometry.resultant:.4f}",
+                                  className="cohort-stat-value"),
+                    ],
+                ),
+                html.Div(
+                    "How nearly the members point the same way. Real cohorts sit "
+                    "near 1.000, so this flags a mixed group rather than "
+                    "grading a clean one.",
+                    className="cohort-stat-note"),
+            ],
+        ),
+    ]
+
+    if low:
+        # Amber, not red, and the same reason the map's coverage bar is amber:
+        # a small cohort is working correctly, not failing.
+        rows.insert(0, html.Div(
+            className="cohort-flag",
+            children=[
+                html.Span(f"Only {k} sample{'s' if k != 1 else ''} in this cohort",
+                          className="cohort-flag-title"),
+                html.Span(
+                    f"Pooled results reach {stability:.2f} stability at this size, "
+                    f"against {best:.2f} at {LOW_N_THRESHOLD * 3} or more. Read "
+                    "the hits as a neighbourhood, not as a ranking.",
+                    className="cohort-flag-body"),
+            ],
+        ))
+
+    return html.Div(
+        className="cohort-card",
+        children=[
+            html.Div(
+                className="cohort-card-head",
+                children=[
+                    html.Span(f"{k}", className="cohort-card-k"),
+                    html.Span("samples pooled into one query",
+                              className="cohort-card-k-label"),
+                ],
+            ),
+            *rows,
+        ],
+    )
+
+
+def build_cohort_details(query: pd.Series) -> list[Any]:
+    """Inspector view of a pooled cohort query node.
+
+    The single-sample panel would render this as one sample with a blank name,
+    so a cohort gets its own: what defined it, how many went in, what came back
+    out about its spread, and which members were excluded.
+    """
+    label = _safe_str(query.get("cohort_label")) or "Cohort"
+    study = _safe_str(query.get("study_id"))
+    members = [m for m in _safe_str(query.get("members")).split("\n") if m]
+    excluded = [m for m in _safe_str(query.get("excluded")).split("\n") if m]
+    outliers = {m for m in _safe_str(query.get("outliers")).split("\n") if m}
+
+    parts: list[Any] = [
+        _details_head("Pooled OSDR cohort", label),
+        _detail_section(
+            "Definition",
+            [
+                _detail_row("Study", study, mono=True),
+                _detail_row("Grouped by", _safe_str(query.get("grouped_by"))),
+                _detail_row("Samples pooled", str(len(members))),
+                _detail_row("Result stability", _safe_str(query.get("stability"))),
+                _detail_row("Group tightness",
+                            f"R̄ {_safe_str(query.get('resultant'))}"),
+            ],
+        ),
+    ]
+
+    if members:
+        parts.append(html.Div(
+            className="details-section",
+            children=[
+                html.Div(f"Pooled members ({len(members)})",
+                         className="details-section-title"),
+                html.Ul(
+                    className="cohort-member-list",
+                    children=[
+                        html.Li(
+                            className="cohort-member" + (" is-outlier" if m in outliers else ""),
+                            children=[
+                                html.Span(m, className="cohort-member-name"),
+                                (html.Span("furthest from the rest",
+                                           className="cohort-member-tag")
+                                 if m in outliers else None),
+                            ],
+                        )
+                        for m in members
+                    ],
+                ),
+            ],
+        ))
+
+    if excluded:
+        parts.append(html.Div(
+            className="details-section",
+            children=[
+                html.Div(f"Excluded by you ({len(excluded)})",
+                         className="details-section-title"),
+                html.Ul(className="cohort-member-list cohort-member-list--excluded",
+                        children=[html.Li(m, className="cohort-member") for m in excluded]),
+            ],
+        ))
+
+    parts.append(_detail_text_block(
+        "How this query was built",
+        "Each member's cached 512-d embedding was L2-normalized and averaged, "
+        "then the mean was normalized again - the maximum-likelihood mean "
+        "direction for vectors compared by cosine, so every animal gets one "
+        "vote regardless of how concentrated its transcriptome is. The pooled "
+        "vector was then scored against every ARCHS4 sample by exactly the scan "
+        "a single-sample search uses.",
+        collapsible=True))
+
+    return [p for p in parts if p is not None]
+
+
 OSDR_ACCESSION_RE = re.compile(r"^(OSD|GLDS)-\d+$")
 
 
@@ -213,6 +410,10 @@ def _build_osdr_query_metadata_block(query: pd.Series) -> list[Any]:
 
 def _build_query_details(query: pd.Series, compact: bool) -> list[Any]:
     """Details for the OSDR query node. ``compact`` omits the finer biology rows."""
+    # A pooled cohort is a query too, and rendering it through the single-sample
+    # path would show one blank sample name where a group belongs.
+    if _safe_str(query.get("is_cohort")) == "1":
+        return build_cohort_details(query)
     heading = _safe_str(query.get("sample_name")) or _safe_str(query.get("sample_id")) or "OSDR query"
     biology_rows = [
         _detail_row("Species", "Mus musculus"),
