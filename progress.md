@@ -51,6 +51,16 @@ Two smaller things worth not relearning.
 `swap_size_mb` was set and then removed because the running machine reported `SwapTotal: 0` - it silently did nothing, and the memory it insured against never appeared.
 And Fly's autostop counts HTTP requests, so it will stop a machine out from under an SSH-run benchmark; the first embed measurement was invalid for that reason and had to be redone with traffic kept flowing.
 
+**Where verification stands.**
+`tests/e2e_check.py` (45) and `tests/e2e_cohort_check.py` (60) pass against the deployment, and all suites pass locally (285 unit, 45 map, 68 upload, 60 cohort).
+The upload *feature* is verified on the deployment - both columns of the example file embedded live, each matching the catalog path exactly (5 hits, 248 s and 273 s) - but the upload *suite* is not yet a reliable gate there, because a hosted embed is four to five minutes and the machine auto-stops between runs.
+`e2e_target.patience()` multiplies every wait by 5 for a remote target and 1 locally, which is what made the map and cohort suites reliable remotely; the upload suite needs a pinned-warm machine rather than more patience.
+
+**Two harness bugs the deployment exposed, both worth remembering.**
+A dropdown's displayed value updates in the browser before the callback carrying it reaches the server, so "the picker holds the GC column" passed while the search still ran on the previous column.
+And waiting for the upload slot to be merely non-empty is satisfied by the previous upload's text, so a run continued against a stale `upload-store` pointing at a file the app had already unlinked, which surfaced as a rejection with the wrong reason.
+Both produced plausible wrong answers rather than errors, and both are the same mistake: **wait for a condition that names the thing you just did**, because a condition the previous step also satisfies is not a wait at all.
+
 Design, tradeoffs, and the volume-versus-baked-in argument: `docs/deployment.md`.
 
 ## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
