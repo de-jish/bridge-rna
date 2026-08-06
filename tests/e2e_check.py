@@ -221,6 +221,36 @@ def main() -> int:
             c.ok(method_h < 60,
                  f"the projection control is a single row ({method_h:.0f}px tall)")
 
+            # A whole-map field says nothing under the control: the full bar is
+            # the answer, and "Colours all 942,563 points." only restated it.
+            cov = page.locator("#coverage").inner_text().strip()
+            c.ok(cov == "",
+                 f"a whole-map field leaves the coverage readout silent: {cov!r}")
+            c.ok(page.locator(".bm-coverage-bar").count() == 1,
+                 "while the bar itself stays, so the rail does not jump")
+
+            print("\n=== 2b. the key names the shapes, not only the hues ===")
+            # That a diamond is one of the 2,108 spaceflight samples has been
+            # true since the map was built and was stated nowhere a viewer could
+            # read it. The colour legend keys hue; this keys shape.
+            corpus = page.locator("#legend-corpus").inner_text().replace("\n", " ")
+            print(f"     corpus key: {corpus!r}")
+            c.ok("ARCHS4" in corpus and "OSDR" in corpus,
+                 f"both corpora are keyed by shape: {corpus!r}")
+            shapes = page.eval_on_selector_all(
+                "#legend-corpus .bm-key-glyph", "els => els.map(e => e.className)")
+            c.ok(any("corpus-archs4" in s for s in shapes)
+                 and any("corpus-osdr" in s for s in shapes),
+                 f"each with its own glyph: {shapes}")
+            # A key is what you are looking at, so an untickable layer leaves it.
+            page.locator("#layers input[type=checkbox]").nth(1).uncheck()
+            page.wait_for_timeout(2500)
+            corpus = page.locator("#legend-corpus").inner_text()
+            c.ok("OSDR" not in corpus,
+                 f"unticking a layer drops its row from the key: {corpus!r}")
+            page.locator("#layers input[type=checkbox]").nth(1).check()
+            page.wait_for_timeout(2500)
+
             print("\n=== 3. an OSDR-only field draws context, not a grey category ===")
             page.locator("#color-by").click()
             page.locator(".dash-dropdown-content").get_by_text(
@@ -242,7 +272,7 @@ def main() -> int:
             coverage = page.locator("#coverage").inner_text()
             print(f"     coverage: {coverage!r}")
             c.ok("context" in coverage.lower(),
-                 "the coverage readout explains what happens to uncoloured points")
+                 "the coverage readout explains what happens to uncolored points")
             page.screenshot(path=str(SHOTS / "02-osdr-only-context.png"))
 
             print("\n=== 4. budget tiers re-render ===")

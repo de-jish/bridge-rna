@@ -54,7 +54,7 @@
   color: inherit;
   border-radius: var(--radius-sm);
   /* The brand is a link home now. Nothing about it should say "link": no
-     underline, no colour shift - only the pointer and a focus ring. */
+     underline, no color shift - only the pointer and a focus ring. */
   outline-offset: 3px;
 }
 .app-brand:hover .app-title { color: #ffffff; }

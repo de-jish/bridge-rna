@@ -227,7 +227,7 @@ Measured build cost of the change, same machine, same seed: the k=30 neighbour g
 ### The species separation and the init (2026-07-23)
 
 `n_neighbors` was not the whole story, and this is the part that actually fixed the map's separation.
-The species split - human against mouse, the one colour-by that clearly clears the arbitrary-projection band at eta-squared 0.985 - looked interleaved rather than cleanly split, and `n_neighbors=30` alone did not restore it.
+The species split - human against mouse, the one color-by that clearly clears the arbitrary-projection band at eta-squared 0.985 - looked interleaved rather than cleanly split, and `n_neighbors=30` alone did not restore it.
 The cause was the **initialization**, changed from spectral to PCA on 2026-07-22 in the same commit that removed the landmark transform, and never separately measured.
 
 Isolated on a 120,000-point sample with the graph, `n_neighbors`, metric and seed all held fixed, varying only the init:
@@ -376,7 +376,7 @@ Four library behaviours the code actively depends on, each of which caused a rea
   Components are styled through Dash's own structural classes and its `--Dash-*` tokens.
   Dash's dropdown also has no option-group support, which is why `colorby.menu_options()` carries grouping through ordering plus a scope suffix rather than faked header rows.
 - **pandas 3.0, again, and this one is a memory trap rather than a correctness one**: `.to_numpy()` on a string-dtype Series materializes a *fresh* Python `str` object per element.
-  `render._colour_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry, against an app that otherwise opens 80.8 MB.
+  `render._color_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry, against an app that otherwise opens 80.8 MB.
   It is stored as `int16` legend slots instead, which is 1.9 MB, and category selection becomes a vectorized integer compare rather than 942,563 Python string comparisons.
   Measured effect on the render path: a warm figure over the whole corpus went from 1.33 s to 0.06 s.
 
@@ -588,7 +588,7 @@ The OSDR overlay is always a white-ringed `diamond`, so the 2,108 spaceflight sa
 | token | value | role |
 | --- | --- | --- |
 | `RETRIEVAL_QUERY` | `#0bab9f` | cohort A's pooled members; == `ACCENT_TEAL`, the network's query star |
-| `RETRIEVAL_QUERY_RGB` | `11, 171, 159` | the same colour, for a computed halo alpha |
+| `RETRIEVAL_QUERY_RGB` | `11, 171, 159` | the same color, for a computed halo alpha |
 | `RETRIEVAL_QUERY_B` | `#ffc233` | cohort B's members, in a comparison only |
 | `RETRIEVAL_QUERY_B_RGB` | `255, 194, 51` | |
 | `RETRIEVAL_QUERY_SIZE` | 20.0 | px; x0.7 when pooled, x0.5 in 3-D |
@@ -616,10 +616,10 @@ Hue is safe on a member because a member is a *filled* mark with a 2 px white ou
 `#ffc233` against `#0bab9f` is CIEDE2000 **43.4** normal, **31.7 / 45.0 / 48.0** under protanopia, deuteranopia and tritanopia, all far above the palette's 8.4 CVD bar; it is 10.5:1 on `PLOT_BG` and 17.0 dE from the nearest categorical hue.
 `ACCENT_WARM #d9791b` was rejected for the map: 0.3 dE from `CATEGORICAL[3]` under deuteranopia.
 
-The rail's two-cohort swatches mirror these hexes in `assets/map.css` (`.bm-retrieval-swatch.is-a` / `.is-b`), because Plotly cannot read a CSS variable. A test pins the pair.
+Neither hex is mirrored into a stylesheet. The map's key sets them inline from `theme` (`manifold/layout._key_glyph`), which is what removed the last place a cohort hue was written twice - the rail's old `.bm-retrieval-swatch.is-a` / `.is-b` rules, deleted 2026-08-06. `test_the_map_key_reads_its_hues_from_the_theme` asserts both halves: the key carries the theme's values, and neither hex appears in `map.css` again.
 
 `bridge_rna/figures.GRAPH_THEME` names the retrieval view's own three roles: `cohort_a #0bab9f`, `cohort_b #d9791b`, `cohort_shared #2b7fff`.
-Cohort A is teal and shared is blue, which is a swap from what shipped first: teal is the query star in the single-query network *and* the query mark on the map, so giving it to "shared" meant running a comparison silently recoloured the star the previous search had drawn teal.
+Cohort A is teal and shared is blue, which is a swap from what shipped first: teal is the query star in the single-query network *and* the query mark on the map, so giving it to "shared" meant running a comparison silently recolored the star the previous search had drawn teal.
 
 Figure `dragmode` is **`pan`**, not `lasso` or `select`, and the graph config removes both `select2d` and `lasso2d` from the modebar.
 There is no selection feature, and a drag that draws a marquee doing nothing would be a promise the app does not keep.
@@ -759,7 +759,7 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**290 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-05 by running the suite.
+**307 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-06 by running the suite.
 
 | file | tests |
 | --- | --- |
@@ -775,7 +775,7 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 The rows sum to the headline; regenerate both with `pytest tests/ -q --collect-only`.
 
-Plus **205 browser checks**, which are not collected by pytest and need the real cache: 45 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 92 in `tests/e2e_cohort_check.py`.
+Plus **242 browser checks**, which are not collected by pytest and need the real cache: 50 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 124 in `tests/e2e_cohort_check.py`.
 These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
@@ -789,7 +789,7 @@ The whole suite runs against a synthetic corpus built into a temp directory by `
 It never touches the 963 MB memmap or the multi-hour embedding artifacts and runs on a machine that has neither.
 The fixture writes a synthetic `archs4_metadata.parquet` whose source strings are in ARCHS4's free-text register (`"liver"`, `"whole blood"`, `"Brain cortex"`, `"HeLa"`, `"left kidney"`, `"skeletal muscle biopsy"`) and maps them through the **real** canonicalizer, so the tests exercise the mapping rather than assuming it.
 `tests/conftest.py` provides a `without_archs4_metadata` fixture that points `ARCHS4_METADATA_PARQUET` at a non-existent file and clears the loader caches on both sides, because the degraded state is what a fresh clone starts in and needs real coverage.
-`render._colour_plan` is cleared there alongside the two data loaders: it memoizes a label array derived from the metadata, and a test proved that leaving it warm let Tissue keep colouring 940,455 ARCHS4 points from a join that no longer existed.
+`render._color_plan` is cleared there alongside the two data loaders: it memoizes a label array derived from the metadata, and a test proved that leaving it warm let Tissue keep coloring 940,455 ARCHS4 points from a join that no longer existed.
 
 `tests/e2e_check.py` sits outside that suite and outside pytest's collection, because it needs the opposite of a hermetic fixture: it boots the real Dash app against the real `cache/` and drives a real browser.
 

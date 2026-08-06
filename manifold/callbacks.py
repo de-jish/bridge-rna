@@ -226,10 +226,15 @@ def _frame_for(hits_payload, method: str, dims: str,
 def coverage_children(color_by: str):
     """The coverage readout under the color-by control.
 
-    States the exact number of points the selected field colours. This is the
-    control that answers "why is so much of my map not coloured?" before the
+    States the exact number of points the selected field colors. This is the
+    control that answers "why is so much of my map not colored?" before the
     user has to ask it, and it is why an OSDR-only field is no longer
     indistinguishable from a broken one.
+
+    A whole-map field says nothing. The full bar already is the answer, and the
+    sentence that used to sit under it - "Colors all 942,563 points." - only
+    restated the bar in words. The readout exists for the partial case, which is
+    the one that raises a question.
     """
     spec = colorby.get(color_by)
     covered, total = colorby.coverage(color_by)
@@ -241,14 +246,16 @@ def coverage_children(color_by: str):
         style={"width": f"{max(pct, 1.5):.1f}%"}))
 
     if whole_map:
-        text = f"Colours all {covered:,} points."
+        text = ""
     elif covered:
-        text = (f"Colours {covered:,} of {total:,} points ({pct:.1f}%). "
+        text = (f"Colors {covered:,} of {total:,} points ({pct:.1f}%). "
                 "ARCHS4 is drawn as faint context.")
     else:
         text = "No data for this field on this machine."
 
-    children = [bar, html.Div(text, className="bm-coverage-text")]
+    children = [bar]
+    if text:
+        children.append(html.Div(text, className="bm-coverage-text"))
     missing = spec.missing_hint()
     if missing:
         children.append(html.Div(missing, className="bm-coverage-fix"))
@@ -263,6 +270,9 @@ def register(app):
         Output("legend-title", "children"),
         Output("legend-search", "style"),
         Output("legend-store", "data"),
+        Output("legend-retrieval", "children"),
+        Output("legend-color", "style"),
+        Output("legend-corpus", "children"),
         Output("coverage", "children"),
         Output("color-by-hint", "children"),
         Input("method", "value"),
@@ -293,13 +303,26 @@ def register(app):
                               yaxis=dict(range=[vp[2], vp[3]]))
         badge_children = [_badge(b) for b in badges]
         items = legend_data.get("items", [])
-        legend_style = {} if items else {"display": "none"}
+
+        # The key reads the *full* overlay and is told separately which arms are
+        # ticked, so an unticked cohort can keep its row, receded. `retrieval`
+        # above is the drawn subset and is what the figure gets.
+        key = layout.retrieval_key_children(
+            _retrieval_overlay(hits_payload), roles, dims)
+        corpus = layout.corpus_key_children(layers)
+
+        # The panel is shown when any section has content. It used to hang off
+        # the color items alone, so an OSDR-only field with the OSDR layer
+        # unticked took the whole key off screen - and would now take a drawn
+        # retrieval's key with it.
+        legend_style = {} if (items or key or corpus) else {"display": "none"}
+        color_style = {} if items else {"display": "none"}
         search_style = ({} if len(items) >= LEGEND_SEARCH_MIN_ITEMS
                         else {"display": "none"})
         title = f"Color · {legend_data['title']}"
         return (fig, badge_children, legend_style, title, search_style,
-                legend_data, coverage_children(color_by),
-                colorby.get(color_by).hint)
+                legend_data, key, color_style, corpus,
+                coverage_children(color_by), colorby.get(color_by).hint)
 
     @app.callback(
         Output("budget", "options"),
@@ -427,57 +450,57 @@ def register(app):
         Input("show-retrieval", "value"),
     )
     def describe_the_retrieval(hits_payload, show_retrieval):
-        """What is on the map, stated under the control that decides it.
+        """One line saying what the ticks are currently drawing.
 
-        It reads the ticks rather than the payload, so a hidden arm is reported
-        as hidden. This map already holds that a key is read as "what am I
-        looking at" rather than "what exists" - it is why the colour legend
-        recounts itself per figure and drops a category with nothing drawn - and
-        a two-cohort key listing an arm that is not on screen would be the same
-        error by another route.
+        This used to be the map's only key for the retrieval: a swatch per
+        cohort and a paragraph explaining that a ring inside a square is a hit
+        both arms found. All of that moved onto the plot, into
+        `layout.retrieval_key_children`, next to the marks it decodes - the
+        ticks directly above already carry each cohort's name, so the rail was
+        naming them twice and explaining glyphs nowhere near them.
+
+        What is left is the control's own feedback, and it reads the ticks
+        rather than the payload so a hidden arm is reported as hidden.
         """
         full = _retrieval_overlay(hits_payload)
         if full is None:
             return ""
 
         roles = _roles_from_checklist(show_retrieval)
+        shown = [c for c in full["cohorts"] if c["role"] in roles]
+        if not shown:
+            # The tick hides the overlay outright, and saying so is the whole
+            # job of this line. It used to describe the retrieval regardless,
+            # so unticking left the rail asserting glyphs "drawn where they sit
+            # in the space" over a map with none of them on it.
+            return ("Not drawn. Tick it above to put it back on the map."
+                    if len(full["cohorts"]) < 2 else
+                    "Neither arm is drawn. Tick one to put it back on the map.")
+
         if len(full["cohorts"]) < 2:
-            n = len(full["hit_points"])
+            n = len(set(full["hit_points"]))
             query = full["query_label"] or "an OSDR sample"
             return [
                 html.B(query.split("|")[-1]),
-                f" and its {n} nearest ARCHS4 neighbour{'s' if n != 1 else ''}, "
+                f" and its {n} nearest ARCHS4 neighbor{'s' if n != 1 else ''}, "
                 "drawn where they sit in the space.",
             ]
 
-        drawn = _retrieval_overlay(hits_payload, roles) if roles else None
-        shown = {c["role"] for c in (drawn or {}).get("cohorts", [])}
-        rows = []
-        for c in full["cohorts"]:
-            hidden = c["role"] not in shown
-            rows.append(html.Div(
-                className="bm-retrieval-key-row" + (" is-hidden" if hidden else ""),
-                children=[
-                    html.Span(className=f"bm-retrieval-swatch is-{c['role']}"),
-                    html.B(c["label"] or "cohort"),
-                    html.Span(
-                        " · not shown" if hidden
-                        else f" · {len(c['hit_points'])} hits",
-                        className="bm-retrieval-key-count"),
-                ]))
-
         if len(shown) < 2:
-            rows.append(html.Div(
-                "Tick both arms to see which samples they share.",
-                className="bm-retrieval-key-note"))
-        else:
-            n_shared = len(full["shared_points"])
-            rows.append(html.Div(
-                f"Retrieved by both: {n_shared}. Those carry both marks, a ring "
-                "inside a square. Each glyph is a pooled member; the query "
-                "itself is a mean of them and has no position here.",
-                className="bm-retrieval-key-note"))
-        return html.Div(rows, className="bm-retrieval-key")
+            return [html.B(shown[0]["label"] or "One arm"),
+                    " only. Tick both to see which samples they share."]
+        # Distinct samples, not drawn marks. `hit_points` is a concatenation
+        # across the arms, so a hit both retrieved appears in it twice - and
+        # quoting its length made the rail say "10 hits, 2 of them retrieved by
+        # both" for the same search whose banner on the other view said "share
+        # 2 of 8 retrieved samples". Two surfaces, one comparison, two numbers.
+        n_shared = len(full["shared_points"])
+        n_hits = len(set(full["hit_points"]))
+        return [
+            "Both arms drawn, ",
+            html.B(f"{n_hits}"), " samples retrieved, ",
+            html.B(f"{n_shared}"), " of them by both.",
+        ]
 
     @app.callback(
         Output("viewport-store", "data"),

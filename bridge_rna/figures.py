@@ -34,9 +34,9 @@ GRAPH_THEME = {
     # what shipped first, and it fixes a real inconsistency rather than a
     # preference: teal is the query star in the single-query network and the
     # query mark on the map, so giving it to "shared" meant running a
-    # comparison silently recoloured the star the previous search drew teal.
+    # comparison silently recolored the star the previous search drew teal.
     # Both views now agree that teal is cohort A and warm is cohort B, and each
-    # renders "both" the way its canvas supports - a third colour on white, a
+    # renders "both" the way its canvas supports - a third color on white, a
     # doubled mark on the map's navy.
     "cohort_a": "#0bab9f",
     "cohort_b": "#d9791b",
@@ -274,9 +274,9 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
         # near-invisible - so inspecting one hit made the rest of the retrieval
         # look like it had been dismissed. clickData fires either way.
         clickmode="event",
-        # The font colour must be set explicitly. Plotly only auto-contrasts the
+        # The font color must be set explicitly. Plotly only auto-contrasts the
         # hover text when it also picks the background; forcing bgcolor to white
-        # while leaving the colour unset makes it inherit the trace colour, so
+        # while leaving the color unset makes it inherit the trace color, so
         # tooltips rendered pale blue on white and were effectively unreadable.
         hoverlabel={
             "font": {"family": GRAPH_THEME["font_sans"], "size": 12, "color": GRAPH_THEME["text_primary"]},
@@ -353,12 +353,12 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
 
     fig = go.Figure()
 
-    def _edges(ids: list[str], qy: float, colour: str, scores: dict[str, float]):
+    def _edges(ids: list[str], qy: float, color: str, scores: dict[str, float]):
         for g in ids:
             fig.add_trace(go.Scatter(
                 x=[0.0, 1.0], y=[qy, positions[g]], mode="lines",
                 line={"width": _edge_width([scores.get(g, 0.95)])[0] * 0.6,
-                      "color": colour},
+                      "color": color},
                 hoverinfo="skip", showlegend=False))
 
     _edges(a_only + shared, qa_y, GRAPH_THEME["edge_cohort_a"], score_a)
@@ -385,19 +385,19 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
         (b_only, _safe_str(query_b.get("cohort_label")) or "Second cohort only",
          GRAPH_THEME["cohort_b"], 15),
     ]
-    for ids, name, colour, size in bands:
+    for ids, name, color, size in bands:
         if not ids:
             continue
         fig.add_trace(go.Scatter(
             x=[1.0] * len(ids), y=[positions[g] for g in ids],
             mode="markers", name=name,
-            marker={"size": size, "color": colour, "symbol": "circle",
+            marker={"size": size, "color": color, "symbol": "circle",
                     "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]}},
             customdata=[["gsm", g, _hover(g)] for g in ids],
             hovertemplate="%{customdata[2]}<extra></extra>",
             showlegend=True))
 
-    for query, qy, colour, kind in (
+    for query, qy, color, kind in (
         (query_a, qa_y, GRAPH_THEME["cohort_a"], "query"),
         (query_b, qb_y, GRAPH_THEME["cohort_b"], "query2"),
     ):
@@ -407,7 +407,7 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
             textposition="middle left",
             textfont={"family": GRAPH_THEME["font_sans"], "size": 11,
                       "color": GRAPH_THEME["text_secondary"]},
-            marker={"size": 28, "color": colour, "symbol": "star",
+            marker={"size": 28, "color": color, "symbol": "star",
                     "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]}},
             customdata=[[kind, _safe_str(query.get("sample_id")),
                          f"{_safe_str(query.get('sample_name'))}<br>"
@@ -470,7 +470,7 @@ def build_bar_figure(hits_df: pd.DataFrame) -> go.Figure:
         yaxis_title="",
         height=420,
         # Pinned for the same reason as the network graph: never leave hover
-        # text colour to Plotly's fallback once a background is specified.
+        # text color to Plotly's fallback once a background is specified.
         hoverlabel={
             "font": {"family": GRAPH_THEME["font_sans"], "size": 12, "color": GRAPH_THEME["text_primary"]},
             "bgcolor": "#ffffff",

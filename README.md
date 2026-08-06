@@ -22,10 +22,10 @@ Nothing in the pipeline was told the query was an eye; it found the retina on it
 ### Map (`/map`)
 
 The same space, seen all at once.
-Both collections - 2,108 NASA samples and 940,455 Earth samples - are placed in one shared projection and drawn as live points, coloured by tissue.
-You can rotate it, switch between 2-D and 3-D, recolour it, and overlay a retrieval to see where a query and its matches sit.
+Both collections - 2,108 NASA samples and 940,455 Earth samples - are placed in one shared projection and drawn as live points, colored by tissue.
+You can rotate it, switch between 2-D and 3-D, recolor it, and overlay a retrieval to see where a query and its matches sit.
 
-![The Bridge RNA map: the joint corpus as a 3-D projection, coloured by tissue](docs/bridge-rna-map.png)
+![The Bridge RNA map: the joint corpus as a 3-D projection, colored by tissue](docs/bridge-rna-map.png)
 
 ## How it works
 
@@ -74,7 +74,7 @@ It is deliberately not a flight-minus-ground difference vector: a difference of 
 
 Both cohorts are drawn on the map, which is where that comparison is actually settled.
 The overlap the panel reports is a number about two *sets* of hits, and two arms can share no hits at all while sitting in the same neighbourhood, each picking different samples out of the same crowd.
-Each cohort's pooled animals are drawn in its own colour, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
+Each cohort's pooled animals are drawn in its own color, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
 You can untick either arm when the picture gets crowded.
 
 Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md).
@@ -99,23 +99,23 @@ And it separates the two corpora more than UMAP does, which makes it the worst o
 Vectors are L2-normalised before any reduction.
 Without that step the first principal component is really a magnitude axis and holds 57.8% of the variance, swamping the rest; normalised, it drops to 41.3% and the biology comes through.
 
-### Colouring both collections by tissue
+### Coloring both collections by tissue
 
 OSDR and ARCHS4 describe tissue in completely different ways.
 OSDR is curated but hyper-specific ("Right extensor digitorum longus", 48 values in all).
 ARCHS4 has no tissue column at all, only 42,754 distinct free-text GEO strings.
 `manifold/tissue.py` folds both onto one list of 37 anatomical buckets plus "Other" and "Unknown", using ordered keyword rules where the first match wins.
 The order is what keeps "bone marrow" from being read as "bone" and "adrenal" from being read as "renal".
-Because both collections go through the same function, a liver in GEO and a NASA liver get the same colour and the same legend row.
+Because both collections go through the same function, a liver in GEO and a NASA liver get the same color and the same legend row.
 All 48 OSDR values and 90.6% of the Earth samples land in a named bucket.
 
 The map will not paint a collection it cannot describe as though it were data.
 Pick an OSDR-only field like Flight vs Ground and the 940,455 Earth points have no value for it, so rather than a flat grey cloud that reads as "measured and empty", they are drawn as faint context with no legend entry.
-The colour-by menu says up front what each field covers, and a field whose data has not been built is shown disabled with the command that builds it.
+The color-by menu says up front what each field covers, and a field whose data has not been built is shown disabled with the command that builds it.
 
 ### Hovering and inspecting
 
-On the map, hovering an OSDR point shows its name and what it is under the current colouring.
+On the map, hovering an OSDR point shows its name and what it is under the current coloring.
 The Earth cloud carries no hover data on purpose, both for speed at a million points and because a click that returns nothing is how the app knows you clicked the background rather than a sample.
 In the retrieval view, the network graph draws the query, each matched sample, and the studies they belong to; clicking any node opens its full metadata in the inspector and fetches the study abstract from NCBI on demand.
 
@@ -231,10 +231,10 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 290 tests, about twenty-five seconds
-.venv/bin/python tests/e2e_check.py              # 45 browser checks; needs the built cache
+.venv/bin/python -m pytest tests/ -q             # 307 tests, about twenty-five seconds
+.venv/bin/python tests/e2e_check.py              # 50 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 68 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 92 checks of cohort retrieval
+.venv/bin/python tests/e2e_cohort_check.py       # 124 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.

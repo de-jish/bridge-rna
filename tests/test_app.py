@@ -632,10 +632,17 @@ def test_coverage_states_the_exact_point_count(corpus):
         "the readout must say what happens to the points it does not colour")
 
 
-def test_coverage_says_so_when_a_field_paints_everything(corpus):
-    text = _text(callbacks.coverage_children("species"))
-    assert f"{corpus['total']:,}" in text
-    assert "all" in text.lower()
+def test_coverage_says_nothing_when_a_field_paints_everything(corpus):
+    """The full bar is the whole answer.
+
+    "Colours all 942,563 points." sat under it and only restated the bar in
+    words. The readout exists to answer "why is most of my map not colored?",
+    which is a question a whole-map field never raises, so it now says nothing
+    at all rather than reassuring at length.
+    """
+    children = callbacks.coverage_children("species")
+    assert len(children) == 1, "a whole-map field is the bar and nothing else"
+    assert _text(children).strip() == ""
 
 
 def test_coverage_bar_is_amber_only_for_a_partial_field(corpus):
@@ -793,14 +800,296 @@ def test_a_single_sample_retrieval_is_still_named_by_its_sample_key(corpus):
     assert len(overlay["cohorts"]) == 1
 
 
-def test_the_map_swatches_match_the_colours_plotly_draws():
-    """Plotly cannot read a CSS variable, so the rail's two-cohort key mirrors
-    the plot's hexes by hand. A drifted swatch would label the wrong cohort."""
+# --- The key on the plot -----------------------------------------------------
+#
+# The map draws four encodings at once - corpus tissue hue, member fill hue,
+# hit ring shape, and corpus glyph shape - and until this key existed it
+# explained exactly one of them. These pin the structure, not the wording.
+
+
+def _classes(component) -> list[str]:
+    """Every className in a Dash component tree, in document order."""
+    out: list[str] = []
+    if isinstance(component, (list, tuple)):
+        for c in component:
+            out += _classes(c)
+        return out
+    cls = getattr(component, "className", None)
+    if cls:
+        out.append(str(cls))
+    children = getattr(component, "children", None)
+    if children is not None:
+        out += _classes(children)
+    return out
+
+
+def _key_shapes(children) -> list[str]:
+    """The glyph shape of each key row, in order."""
+    return [c.split("is-", 1)[1] for c in _classes(children)
+            if c.startswith("bm-key-glyph is-")]
+
+
+def test_a_plain_search_gets_a_two_row_key_and_no_headings(corpus):
+    """The single-query state must not pay for the comparison. With one query
+    on screen there is nothing for a name or a group heading to distinguish it
+    from, so the key is the query mark, the hit mark, and nothing else."""
+    key = str(data.osdr_metadata()["sample_key"].iloc[0])
+    overlay = callbacks._retrieval_overlay(
+        {"sample_id": key, "hits": [{"gsm": "GSM1", "score": 0.9,
+                                     "archs4_index": 0}]})
+    children = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
+    assert _key_shapes(children) == ["star", "hit-a"]
+    assert "bm-key bm-key--retrieval" in _classes(children)
+    assert "bm-key-head" not in _classes(children)
+    assert "the query sample" in _text(children)
+    assert "pooled member" not in _text(children), (
+        "one sample is not a pool; the phrase is earned by k >= 2")
+
+
+def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):
+    """The encoding has two factors and they do not share a channel: hue names
+    the cohort on a member, ring shape names it on a hit. Listing each cohort's
+    marks together buries that. Listing the two member rows adjacent and the two
+    hit rows adjacent shows it - one pair differs only in hue, the next only in
+    shape - so the layout is the explanation and no sentence has to assert it.
+    """
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    children = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
+
+    assert _key_shapes(children) == ["star", "star", "hit-a", "hit-b",
+                                     "hit-both"]
+    # The rule that separates this key from the colour list below it hangs off
+    # this modifier. It was missing here once - the comparison branch returns
+    # from a different indent level than the single-query branch, so an edit
+    # that added the class to both matched only one - and the key sat flush
+    # against "Color · Tissue" with nothing between them.
+    assert "bm-key bm-key--retrieval" in _classes(children)
+    text = _text(children)
+    assert "Pooled members" in text and "Retrieved hits" in text
+    # Each cohort is named in both of its rows, so neither channel has to be
+    # carried across a heading by memory.
+    for label in ("Liver · Space Flight", "Liver · Ground Control"):
+        assert text.count(label) == 2, f"{label} is not named in both its rows"
+
+
+def test_the_doubled_mark_is_rowed_only_when_both_arms_are_drawn(two_cohorts):
+    """A hit retrieved by both is one point wearing both cohorts' rings, so it
+    cannot exist with an arm hidden. It is also not a third cohort, which is why
+    it is the last row of the hits group rather than a group of its own."""
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+
+    both = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
+    assert "retrieved by both" in _text(both)
+    assert _key_shapes(both)[-1] == "hit-both"
+
+    one = layout.retrieval_key_children(overlay, ("a",), "2d")
+    assert "retrieved by both" not in _text(one)
+    assert "hit-both" not in _key_shapes(one)
+
+
+def test_the_single_query_key_obeys_the_tick_too(corpus):
+    """The one tick hides the whole overlay, so the key has to recede with it.
+
+    This branch ignored `roles` at first, which meant unticking "Show it on the
+    map" left the plot with no star and no ring while the key went on counting
+    one member and five hits - the exact failure the count rule exists to
+    prevent, in the commonest state the map has.
+    """
+    key = str(data.osdr_metadata()["sample_key"].iloc[0])
+    overlay = callbacks._retrieval_overlay(
+        {"sample_id": key, "hits": [{"gsm": "GSM1", "score": 0.9,
+                                     "archs4_index": 0}]})
+    shown = layout.retrieval_key_children(overlay, ("a",), "2d")
+    assert "1" in _text(shown) and "hidden" not in _text(shown)
+
+    hidden = layout.retrieval_key_children(overlay, (), "2d")
+    assert _key_shapes(hidden) == _key_shapes(shown), "the marks stay named"
+    assert _classes(hidden).count("bm-key-row is-hidden") == 2
+    assert _text(hidden).count("hidden") == 2
+
+
+def test_a_hidden_arm_keeps_both_its_rows_receded(two_cohorts):
+    """Dropping them would leave a gold glyph on screen a moment later with
+    nothing to look it up in, and would make the key disagree with the ticks
+    that produced it. The hue and the shape it owns stay named; only the counts
+    go, because there is nothing on screen to count."""
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    children = layout.retrieval_key_children(overlay, ("a",), "2d")
+
+    assert _key_shapes(children) == ["star", "star", "hit-a", "hit-b"]
+    assert _classes(children).count("bm-key-row is-hidden") == 2
+    assert _text(children).count("hidden") == 2
+
+
+def test_the_key_follows_the_three_dimensional_symbol_substitution(two_cohorts):
+    """`Scatter3d` rejects `star` outright, so a member draws as a diamond
+    there. A key still showing a star would assert a mark 3-D does not draw,
+    which is worse than the silence it replaced. The hit shapes are deliberately
+    unchanged - that is why shape, not hue, carries cohort identity."""
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    assert _key_shapes(layout.retrieval_key_children(overlay, ("a", "b"), "3d")) \
+        == ["diamond", "diamond", "hit-a", "hit-b", "hit-both"]
+
+
+def test_an_uploaded_query_gets_no_member_row(corpus):
+    """An uploaded sample was never embedded into this map, so it has no
+    coordinate and draws no member mark. A row for it would key a glyph that is
+    not there."""
+    overlay = callbacks._retrieval_overlay(
+        {"sample_id": "UPLOAD|counts.csv::S1",
+         "hits": [{"gsm": "GSM1", "score": 0.9, "archs4_index": 0}]})
+    children = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
+    assert _key_shapes(children) == ["hit-a"]
+
+
+def test_a_shared_hit_is_one_sample_wherever_it_is_counted(two_cohorts):
+    """`hit_points` is a concatenation across the arms, so a hit both cohorts
+    retrieved is in it twice. Quoting its length made the map say "10 hits, 2 of
+    them retrieved by both" for the same comparison whose banner on the other
+    view said "share 2 of 8 retrieved samples" - two surfaces, one search, two
+    numbers, and a subset relation that cannot hold either way. Both surfaces
+    count distinct samples now."""
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    per_arm = sum(len(c["hit_points"]) for c in overlay["cohorts"])
+    distinct = len(set(overlay["hit_points"]))
+    assert overlay["shared_points"], "this fixture is built to share two hits"
+    assert distinct == per_arm - len(overlay["shared_points"])
+    assert distinct < len(overlay["hit_points"]), "the concatenation double-counts"
+
+    _fig, _legend, badges = render.build_figure(
+        "pca", "2d", "species", ["archs4"], 5000, None, retrieval=overlay)
+    badge = next(b for b in badges if "cohorts" in b)
+    assert f"<b>{distinct}</b> samples" in badge, badge
+    assert f"<b>{len(overlay['shared_points'])}</b> retrieved by both" in badge
+
+
+def test_the_map_caveat_is_true_in_three_dimensions_too():
+    """The retrieval group is a static subtree and stays on screen in 3-D, so a
+    caveat reading "a projection of 512 dimensions into two" would be false to
+    a reader looking at three axes. That is the same class of error as a
+    parameter chip naming one t-SNE gradient method for both dimensionalities,
+    which `projection_params` takes `dims` specifically to avoid."""
+    caveat = _text(layout.control_rail())
+    assert "Hover a hit" in caveat
+    assert "into two" not in caveat
+    assert "cannot preserve" in caveat
+
+
+def test_the_corpus_key_rows_only_the_layers_that_are_drawn(corpus):
+    """A key is what you are looking at. That a diamond means OSDR had been
+    true since the map was built and was stated nowhere a viewer could read."""
+    both = layout.corpus_key_children(["archs4", "osdr"])
+    assert _key_shapes(both) == ["corpus-archs4", "corpus-osdr"]
+    assert "ARCHS4" in _text(both) and "OSDR" in _text(both)
+
+    assert _key_shapes(layout.corpus_key_children(["osdr"])) == ["corpus-osdr"]
+    assert layout.corpus_key_children([]) == []
+    assert layout.corpus_key_children(None) == []
+
+
+def test_the_key_glyph_shapes_all_have_a_stylesheet_rule():
+    """A shape with no rule renders as a 14px empty box, which is a key row
+    pointing at nothing. `test_every_classname_used_in_python_exists_in_some
+    _stylesheet` cannot catch these: the class is built by string interpolation
+    from the shape name, so it never appears in a className literal."""
     css = _all_css()
-    for selector, value in [(".bm-retrieval-swatch.is-a", theme.RETRIEVAL_QUERY),
-                            (".bm-retrieval-swatch.is-b", theme.RETRIEVAL_QUERY_B)]:
-        assert f"{selector} {{ background: {value}; }}" in css, (
-            f"{selector} drifted from {value}")
+    shapes = ["star", "diamond", "hit-a", "hit-b", "hit-both",
+              "corpus-archs4", "corpus-osdr"]
+    missing = [s for s in shapes if f".bm-key-glyph.is-{s}" not in css]
+    assert not missing, f"key glyph shapes with no CSS rule: {missing}"
+
+
+#: Copy that was deliberately removed from the interface. Each of these was a
+#: sentence the rail or the panel used to carry, and each was cut for a reason
+#: recorded beside the code that used to emit it. They are pinned here because
+#: prose regresses silently: nothing else in the suite would notice a paragraph
+#: coming back, and several of these had already outlived the thing they
+#: described.
+REMOVED_COPY = (
+    "Not a difference vector",
+    "Nothing is dropped for you",
+    "Adds roughly two seconds per hit",
+    "One glyph per sample",
+    "Each glyph is a pooled member",
+    "no line is drawn",
+    "anatomical vocabulary",
+)
+
+
+def test_the_removed_copy_stays_removed():
+    """Neither view may say any of these again."""
+    source = "\n".join(
+        p.read_text()
+        for d in ("manifold", "bridge_rna")
+        for p in sorted((paths.REPO_ROOT / d).glob("*.py"))) + \
+        (paths.REPO_ROOT / "app.py").read_text()
+    back = [s for s in REMOVED_COPY if s in source]
+    assert not back, f"copy that was deliberately removed is back: {back}"
+
+
+def test_the_app_spells_color_the_american_way():
+    """One application, one spelling.
+
+    The map's own identifiers were already American - `colorby`, `color_by`,
+    `color_for_index`, `#color-by` - while its prose and two of its user-facing
+    strings were not, and `render._colour_plan` sat two lines from
+    `theme.color_for_index`. The retrieval view had one user-visible instance
+    left, in the comparison legend strip, which would have put two spellings on
+    screen for the same two-cohort search.
+    """
+    offenders = []
+    for path in (sorted((paths.REPO_ROOT / "manifold").glob("*.py"))
+                 + sorted((paths.REPO_ROOT / "bridge_rna").glob("*.py"))
+                 + sorted(paths.ASSETS_DIR.glob("*.css"))
+                 + [paths.REPO_ROOT / "app.py"]):
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if "colour" in line.lower():
+                offenders.append(f"{path.name}:{i}")
+    assert not offenders, f"British spelling in the app: {offenders}"
+
+
+def _inline_backgrounds(component) -> set[str]:
+    """Every `style={"background": ...}` value in a Dash component tree."""
+    out: set[str] = set()
+    if isinstance(component, (list, tuple)):
+        for c in component:
+            out |= _inline_backgrounds(c)
+        return out
+    style = getattr(component, "style", None)
+    if isinstance(style, dict) and style.get("background"):
+        out.add(style["background"])
+    children = getattr(component, "children", None)
+    if children is not None:
+        out |= _inline_backgrounds(children)
+    return out
+
+
+def test_the_map_key_reads_its_hues_from_the_theme(two_cohorts):
+    """There is no second copy of a cohort hue left to drift.
+
+    The rail's old two-cohort key mirrored RETRIEVAL_QUERY and
+    RETRIEVAL_QUERY_B into map.css by hand, because Plotly cannot read a CSS
+    variable - so the swatch and the glyph were two spellings of one hex, and a
+    drifted swatch would have labelled the wrong cohort. The key on the plot
+    sets them inline from `theme` instead. The stylesheet keeps the shapes,
+    which have no Python constant to disagree with.
+    """
+    a, b = two_cohorts
+    overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
+    fills = _inline_backgrounds(
+        layout.retrieval_key_children(overlay, ("a", "b"), "2d"))
+    assert theme.RETRIEVAL_QUERY in fills
+    assert theme.RETRIEVAL_QUERY_B in fills
+
+    map_css = (paths.ASSETS_DIR / "map.css").read_text()
+    for value in (theme.RETRIEVAL_QUERY, theme.RETRIEVAL_QUERY_B):
+        assert value not in map_css, (
+            f"{value} is mirrored into map.css again; the key reads theme")
 
 
 def test_the_second_cohorts_hit_symbol_is_valid_in_three_dimensions():

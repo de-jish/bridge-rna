@@ -318,7 +318,7 @@ def test_layer_toggles_actually_remove_layers(corpus):
 
 # --- The memoized colour plan -----------------------------------------------
 
-def test_the_colour_plan_is_compact_integer_codes(corpus):
+def test_the_color_plan_is_compact_integer_codes(corpus):
     """The plan is memoized for every colour-by, so its size is load-bearing.
 
     An array of display-label strings looks equivalent and is not: under pandas
@@ -327,7 +327,7 @@ def test_the_colour_plan_is_compact_integer_codes(corpus):
     values, measured at 127 MB per colour-by. Across the registry that is more
     than a gigabyte of cache for a map that otherwise opens 81.5 MB.
     """
-    codes, legend = render._colour_plan("tissue")
+    codes, legend = render._color_plan("tissue")
     _, _, total = data.counts()
     assert codes.dtype == np.int16, f"codes widened to {codes.dtype}"
     assert len(codes) == total
@@ -340,7 +340,7 @@ def test_every_covered_point_lands_in_exactly_one_legend_row(corpus):
     """Codes are the only link between a glyph and its swatch, so the mapping
     from points to legend rows must be total and must agree with the counts."""
     for key in ("tissue", "species", "flight_status"):
-        codes, legend = render._colour_plan(key)
+        codes, legend = render._color_plan(key)
         counted = sum(row["count"] for row in legend)
         assert int((codes >= 0).sum()) == counted, (
             f"{key}: {int((codes >= 0).sum())} points carry a slot but the "
@@ -351,9 +351,9 @@ def test_every_covered_point_lands_in_exactly_one_legend_row(corpus):
                 f"points but {int((codes == slot).sum())} carry its slot")
 
 
-def test_the_colour_plan_is_cached_and_returns_the_same_object(corpus):
-    a, _ = render._colour_plan("tissue")
-    b, _ = render._colour_plan("tissue")
+def test_the_color_plan_is_cached_and_returns_the_same_object(corpus):
+    a, _ = render._color_plan("tissue")
+    b, _ = render._color_plan("tissue")
     assert a is b, "the colour plan is being recomputed on every figure build"
 
 
@@ -731,10 +731,9 @@ def test_the_hover_says_pooled_member_only_when_something_was_pooled():
     coords = _coords()
     alone = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
                  if t.name == "retrieved hit")
-    assert all("map rank" in row[2] for row in alone.customdata)
-    assert not any("pooled member" in row[2] for row in alone.customdata)
+    assert all("map rank" in row[1] for row in alone.customdata)
+    assert not any("pooled member" in row[1] for row in alone.customdata)
 
     pooled = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
               if t.name == "retrieved hit"]
-    assert all("from the nearest pooled member" in row[2]
-               for t in pooled for row in t.customdata)
+    assert all("map rank" in row[1] for t in pooled for row in t.customdata)

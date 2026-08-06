@@ -85,7 +85,7 @@
 /* ---- Projection parameters ---------------------------------------------
    Sits directly under the Projection control and states how the active
    projection was actually fit, read off projection_stats.json. Same rule as
-   the colour-by coverage readout further down - the fact that qualifies a
+   the color-by coverage readout further down - the fact that qualifies a
    control belongs against that control - and it hangs at the same 9px offset
    so the two readouts line up under their respective controls. Deliberately
    not a plot badge: that row reports what is drawn right now and changes on
@@ -116,42 +116,13 @@
    is 11.5px. --text-secondary is 5.47:1 and still recedes behind the
    controls. */
 .bm-hint { font-size: 11.5px; color: var(--text-secondary); margin-top: 7px; line-height: 1.45; }
+/* A color-by with nothing to add should not still spend its margin, the same
+   rule .bm-params follows. Most fields now carry no hint at all. */
+.bm-hint:empty { display: none; }
 
-/* The two-cohort key, shown only when a comparison is drawn. It sits directly
-   under the per-cohort ticks it explains, which is the rail's standing rule:
-   the fact that qualifies a control belongs against that control.
-
-   The swatch hexes are the plot's, not the rail's, and are written literally
-   because they have to match manifold/theme.RETRIEVAL_QUERY and
-   RETRIEVAL_QUERY_B exactly - Plotly cannot read a CSS variable, so this is
-   the same mirroring GRAPH_THEME does, and a test pins the pair. */
-.bm-retrieval-key { margin-top: 8px; }
-.bm-retrieval-key-row {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 11.5px; color: var(--text-secondary);
-  padding: 2px 0;
-}
-.bm-retrieval-key-row b { color: var(--text-primary); font-weight: 600; }
-.bm-retrieval-swatch {
-  width: 11px; height: 11px; flex-shrink: 0;
-  border-radius: 2px;
-  /* A ring, matching the white outline every member glyph carries on the
-     dark plot canvas, so the swatch reads as the same object. */
-  box-shadow: 0 0 0 1.5px var(--bg-panel), 0 0 0 2.5px #c3cfdf;
-}
-.bm-retrieval-swatch.is-a { background: #0bab9f; }
-.bm-retrieval-swatch.is-b { background: #ffc233; }
-.bm-retrieval-key-count { color: var(--text-secondary); }
-/* An arm the user has unticked stays in the key, so the colour it owns is
-   still named, but it recedes and says it is not drawn. Dropping the row would
-   leave a gold glyph on screen a moment later with nothing to look it up in. */
-.bm-retrieval-key-row.is-hidden { opacity: 0.45; }
-.bm-retrieval-key-row.is-hidden b { font-weight: 500; }
-.bm-retrieval-key-note {
-  margin-top: 6px;
-  font-size: 11.5px; line-height: 1.45;
-  color: var(--text-secondary);
-}
+/* The rail's retrieval line is one sentence now. Everything that used to sit
+   here - a swatch per cohort and a paragraph on what a ring inside a square
+   means - is on the plot, in .bm-key, against the marks it decodes. */
 
 /* Dropdown (Dash 4 dcc.Dropdown: a radix popover, not react-select).
    The menu is portaled to the end of <body>, so its rules cannot be scoped
@@ -240,12 +211,19 @@
 .bm-badge b { color: #fff; }
 .bm-badge.warn { border-color: rgba(215, 150, 40, 0.6); color: #ffd79a; }
 
-/* Floating searchable legend. Sits below the modebar's row rather than beside
-   it: Plotly renders the modebar at the top-right of the plot, and at narrow
-   widths the two overlapped. */
+/* The floating key. Sits below the modebar's row rather than beside it: Plotly
+   renders the modebar at the top-right of the plot, and at narrow widths the
+   two overlapped.
+
+   Three sections, ordered by how transient each is: the retrieval on top
+   (asked for a moment ago, gone next search), the color list in the middle
+   (the standing state of the map), the corpus shapes at the bottom (a footnote
+   that never changes). Only the middle one can grow, so only the middle one
+   scrolls - `min-height: 0` on the section is what lets it, since a flex child
+   defaults to its content height and would otherwise push the footer out. */
 .bm-legend {
   position: absolute; top: 46px; right: 14px; z-index: 7;
-  width: 194px; max-height: calc(100% - 58px);
+  width: 228px; max-height: calc(100% - 58px);
   background: rgba(14, 29, 52, 0.9);
   border: 1px solid rgba(90, 130, 185, 0.4);
   border-radius: 10px;
@@ -253,6 +231,7 @@
   backdrop-filter: blur(4px);
   display: flex; flex-direction: column;
 }
+.bm-legend-section { display: flex; flex-direction: column; min-height: 0; }
 .bm-legend-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
   color: #8ea6c9; font-weight: 700; margin-bottom: 8px;
@@ -275,10 +254,135 @@
 .bm-legend-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
 .bm-legend-count { margin-left: auto; color: #7f97ba; font-variant-numeric: tabular-nums; font-size: 11px; }
 
-/* ---- Colour-by coverage readout ---------------------------------------
-   Sits directly under the colour-by control and states how much of the map
+/* ---- The mark key ------------------------------------------------------
+   The color legend above keys hue. This keys SHAPE, which was the channel
+   nothing on screen explained: that a diamond is one of the 2,108 spaceflight
+   samples, that a white ring is a retrieved hit, that a round ring and a square
+   ring are two different cohorts, and that a ring inside a square is a hit both
+   of them found.
+
+   Every mark is drawn as the mark. Naming a square ring in words, in a panel
+   that could simply draw one, is the key doing less than it could - and the
+   marks it has to match are 20 px glyphs on a navy canvas, which a 14 px box
+   reproduces closely enough to recognise.
+
+   Shapes live here; hues come from manifold/theme.py through an inline style,
+   so there is no second copy of RETRIEVAL_QUERY to drift. The one color that
+   IS written here is the hit ring's white, because it is the same white for the
+   same measured reason: no hue clears 3:1 against the worst categorical tissue
+   bucket on this background, which is why the ring is white on the plot too. */
+.bm-key { display: flex; flex-direction: column; gap: 1px; }
+/* The rule is on the modifier, not on `:not(:last-child)`: each key is the only
+   child of its own slot div, so it is always a last child and the sibling
+   selector could never fire. */
+.bm-key--retrieval {
+  margin-bottom: 9px; padding-bottom: 9px;
+  border-bottom: 1px solid rgba(90, 130, 185, 0.28);
+}
+.bm-key--corpus {
+  margin-top: 9px; padding-top: 9px;
+  border-top: 1px solid rgba(90, 130, 185, 0.28);
+}
+.bm-key-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: #cbd9ec; padding: 2px 2px;
+  min-width: 0;
+}
+.bm-key-count {
+  margin-left: auto; padding-left: 6px;
+  color: #7f97ba; font-variant-numeric: tabular-nums; font-size: 11px;
+}
+
+/* A comparison groups by ROLE, so the two member rows sit adjacent and differ
+   only in hue, and the two hit rows sit adjacent and differ only in shape. The
+   sub-heads are what make that pairing legible; they appear only when there are
+   two cohorts, because a lone search has nothing to pair. */
+.bm-key-head {
+  margin: 6px 2px 2px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 700; color: #7f97ba;
+}
+.bm-key-head:first-child { margin-top: 0; }
+/* A cohort label runs long ("Liver · Space Flight"), and two arms usually
+   differ only in the trailing facet - exactly the part truncation would eat.
+   So it wraps instead: nothing about which arm this is can be lost. */
+.bm-key-label { overflow-wrap: anywhere; }
+/* An unticked arm keeps both its rows so the hue and the shape it owns are
+   still named, receded and saying so. */
+.bm-key-row.is-hidden { opacity: 0.45; }
+
+/* ---- The glyphs themselves --------------------------------------------- */
+.bm-key-glyph {
+  position: relative; flex: none;
+  width: 14px; height: 14px;
+  display: block;
+}
+.bm-key-glyph-fill { position: absolute; inset: 0; }
+
+/* The query / pooled member: a star in 2-D, carrying the 2 px white outline it
+   wears on the plot. The outline is the outer shape and the hue is inset into
+   it, which is how the plot builds it too. */
+.bm-key-glyph.is-star,
+.bm-key-glyph.is-star .bm-key-glyph-fill {
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%,
+                     50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+.bm-key-glyph.is-star { background: #ffffff; }
+.bm-key-glyph.is-star .bm-key-glyph-fill { inset: 1.5px; }
+
+/* 3-D substitutes a diamond, because Scatter3d rejects `star` outright. */
+.bm-key-glyph.is-diamond {
+  width: 11px; height: 11px; margin: 1.5px;
+  background: #ffffff; border-radius: 1px;
+  transform: rotate(45deg);
+}
+.bm-key-glyph.is-diamond .bm-key-glyph-fill { inset: 1.5px; border-radius: 1px; }
+
+/* Hit rings: open, white, and distinguished only by shape - the same split the
+   plot uses, for the same reason. B's square is the larger of the two so that a
+   hit both cohorts retrieved composites into a ring inside a square, which is
+   exactly what .is-hit-both draws. */
+.bm-key-glyph.is-hit-a,
+.bm-key-glyph.is-hit-b,
+.bm-key-glyph.is-hit-both { border: 2px solid #ffffff; }
+.bm-key-glyph.is-hit-a {
+  width: 12px; height: 12px; margin: 1px; border-radius: 50%;
+}
+.bm-key-glyph.is-hit-b { width: 12px; height: 12px; margin: 1px; }
+/* The doubled mark is the one glyph that cannot be drawn to the plot's own
+   proportions. There, a 2.2 px stroke on a 27 px square is 8% of the mark, and
+   the 20 px circle inside it leaves a 3.5 px gap; scaled into a 14 px box that
+   gap is under a pixel, and the two strokes merge into a filled white square
+   with a hole - which is what the first attempt rendered. So the box grows to
+   17 px and the inner circle is inset further than faithfulness would put it:
+   the gap has to survive at 1x, because "a ring inside a square" is the whole
+   content of this row. */
+.bm-key-glyph.is-hit-both {
+  width: 17px; height: 17px; margin: -1.5px;
+}
+.bm-key-glyph.is-hit-both::after {
+  content: ""; position: absolute; inset: 4px;
+  border: 2px solid #ffffff; border-radius: 50%;
+}
+
+/* The corpus shapes. Neutral-filled: these marks take their color from the
+   color-by above, and the shape is the whole message. */
+.bm-key-glyph.is-corpus-archs4 {
+  width: 7px; height: 7px; margin: 3.5px; border-radius: 50%;
+}
+.bm-key-glyph.is-corpus-archs4 .bm-key-glyph-fill { border-radius: 50%; }
+.bm-key-glyph.is-corpus-osdr {
+  width: 9px; height: 9px; margin: 2.5px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 1.5px #ffffff;
+}
+.bm-key-glyph.is-corpus-osdr .bm-key-glyph-fill { border-radius: 1px; }
+
+/* ---- Color-by coverage readout ---------------------------------------
+   Sits directly under the color-by control and states how much of the map
    the selected field actually paints. This is the answer to "why is most of
-   my map not coloured?", given before the question is asked. */
+   my map not colored?", given before the question is asked. */
 .bm-coverage { margin-top: 9px; }
 /* The track needs enough contrast to read as a track. An OSDR-only field fills
    0.2% of it, and against the old near-white #e3eaf3 that sliver looked like a
@@ -296,7 +400,7 @@
   transition: width 0.18s ease;
 }
 /* Amber, not red: a field that only describes OSDR is working correctly, not
-   failing. The colour marks a limit worth knowing, not an error. */
+   failing. The color marks a limit worth knowing, not an error. */
 .bm-coverage-fill.partial { background: var(--accent-warm); }
 .bm-coverage-text {
   font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;

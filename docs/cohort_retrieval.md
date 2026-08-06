@@ -13,7 +13,7 @@ Every number below was produced by `precompute/validate_cohorts.py` against the 
 | Against a structure-free null | 0.331, so the cohort definition is worth **+0.407** |
 | Against a within-study null | 0.683, so tissue and arm are worth **+0.055** on top of the study |
 | Cost of a pooled query | one memmap pass, the same ~0.5 s as a single sample, at any k |
-| Tests | 36 unit tests, 92 browser checks, 6 corpus-scale validation checks |
+| Tests | 40 unit tests, 124 browser checks, 6 corpus-scale validation checks |
 
 ## Why this exists, in one paragraph
 
@@ -246,16 +246,23 @@ Cohort mode, top to bottom:
 4. **The cohort card**: k pooled, the measured stability at this k, and the amber low-N flag when it applies.
 5. **Members**, a collapsed disclosure listing every sample with its leave-one-out cosine, each with a checkbox. Any member flagged as an outlier is marked, never removed.
 6. **Compare against**, an optional sibling-cohort picker, empty by default.
-7. **Search cohort**.
+7. **A second cohort card**, when one is armed. Added 2026-08-06.
+8. **Search cohort**.
 
 The rail's existing rule holds: the fact that qualifies a control sits directly under that control.
 The cohort-count line hangs under the facet chips, and the confidence card hangs under the cohort picker.
+
+Step 7 exists because a comparison runs **two** independent pooled queries and the rail described one of them.
+That is not a symmetry argument. `STABILITY_BY_K` is a function of size, so an overlap of 0.25 between a 12-animal cohort at 0.81 and a 2-animal cohort at 0.34 means something quite different from the same 0.25 between two cohorts of twelve - and the number that decides how much of the overlap to believe was on screen for the first arm only, while the second got a color in the network figure and a mark on the map.
+It sits under "Compare against" rather than beside the first card for the rule above, and because that ordering keeps the member ticks - which belong to cohort A alone - next to cohort A's card.
+Both cards take a role line (`● COHORT A`, `● COHORT B · differs by spaceflight arm`) **only when there are two**; a lone cohort gets no letter, since there is nothing to tell it apart from.
+The contrast facet is stated once, on the second card, because it is a property of the pair.
 
 ## 8. Testing
 
 Three layers, each answering a question the others cannot.
 
-**`tests/test_cohorts.py`, 36 tests, against the synthetic fixture corpus.**
+**`tests/test_cohorts.py`, 40 tests, against the synthetic fixture corpus.**
 Facet grouping, the estimator, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
 Two are worth calling out because they pin claims made in prose everywhere else.
 `test_pooled_ranking_is_the_mean_of_the_members_own_cosines` checks the central algebraic claim directly: ranking by cosine to the spherical mean is identical to ranking by the unweighted average of the members' own cosines, which is what "ask every animal, then average the votes" means.
@@ -264,7 +271,7 @@ Two are worth calling out because they pin claims made in prose everywhere else.
 **`precompute/validate_cohorts.py`, 6 checks, against the real corpus.**
 Section 6. This is the only layer that can speak to whether pooling works, as opposed to whether it computes what it says.
 
-**`tests/e2e_cohort_check.py`, 92 browser checks, against the real app and the real cache.**
+**`tests/e2e_cohort_check.py`, 124 browser checks, against the real app and the real cache.**
 Define a cohort, retick facets, watch the count change, read the confidence card, open the member list, pool and search, open the inspector, exclude a member and watch every number restate, compare two arms, and follow the whole cohort to the map.
 It asserts on what the page reports about itself, and two of its checks exist because this feature shipped those exact regressions and had them fixed: callbacks firing at page load so the canvas greeted a visitor with "Cohort retrieval failed", and the legend continuing to advertise a GSE column while a comparison that draws none was on screen.
 
@@ -311,10 +318,10 @@ So the two channels are split by what each can carry:
 Hue is safe on a member because a member is a *filled* mark with a 2 px white outline: its findability comes from the outline, so the fill only has to be discriminable from the other cohort's fill.
 Gold `#ffc233` against teal `#0bab9f` measures CIEDE2000 **43.4** in normal vision and **31.7 / 45.0 / 48.0** under protanopia, deuteranopia and tritanopia, every one far above the 8.4 CVD bar the categorical palette was validated to.
 It is 10.5:1 against `PLOT_BG` and 17.0 dE from the nearest categorical hue, so it cannot be read as a legend row.
-`ACCENT_WARM #d9791b`, the network's own cohort-B colour, was rejected for the map specifically: it sits 0.3 dE from `CATEGORICAL[3]` under deuteranopia.
+`ACCENT_WARM #d9791b`, the network's own cohort-B color, was rejected for the map specifically: it sits 0.3 dE from `CATEGORICAL[3]` under deuteranopia.
 
 Cohort A keeps teal deliberately.
-A comparison is then the single-cohort case plus a second thing, rather than a new colour scheme, so a single-sample map, a single-cohort map and the first arm of a comparison all draw the same mark.
+A comparison is then the single-cohort case plus a second thing, rather than a new color scheme, so a single-sample map, a single-cohort map and the first arm of a comparison all draw the same mark.
 
 **A shared hit is emergent, never computed.** It is in both hit lists, so it receives both traces: a 20 px ring inscribed in a 27 px square. There is no third symbol and no set intersection in the renderer, which means the shared set drawn on the map cannot drift from the `comparison["shared"]` the banner quotes, because it is not calculated twice.
 
@@ -332,16 +339,21 @@ A comparison is then the single-cohort case plus a second thing, rather than a n
 
 The map rail's "Show it on the map" checkbox becomes **one tick per cohort**, labelled with each cohort's own name, both on by default.
 It is the same control rather than a new one, so nothing else about the rail changes, and unticking one is the escape hatch when two 38-member cohorts crowd the same region.
-Directly under it sits a colour key naming each cohort against its swatch, stating how many hits each retrieved and how many both did, and saying that a ring inside a square is a hit both found.
-That follows the rail's existing rule: the fact that qualifies a control sits under that control.
 
 Framing follows the ticks, so "Frame the retrieval" frames what is actually drawn.
 
-### The cross-view colour swap
+**Superseded on 2026-08-06.** A color key sat directly under those ticks, naming each cohort against a swatch and saying in prose that a ring inside a square is a hit both arms found.
+It moved onto the plot, into the floating key, and the reason it moved is the reason this section gave for putting it on the rail: put the fact where the misreading happens, and the misreading happens at the glyph.
+Two further things were wrong with it there.
+The ticks immediately above already carry each cohort's name, so the rail named them twice; and the swatches keyed only the *member* hues, while the hits - which outnumber the members and are what a comparison is about - were encoded by a shape the rail never mentioned.
+What is left on the rail is one line of the control's own feedback ("Both arms drawn, **10** hits, **2** of them retrieved by both").
+`docs/map_key.md` is the design document for what replaced it.
+
+### The cross-view color swap
 
 `GRAPH_THEME` expressed the comparison network's A / B / shared language through keys named `gsm`, `gse` and `query`, which mean something else in `build_network_figure`, and it gave "retrieved by both" `#0bab9f` - the exact hex the map uses for the query.
-Teal therefore meant "the query" in one view and "a shared hit" in the other, for the same search, and running a comparison silently recoloured the query star that the search a minute earlier had drawn teal.
+Teal therefore meant "the query" in one view and "a shared hit" in the other, for the same search, and running a comparison silently recolored the query star that the search a minute earlier had drawn teal.
 
 Two literals fix it: cohort A becomes teal and "retrieved by both" becomes blue.
-Both views now agree that teal is cohort A and warm is cohort B, while each renders "both" the way its own canvas supports - a colour on white, a doubled mark on navy.
+Both views now agree that teal is cohort A and warm is cohort B, while each renders "both" the way its own canvas supports - a color on white, a doubled mark on navy.
 `GRAPH_THEME` gains `cohort_a` / `cohort_b` / `cohort_shared` keys so the retrieval view names what it means.

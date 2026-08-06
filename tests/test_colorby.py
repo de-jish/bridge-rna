@@ -112,7 +112,7 @@ def test_the_renderer_does_not_serve_tissue_from_a_stale_cache(
         corpus, without_archs4_metadata):
     """The colour plan is memoized, so it has to be invalidated with the join.
 
-    ``render._colour_plan`` caches a label array derived from
+    ``render._color_plan`` caches a label array derived from
     ``archs4_metadata.parquet``. If it survives the artifact disappearing, the
     map keeps colouring 940,455 ARCHS4 points by a tissue table that is no
     longer there - a picture with no data behind it, which is worse than the
@@ -120,7 +120,7 @@ def test_the_renderer_does_not_serve_tissue_from_a_stale_cache(
     """
     from manifold import render
 
-    codes, legend = render._colour_plan("tissue")
+    codes, legend = render._color_plan("tissue")
     n_archs4, n_osdr, _ = data.counts()
     assert (codes[:n_archs4] == render.NOT_COVERED_CODE).all(), (
         "ARCHS4 points carry tissue categories with no metadata join present")
