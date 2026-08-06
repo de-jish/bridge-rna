@@ -731,44 +731,76 @@ def register(app) -> None:
 
     @app.callback(
         Output("cohort-card", "children"),
+        Output("cohort-compare-card", "children"),
         Output("cohort-members-summary", "children"),
         Output("cohort-search-button", "disabled"),
         Input("cohort-members", "value"),
         Input("cohort-dropdown", "value"),
+        Input("cohort-compare-dropdown", "value"),
         State("cohort-facets-store", "data"),
     )
     def update_cohort_card(included: list[str] | None, cohort_id: str | None,
-                           facets: list[str] | None):
-        """Restate size and stability for what is actually ticked.
+                           compare_id: str | None, facets: list[str] | None):
+        """Restate size and stability for every pooled query that will run.
 
         This reads the *included* members rather than the cohort's full
         membership, because excluding two of six changes every number on the
         card. A card that kept quoting the cohort's nominal size while the pool
         shrank underneath it would be the same failure as the status banner that
         announced cached results as subprocess output.
+
+        The same argument reaches one step further and is why this writes two
+        cards. Arming a comparison runs a *second* independent pooled query, and
+        the rail used to say nothing about its size or its stability while both
+        the network figure and the map gave it a color and drew it. A pooled
+        query that is described nowhere is one the reader cannot weigh: cohort
+        B can easily be the smaller and shakier of the two, and that changes how
+        much of the overlap number to believe.
+
+        B's membership is not editable - the member ticks belong to the
+        selected cohort - so its card always describes the whole sibling.
         """
+        empty = ""
         cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
         if cohort is None:
             return (html.Div("Select a cohort to see how far to trust it.",
                              className="cohort-card cohort-card--empty"),
-                    "Members", True)
+                    empty, "Members", True)
         members = [m for m in (included or []) if m in set(cohort.members)]
         excluded = [m for m in cohort.members if m not in set(members)]
+
+        # The second card is resolved first so it can be reported even while the
+        # first is in a state that cannot pool. Its absence is the common case
+        # and costs one dict lookup.
+        other = C.find_cohort(_safe_str(compare_id), facets=facets)
+        other_card, role = empty, ""
+        if other is not None:
+            other_geometry, _ = _geometry_for(list(other.members))
+            if other_geometry is not None:
+                facet = C.contrast_facet(cohort, other)
+                contrast = (C.FACETS_BY_KEY[facet].label.lower()
+                            if facet else "")
+                role = "a"
+                other_card = build_cohort_card(other, other_geometry, role="b",
+                                               contrast=contrast)
+
         if len(members) < C.MIN_COHORT_SIZE:
             note = ("Tick at least two samples to pool."
                     if excluded else
                     "Pooling needs at least two samples.")
             return (html.Div(note, className="cohort-card cohort-card--empty"),
-                    f"Members ({len(members)} of {cohort.size})", True)
+                    other_card, f"Members ({len(members)} of {cohort.size})",
+                    True)
         geometry, _missing = _geometry_for(members)
         if geometry is None:
             return (html.Div("These samples have no precomputed embeddings.",
                              className="cohort-card cohort-card--empty"),
-                    "Members", True)
+                    other_card, "Members", True)
         summary = (f"Members ({len(members)})" if not excluded
                    else f"Members ({len(members)} of {cohort.size}, "
                         f"{len(excluded)} excluded)")
-        return build_cohort_card(cohort, geometry), summary, False
+        return (build_cohort_card(cohort, geometry, role=role), other_card,
+                summary, False)
 
     @app.callback(
         Output("cohort-compare-dropdown", "options"),
@@ -802,7 +834,7 @@ def register(app) -> None:
                          "value": s.cohort_id})
         return (opts, None,
                 "Runs the second cohort as its own pooled query and reports how "
-                "much of the top-k the two share. Not a difference vector.")
+                "much of the top-k the two share.")
 
     @app.callback(
         Output("network-graph", "figure", allow_duplicate=True),
@@ -1140,7 +1172,7 @@ def register(app) -> None:
     def describe_the_canvas(hits_payload: dict[str, Any] | None):
         """Keep the legend and the subtitle describing what is actually drawn.
 
-        A comparison draws no GSE nodes and two query stars whose colours mean
+        A comparison draws no GSE nodes and two query stars whose colors mean
         something; a single-sample network draws one star and a GSE column. The
         strip above the plot said the second thing in both cases, which is the
         same class of error as the status banner that announced every cached

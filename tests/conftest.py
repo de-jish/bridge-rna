@@ -50,7 +50,7 @@ def without_archs4_metadata(monkeypatch):
     ``.exists()``. The caches must be cleared on both sides of the patch, since
     they would otherwise carry the metadata in or out of the test.
 
-    ``render._colour_plan`` belongs in this list for the same reason the two
+    ``render._color_plan`` belongs in this list for the same reason the two
     loaders do: it memoizes a label array derived from the metadata, so leaving
     it warm would let a test see Tissue colouring ARCHS4 in a state where the
     join does not exist. Every cache that stands downstream of an artifact this
@@ -61,7 +61,7 @@ def without_archs4_metadata(monkeypatch):
     def clear():
         data.archs4_metadata.cache_clear()
         data.archs4_tissue.cache_clear()
-        render._colour_plan.cache_clear()
+        render._color_plan.cache_clear()
 
     clear()
     monkeypatch.setattr(paths, "ARCHS4_METADATA_PARQUET",

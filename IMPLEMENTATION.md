@@ -455,9 +455,9 @@ What the declaration buys, in the interface:
   Dash's dropdown has no option-group support, so the grouping is carried by ordering plus the suffix rather than by faked disabled header rows.
 - **A field with no data at all is shown and disabled, with the command that enables it**, not hidden.
   Hiding it makes the app look like it never had the feature; showing it disabled next to `precompute/fetch_archs4_meta.py` says the feature exists and how to switch it on.
-- **A coverage bar and an exact point count sit directly under the control**: "Colours all 942,563 points." against "Colours 2,108 of 942,563 points (0.2%). ARCHS4 is drawn as faint context."
+- **A coverage bar sits directly under the control**, with an exact point count beside it only when coverage is partial: "Colors 2,108 of 942,563 points (0.2%). ARCHS4 is drawn as faint context." A whole-map field says nothing at all, because a full bar already does - "Colours all 942,563 points." sat there until 2026-08-06 and only restated it in words.
   The partial bar is amber, not red, because an OSDR-only field is working correctly and is not failing.
-  This is the control that answers "why is so much of my map not coloured?" before the user has to ask it.
+  This is the control that answers "why is so much of my map not colored?" before the user has to ask it.
 - **The app opens on the best whole-map field that works**, and falls back to species rather than raising if a browser holds a stale key across a rebuild.
 
 The degraded state, where `archs4_metadata.parquet` was never fetched, is a first-class path rather than an afterthought: Tissue stays available but drops out of the whole-map group and reports OSDR-only coverage with the fix attached, and Species still covers the whole map because it comes from the identity table.

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dash import dcc, html
 
-from . import colorby, data, render
+from . import colorby, data, render, theme
 
 
 def color_by_label(value: str) -> str:
@@ -31,7 +31,7 @@ def method_options() -> list[dict]:
     """The Projection pills, each disabled when its coordinates are not built.
 
     Disabled-and-visible rather than hidden, for the reason `colorby` gives for
-    an unavailable colour-by: hiding it makes the app look like it never had the
+    an unavailable color-by: hiding it makes the app look like it never had the
     feature. t-SNE is the one most likely to be missing, because it is the most
     expensive stage in the build and the only one that can be skipped without
     skipping the rest.
@@ -211,7 +211,7 @@ def control_rail() -> html.Div:
         className="bm-rail",
         children=[
             # The parameter readout sits directly under the control it
-            # describes, which is the same rule the colour-by coverage readout
+            # describes, which is the same rule the color-by coverage readout
             # below follows: the fact that qualifies a control belongs against
             # that control, not in a tooltip and not in the plot badges, which
             # report what is drawn right now and change on every zoom.
@@ -228,7 +228,7 @@ def control_rail() -> html.Div:
                 ], "2d"),
             ]),
             # The color-by group carries its own coverage readout, so the answer
-            # to "how much of this map is this field actually colouring?" sits
+            # to "how much of this map is this field actually coloring?" sits
             # next to the control that decides it rather than being inferred
             # from how grey the plot looks.
             html.Div(className="bm-group", children=[
@@ -263,10 +263,6 @@ def control_rail() -> html.Div:
             html.Div(className="bm-group", children=[
                 html.Div("ARCHS4 point budget", className="bm-group-label"),
                 _segmented("budget", budget_options("2d"), default_budget("2d")),
-                html.Div(
-                    "One glyph per sample; zoom re-samples the visible window.",
-                    className="bm-hint",
-                ),
             ]),
             # Clicking an OSDR point offers a retrieval for it. Hidden until
             # something is clicked; the map is read rather than driven, so this
@@ -296,15 +292,20 @@ def control_rail() -> html.Div:
                 html.Div(id="retrieval-summary", className="bm-hint"),
                 html.Button("Frame the retrieval", id="frame-retrieval",
                             n_clicks=0, className="bm-button"),
-                # This is the caveat that keeps the feature honest, and it is
-                # placed with the control rather than in a tooltip because the
-                # temptation to read rank off the picture is immediate.
+                # What each mark means now lives in the key on the plot, beside
+                # the marks. What stays here is the one thing the picture cannot
+                # show: that a hit carries two different orderings, and the
+                # nearer of two hits on screen is not the better one.
+                # Not "into two". This div is static and the group stays on
+                # screen in 3-D, where that would be a false statement to a
+                # reader looking at three axes - the same class of error as a
+                # parameter chip naming one t-SNE gradient method for both
+                # dimensionalities. The claim is true of any projection, so it
+                # is made that way rather than made dims-aware.
                 html.Div(
-                    "Hits are ranked by cosine distance in 512 dimensions. "
-                    "This map is a projection into two or three of them and "
-                    "does not preserve those distances, so how far a hit sits "
-                    "from the query here is not its rank, and no line is drawn "
-                    "between them. Hover a hit for both orderings.",
+                    "Hover a hit for its rank in the search and its rank on "
+                    "the map. The two disagree: a projection cannot preserve "
+                    "512-dimensional distances.",
                     className="bm-hint",
                 ),
             ]),
@@ -312,23 +313,198 @@ def control_rail() -> html.Div:
     )
 
 
+# --- The key on the plot -----------------------------------------------------
+#
+# Every mark the map can draw is decoded here, in one panel, beside the marks.
+# Before this the map explained exactly one of its four encodings: the floating
+# legend keyed hue for the corpus, and everything else - that a diamond is an
+# OSDR sample, that a white ring is a retrieved hit, that a round ring and a
+# square ring are two different cohorts, that a ring inside a square is a hit
+# both of them found - was either prose on a rail 800 px from the glyph it
+# described, or nothing at all. A viewer who did not already know the scheme
+# could only decode the picture by hovering it one point at a time.
+#
+# The hues below are read from `theme`, never mirrored into the stylesheet, so
+# a change to RETRIEVAL_QUERY moves the plot and the key together. The
+# stylesheet owns the *shapes*, because a shape has no Python constant to drift
+# from - and the white it draws the hit rings in is the same white for the same
+# measured reason (theme.RETRIEVAL_HIT_RING: no hue clears 3:1 against the worst
+# categorical bucket on the navy canvas).
+
+#: What the corpus glyph shapes mean. Neutral-filled, because these marks take
+#: their color from the color-by and the shape is the whole message.
+CORPUS_KEY = (("archs4", "ARCHS4"), ("osdr", "OSDR"))
+CORPUS_KEY_COLOR = "#8ea6c9"
+
+
+def _key_glyph(kind: str, color: str | None = None):
+    """One mark, drawn as the mark rather than named in words.
+
+    `kind` selects the shape from the stylesheet; `color` is the fill for the
+    shapes that have one, applied inline so it can come straight from `theme`.
+    """
+    fill = ([html.Span(className="bm-key-glyph-fill",
+                       style={"background": color})] if color else [])
+    return html.Span(className=f"bm-key-glyph is-{kind}", children=fill)
+
+
+def _key_row(kind: str, label: str, count=None, color: str | None = None,
+             hidden: bool = False):
+    """A glyph, what it means, and how many are on screen right now.
+
+    The count follows the color legend's rule and reports what is *drawn*,
+    which for a retrieval is the whole of it - nothing about the overlay is
+    sampled or budgeted. It is omitted entirely rather than rendered as an
+    empty slot for the rows that are a shape key and have nothing to count.
+    """
+    tail = ([html.Span(f"{count:,}" if isinstance(count, int) else str(count),
+                       className="bm-key-count")]
+            if count is not None else [])
+    return html.Div(
+        className="bm-key-row" + (" is-hidden" if hidden else ""),
+        children=[_key_glyph(kind, color),
+                  html.Span(label, className="bm-key-label"), *tail])
+
+
+#: A member mark is a star in 2-D and a diamond in 3-D, because `Scatter3d`
+#: rejects `star` outright. The key follows the plot rather than picking one
+#: and being wrong in the other view.
+def _member_shape(dims: str) -> str:
+    return "diamond" if dims == "3d" else "star"
+
+
+def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
+                           dims: str) -> list:
+    """The retrieval section of the key: every overlay mark, decoded.
+
+    `overlay` is the **full** payload, including an arm the user has unticked,
+    and `roles` is what is actually ticked. A hidden arm keeps its rows, receded
+    and marked "hidden", so the hue it owns is still named - dropping them would
+    leave a gold glyph on screen a moment later with nothing to look it up in,
+    and would make the key silently disagree with the ticks above it.
+
+    **A comparison is grouped by role, not by cohort, and that is the whole
+    design.** The encoding has two factors - which cohort, and member versus
+    hit - and they do not use the same channel: hue names the cohort on a
+    member, ring shape names it on a hit. Listing each cohort's two marks
+    together buries that. Listing the two member rows adjacent and the two hit
+    rows adjacent shows it: one pair differs only in hue, the next differs only
+    in shape, and the reader sees each channel vary with the other held fixed.
+    No sentence has to assert the rule, which is what makes this readable at a
+    glance rather than after a paragraph.
+
+    The single-query state must not pay for the comparison: a plain search gets
+    two rows and no headings, because with one query on screen there is nothing
+    for a name or a group to distinguish it from.
+    """
+    if not overlay or not overlay.get("cohorts"):
+        return []
+
+    cohorts = overlay["cohorts"]
+    shape = _member_shape(dims)
+
+    if len(cohorts) == 1:
+        c = cohorts[0]
+        # The single tick hides the whole overlay, so the rows recede exactly as
+        # a comparison's do. Missing this was a real defect: unticking "Show it
+        # on the map" left the plot with no star and no ring while the key went
+        # on counting one member and five hits, which is the failure the count
+        # rule exists to prevent - and it happened in the commonest state of all.
+        hidden = c["role"] not in roles
+        rows = []
+        n_members = len(c["query_points"])
+        if n_members:
+            # An uploaded sample was never embedded into this map, so it has no
+            # coordinate, draws no member mark, and gets no row. "pooled member"
+            # is earned by k >= 2, not by the code path: for a single-sample
+            # search the one member *is* the query.
+            rows.append(_key_row(
+                shape, "pooled member" if n_members > 1 else "the query sample",
+                "hidden" if hidden else n_members, theme.RETRIEVAL_QUERY,
+                hidden=hidden))
+        rows.append(_key_row("hit-a", "retrieved hit",
+                             "hidden" if hidden else len(c["hit_points"]),
+                             hidden=hidden))
+        return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
+
+    hues = {"a": theme.RETRIEVAL_QUERY, "b": theme.RETRIEVAL_QUERY_B}
+    hit_shapes = {"a": "hit-a", "b": "hit-b"}
+
+    def arm(c, kind, count, color=None):
+        hidden = c["role"] not in roles
+        return _key_row(kind, c["label"] or "cohort",
+                        "hidden" if hidden else count, color, hidden=hidden)
+
+    rows = [html.Div("Pooled members", className="bm-key-head")]
+    rows += [arm(c, shape, len(c["query_points"]), hues[c["role"]])
+             for c in cohorts]
+    rows.append(html.Div("Retrieved hits", className="bm-key-head"))
+    rows += [arm(c, hit_shapes[c["role"]], len(c["hit_points"]))
+             for c in cohorts]
+
+    if all(c["role"] in roles for c in cohorts):
+        # Last row of the hits group, where it belongs: it is not a third
+        # cohort, it is one point wearing both cohorts' rings. Drawn only when
+        # both arms are, because with one hidden the doubled mark cannot exist.
+        rows.append(_key_row("hit-both", "retrieved by both",
+                             len(overlay.get("shared_points") or [])))
+    return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
+
+
+def corpus_key_children(layers: list | None) -> list:
+    """The shape key for the two corpora, under the color list.
+
+    Hue is what the color legend keys; this is the other channel, and it was
+    the one nothing on screen explained. A diamond has meant "one of the 2,108
+    NASA spaceflight samples" since the map was built, stated in the render
+    module's docstring and nowhere a viewer could read it.
+
+    Only drawn layers get a row, because a key is what you are looking at.
+
+    It deliberately does not take the color-by. A row here says "this shape is
+    an ARCHS4 sample", which stays true whether that corpus is drawn in eleven
+    tissue hues or in one faint context color - and the context state is
+    already stated twice, by the plot badge and by the coverage readout. Taking
+    the color-by would imply this row varies with it, and invariant 5 is
+    specifically that the context cloud gets no *category* treatment: a swatch,
+    a hue from the palette, a count. A shape, with none of those, is not one.
+    """
+    drawn = set(layers or [])
+    rows = [_key_row(f"corpus-{key}", label, color=CORPUS_KEY_COLOR)
+            for key, label in CORPUS_KEY if key in drawn]
+    if not rows:
+        return []
+    return [html.Div(className="bm-key bm-key--corpus", children=rows)]
+
+
 def legend_panel() -> html.Div:
-    """The floating color key.
+    """The floating key: what is drawn on top, what the colors mean, what the
+    shapes mean.
 
     Every part is declared statically and filled by callbacks, rather than the
     whole panel being rebuilt as callback output. Dash validates its callback
     graph against the initial layout, so components that only ever exist as
     callback output cannot be checked - a typo in one of their ids fails
     silently at runtime instead of loudly at startup.
+
+    The three sections are ordered by how transient each is. The retrieval sits
+    at the top because it is the thing the reader just asked for and the thing
+    that will be gone next search; the color list is the standing state of the
+    map and is the only part that scrolls; the corpus shapes are a footnote and
+    never change. Only the middle one can grow, so only the middle one scrolls.
     """
     return html.Div(
         id="legend", className="bm-legend", style={"display": "none"},
         children=[
-            html.Div(id="legend-title", className="bm-legend-title"),
-            dcc.Input(id="legend-search", className="bm-legend-search",
-                      placeholder="filter categories…", type="text",
-                      debounce=False, style={"display": "none"}),
-            html.Div(id="legend-list", className="bm-legend-list"),
+            html.Div(id="legend-retrieval"),
+            html.Div(id="legend-color", className="bm-legend-section", children=[
+                html.Div(id="legend-title", className="bm-legend-title"),
+                dcc.Input(id="legend-search", className="bm-legend-search",
+                          placeholder="filter categories…", type="text",
+                          debounce=False, style={"display": "none"}),
+                html.Div(id="legend-list", className="bm-legend-list"),
+            ]),
+            html.Div(id="legend-corpus"),
         ],
     )
 

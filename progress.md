@@ -6,6 +6,42 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-06 (the map keys every mark it draws; both pooled queries get described)
+
+A copy pass over both views, plus one design change and two defects the audit behind it turned up.
+Full design document: `docs/map_key.md`.
+
+**Seven sentences deleted from the interface.**
+"Not a difference vector." / "Nothing is dropped for you." / the three-line metadata-enrichment cost note / "Colours all 942,563 points." / the Tissue color-by's anatomical-vocabulary paragraph / "One glyph per sample; zoom re-samples the visible window." / "Each glyph is a pooled member; the query itself is a mean of them and has no position here."
+Each was either a fact the control already carried, a reassurance against a fear the interface never raised, or a definition-by-negation aimed at a suspicion nobody had.
+The long map caveat about cosine rank went too; its last sentence was kept and rewritten to stand alone: "Hover a hit for its rank in the search and its rank on the map. The two disagree: this is a projection of 512 dimensions into two."
+`test_the_removed_copy_stays_removed` pins all of them, because prose regresses silently and nothing else in the suite would notice a paragraph coming back.
+
+**The map view spells `color`.** Strings, comments and identifiers, including `_colour_plan` -> `_color_plan`. This was drift rather than a choice: the package is `colorby.py`, the control is `#color-by`, the functions were already `color_for_index` and `covers_corpus`. `test_the_map_view_spells_color_the_american_way` keeps it.
+
+**The floating legend became the map's key.**
+With a comparison drawn the map carries four encodings at once - corpus glyph hue, member fill hue, hit ring shape, corpus glyph shape - and it explained one.
+Ring shape had no key anywhere, which is the worst of the four: in a comparison the hits outnumber the members and are the thing the feature exists to show.
+Neither did the diamond that has meant "one of the 2,108 spaceflight samples" since the map was built.
+The panel now runs retrieval key / color list / corpus shape footer, ordered by how transient each is, and only the color list scrolls.
+
+**A comparison's key is grouped by role, not by cohort.** The two member rows sit adjacent and differ only in hue; the two hit rows sit adjacent and differ only in shape. The reader sees each channel vary with the other held fixed, so the layout is the explanation and the sentence that used to assert it could be deleted rather than reworded. Grouping by cohort was built first and buries exactly that.
+Shapes are CSS, **hues come from `theme` inline** - which removes the last place a cohort hue was written twice, since the rail's swatches had mirrored both hexes into `map.css` by hand.
+The key follows the plot into 3-D, where a member is a diamond because `Scatter3d` rejects `star`.
+The rail keeps one line of tick feedback; the swatch key and its paragraph are gone.
+
+**Both pooled queries are now described.** Arming a comparison ran a second independent pooled query whose size and stability were stated nowhere, while the network and the map both gave it a color. `STABILITY_BY_K` is a function of size, so an overlap of 0.25 between a cohort of 12 at 0.81 and one of 2 at 0.34 is not the same finding as 0.25 between two cohorts of 12 - and the number that decides which it is was off screen. Each query now carries a card under its own picker, with a role line and the contrast facet, only when there are two.
+
+**Two defects, neither in scope, both found by auditing marks against explanations.**
+*3-D silently discarded the OSDR overlay's diamond and its white ring* - `_scatter`'s `Scatter3d` branch passed no `symbol` and hard-coded `line=dict(width=0)`, so 2,108 spaceflight samples arrived as plain circles in the same palette hue as the 940,455 beneath them, contradicting `render.py`'s own docstring. `test_osdr_markers_are_visually_distinct_from_the_cloud` missed it because it only ever ran `("pca", "2d")`. This was a prerequisite for the corpus key, not a bonus: a key asserting a diamond 3-D does not draw is worse than the silence it replaced.
+*A hit retrieved by both cohorts named one arm on hover.* Two traces at one coordinate, one tooltip per position - so for exactly the points a comparison exists to show, one arm's rank and cosine were unreachable, while `render.py` justified dropping the rank numerals on the grounds that the hover said more. A pre-pass now indexes each drawn point by the cohorts that retrieved it. The **marks** stay emergent; only the hover reads across the arms.
+
+**Two bugs of my own that only a screenshot caught.** The divider under the retrieval key was `.bm-key:not(:last-child)`, which can never fire - each key is the only child of its own slot. Rewritten as a modifier class, it then landed on one of the two return statements, because the comparison branch returns from a different indent. Both key tests now assert it. Neither failure was visible to any assertion.
+
+Tests: 307 unit (was 290), 242 browser checks (was 205) - 50 map, 68 upload, 124 cohort. All passing.
+
+**Open, not addressed:** the header subtitle reads "NASA spaceflight transcriptomes, against all of Earth's" and ends without an object. It has been that way since the merge commit and is not a regression, but it reads as a truncation. Left alone because it is the product's tagline and rewriting it is an editorial call, not a bug fix.
+
 ## 2026-08-05, later (cohort UX narrowed, and the comparison reaches the map)
 
 Four changes, two of them removals, plus two bugs that the work uncovered rather than caused.

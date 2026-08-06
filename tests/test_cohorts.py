@@ -429,3 +429,104 @@ def test_unknown_facet_values_are_named_rather_than_blank():
     assert C.facet_value({"tissue": ""}, "tissue") == "Unknown"
     assert C.facet_value({"tissue": "nan"}, "tissue") == "Unknown"
     assert C.facet_value({"duration": "37 {day}"}, "duration") == "37 day"
+
+
+# --- Two pooled queries, two descriptions ------------------------------------
+#
+# A comparison runs a second independent pooled query. Until 2026-08-06 the
+# interface described the first and gave the second only a colour, in the
+# network figure and on the map. `STABILITY_BY_K` is a function of size, so the
+# arm whose size was off screen is exactly the one that decides how much of the
+# reported overlap to believe.
+
+
+def _series(component) -> str:
+    """Flatten a Dash component tree to its visible text."""
+    from dash.development.base_component import Component
+
+    if isinstance(component, str):
+        return component
+    if isinstance(component, (list, tuple)):
+        return " ".join(_series(c) for c in component)
+    if isinstance(component, Component):
+        children = getattr(component, "children", None)
+        return _series(children) if children is not None else ""
+    return ""
+
+
+def _one_cohort():
+    """Any real cohort from the fixture corpus, with its geometry."""
+    import numpy as np
+
+    cohort = next(c for c in C.build_cohorts() if c.size >= C.MIN_COHORT_SIZE)
+    rng = np.random.default_rng(0)
+    rows = rng.normal(size=(cohort.size, 8)).astype("float32")
+    return cohort, C.cohort_geometry(list(cohort.members), rows)
+
+
+def test_a_lone_cohort_card_carries_no_role_letter():
+    """With no second arm on screen there is nothing for a letter to tell it
+    apart from, so adding one would be chrome for a distinction that does not
+    exist yet."""
+    from bridge_rna.panels import build_cohort_card
+
+    cohort, geometry = _one_cohort()
+    card = build_cohort_card(cohort, geometry)
+    assert "Cohort A" not in _series(card)
+    assert "is-a" not in str(card.className)
+
+
+def test_each_arm_of_a_comparison_names_itself_and_its_hue():
+    """The role line and the left rule are the only thing binding a card to the
+    star it describes in the network figure and to the mark on the map."""
+    from bridge_rna.panels import build_cohort_card
+
+    cohort, geometry = _one_cohort()
+    a = build_cohort_card(cohort, geometry, role="a")
+    b = build_cohort_card(cohort, geometry, role="b",
+                          contrast="spaceflight arm")
+
+    assert "Cohort A" in _series(a) and "is-a" in a.className
+    assert "Cohort B" in _series(b) and "is-b" in b.className
+    # The facet belongs to the pair, so it is stated once, on the second card.
+    assert "differs by spaceflight arm" in _series(b)
+    assert "differs by" not in _series(a)
+    # Both still answer the question the card exists for.
+    for card in (a, b):
+        assert "samples pooled into one query" in _series(card)
+
+
+def test_the_inspector_names_which_arm_it_is_opening_only_in_a_comparison():
+    """Opening on cohort A used to read as *the* pooled query rather than as one
+    of two, with nothing saying the other star leads to its twin."""
+    import pandas as pd
+
+    from bridge_rna.panels import build_cohort_details
+
+    query = pd.Series({"cohort_label": "Liver · Space Flight", "is_cohort": "1",
+                       "study_id": "OSD-1", "members": "a|1\na|2",
+                       "grouped_by": "Study, Tissue", "stability": "0.34 at k = 2"})
+    assert "Cohort A" not in _series(build_cohort_details(query))
+    assert "Cohort A" in _series(build_cohort_details(query, role="a"))
+    assert "Cohort B" in _series(build_cohort_details(query, role="b"))
+    # The letter qualifies the heading; it never replaces the cohort's own name.
+    assert "Liver · Space Flight" in _series(build_cohort_details(query, role="b"))
+
+
+def test_the_cards_dot_colours_are_the_figures_own():
+    """Plotly cannot read a CSS variable, so `GRAPH_THEME` mirrors the tokens.
+    A drifted pair would give a card and the star it describes two colours."""
+    import re
+    from pathlib import Path
+
+    from bridge_rna.figures import GRAPH_THEME
+
+    css = (Path(__file__).resolve().parent.parent / "assets" / "00-tokens.css").read_text()
+
+    def token(name: str) -> str:
+        m = re.search(rf"{name}:\s*(#[0-9a-fA-F]{{6}})", css)
+        assert m, f"{name} is not defined"
+        return m.group(1)
+
+    assert token("--accent-teal") == GRAPH_THEME["cohort_a"]
+    assert token("--accent-warm") == GRAPH_THEME["cohort_b"]

@@ -423,12 +423,34 @@ def main() -> int:
             # ---- 7. two arms -----------------------------------------------
             print("\n=== 7. comparing two arms ===")
             compare_hint = page.locator("#cohort-compare-hint").inner_text()
-            c.ok("Not a difference vector" in compare_hint,
-                 "the comparison says what it is not")
+            c.ok("top-k the two share" in compare_hint,
+                 f"the comparison says what it reports: {compare_hint[:70]!r}")
             choose(page, "cohort-compare-dropdown", "differs by")
             chosen = page.locator("#cohort-compare-dropdown").inner_text()
             c.ok("differs by" in chosen,
                  f"only one-facet-apart siblings are offered: {chosen!r}")
+
+            # A comparison runs TWO independent pooled queries, and the rail
+            # used to describe the size and stability of only one of them while
+            # giving the other a colour in the figure and on the map. Cohort B
+            # can easily be the smaller and shakier arm, which is exactly what
+            # decides how much of the overlap number to believe.
+            card_a = page.locator("#cohort-card").inner_text()
+            card_b = page.locator("#cohort-compare-card").inner_text()
+            c.ok("COHORT A" in card_a.upper(),
+                 f"the selected cohort names its arm: {card_a[:40]!r}")
+            c.ok("COHORT B" in card_b.upper(),
+                 f"and the compared one names its own: {card_b[:40]!r}")
+            c.ok("differs by" in card_b,
+                 "the second card states the one facet they differ in")
+            for name, card in (("A", card_a), ("B", card_b)):
+                c.ok("samples pooled into one query" in card,
+                     f"cohort {name}'s card states its pooled size")
+                c.ok(re.search(r"0\.\d\d", card) is not None,
+                     f"cohort {name}'s card quotes a measured stability")
+            c.ok(page.locator(".cohort-card.is-a").count() == 1
+                 and page.locator(".cohort-card.is-b").count() == 1,
+                 "each card carries its own role colour")
 
             run_cohort_search(page)
             msg = banner(page)
@@ -450,9 +472,18 @@ def main() -> int:
             c.ok("Pooled cohort queries (2)" in legend,
                  "the legend names two pooled queries")
             c.ok("which cohort retrieved it" in legend,
-                 "and explains what the colours mean")
+                 "and explains what the colors mean")
             subtitle = page.locator("#canvas-subtitle").inner_text()
             c.ok("Two pooled cohorts" in subtitle, "so does the subtitle")
+
+            # The inspector opens on cohort A. Without the letter it reads as
+            # *the* pooled query rather than as one of two, with nothing saying
+            # the other star on the canvas leads to its twin.
+            # .details-kicker is uppercased by CSS, so read it case-insensitively
+            # the way this file's other kicker checks already do.
+            details = page.locator("#details-panel").inner_text()
+            c.ok("COHORT A" in details.upper(),
+                 f"the inspector says which arm it opened on: {details[:60]!r}")
             shot(page, "06-comparison")
 
             # ---- 8. the map draws BOTH cohorts ------------------------------
@@ -505,12 +536,59 @@ def main() -> int:
             c.ok("retrieved by both" in badges,
                  "and names the number the comparison is about")
 
-            key = page.locator(".bm-retrieval-key").inner_text()
-            c.ok(page.locator(".bm-retrieval-swatch").count() == 2,
-                 "the rail key carries one swatch per cohort")
-            c.ok("ring inside a square" in key,
-                 f"and says what a shared hit looks like: {key[:80]!r}")
+            # The key sits on the plot now, beside the marks it decodes, and it
+            # is grouped by ROLE rather than by cohort - so the two member rows
+            # are adjacent and differ only in hue, and the two hit rows are
+            # adjacent and differ only in shape. That layout is the explanation;
+            # no sentence has to assert the rule.
+            key = page.locator("#legend-retrieval").inner_text()
+            c.ok("POOLED MEMBERS" in key.upper() and "RETRIEVED HITS" in key.upper(),
+                 f"the key groups the marks by role: {key[:60]!r}")
+            c.ok("retrieved by both" in key,
+                 f"and rows the doubled mark: {key[:90]!r}")
+            # Exact class tokens, not substrings: "is-hit-b" is a prefix of
+            # "is-hit-both", so a substring test counts the doubled mark as a
+            # cohort-B row and reports three hit rows as two.
+            glyphs = page.eval_on_selector_all(
+                "#legend-retrieval .bm-key-glyph",
+                "els => els.map(e => [...e.classList])")
+            shapes = [c for g in glyphs for c in g if c.startswith("is-")]
+            c.ok(shapes.count("is-star") == 2,
+                 f"two member rows, same shape: {shapes}")
+            c.ok(shapes.count("is-hit-a") == 1 and shapes.count("is-hit-b") == 1,
+                 f"two hit rows, different shapes: {shapes}")
+            c.ok(shapes == ["is-star", "is-star", "is-hit-a", "is-hit-b",
+                            "is-hit-both"],
+                 f"grouped by role, so each pair varies in one channel: {shapes}")
+            fills = page.eval_on_selector_all(
+                "#legend-retrieval .bm-key-glyph-fill",
+                "els => els.map(e => getComputedStyle(e).backgroundColor)")
+            c.ok(len(set(fills)) == 2,
+                 f"the member rows carry the two cohort hues: {fills}")
+            names = page.eval_on_selector_all(
+                "#legend-retrieval .bm-key-label",
+                "els => els.map(e => e.textContent)")
+            c.ok(names.count(names[0]) == 2,
+                 f"each cohort is named in both of its rows: {names}")
             shot(page, "07-cohort-on-map")
+
+            # The claim that dropping the rank numerals is safe because "the
+            # hover says strictly more" was untrue: two traces at one coordinate
+            # resolve to one tooltip, so a shared hit named one arm only.
+            shared_hover = page.evaluate("""() => {
+              const gd = document.querySelector('.js-plotly-plot');
+              const hits = gd._fullData.filter(t => t.name === 'retrieved hit');
+              if (hits.length !== 2) return null;
+              const key = t => t.x.map((x, i) => x.toFixed(4) + ',' + t.y[i].toFixed(4));
+              const a = key(hits[0]), b = new Set(key(hits[1]));
+              const i = a.findIndex(p => b.has(p));
+              return i < 0 ? null : hits[0].customdata[i][1];
+            }""")
+            if c.ok(shared_hover is not None, "a shared hit is locatable"):
+                c.ok(shared_hover.count("512-d rank") == 2,
+                     f"its hover carries both arms' ranks: {shared_hover[:120]!r}")
+                c.ok(shared_hover.count("cosine") == 2,
+                     "and both cosines, which is what the numerals gave up for")
 
             # ---- 8b. one tick per cohort -----------------------------------
             print("\n=== 8b. unticking an arm ===")
@@ -531,15 +609,44 @@ def main() -> int:
             # at" rather than "what exists", which is why the colour legend
             # recounts itself per figure. A key still counting hits for an arm
             # that is not drawn would be the same error by another route.
-            key = page.locator(".bm-retrieval-key").inner_text()
-            c.ok("not shown" in key,
-                 f"the key reports the hidden arm as hidden: {key[:80]!r}")
-            c.ok(page.locator(".bm-retrieval-key-row.is-hidden").count() == 1,
-                 "with exactly one row marked hidden")
+            key = page.locator("#legend-retrieval").inner_text()
+            c.ok("hidden" in key,
+                 f"the key reports the hidden arm as hidden: {key[:90]!r}")
+            c.ok(page.locator(".bm-key-row.is-hidden").count() == 2,
+                 "in both of its rows, so the hue and the shape it owns are "
+                 "still named while nothing of it is drawn")
+            c.ok("retrieved by both" not in key,
+                 "and the doubled mark leaves the key, because with one arm "
+                 "hidden it cannot exist")
             solo_badges = page.locator(".bm-plot-badges").inner_text().replace("\n", " ")
             c.ok("2 cohorts" not in solo_badges,
                  f"and the badge stops claiming two: {solo_badges[:80]!r}")
             shot(page, "08-one-arm")
+
+            # The panel used to be shown or hidden on the color items alone, so
+            # the one state that draws no colored category - an OSDR-only field
+            # with the OSDR layer unticked - would have taken the whole key off
+            # screen, retrieval and all, while the retrieval was still drawn.
+            page.locator("#color-by").click()
+            page.wait_for_timeout(400)
+            page.locator(".dash-dropdown-content").get_by_text(
+                "Flight vs Ground", exact=False).first.click()
+            page.wait_for_timeout(3000)
+            page.locator("#layers input[type=checkbox]").nth(1).uncheck()
+            page.wait_for_timeout(3000)
+            c.ok(page.locator("#legend").is_visible(),
+                 "the key survives a state with no colored category on screen")
+            c.ok(page.locator("#legend-retrieval .bm-key-row").count() > 0,
+                 "and still decodes the retrieval that is still drawn")
+            c.ok(not page.locator("#legend-color").is_visible(),
+                 "while the empty color section takes itself off")
+            page.locator("#layers input[type=checkbox]").nth(1).check()
+            page.wait_for_timeout(2500)
+            page.locator("#color-by").click()
+            page.wait_for_timeout(400)
+            page.locator(".dash-dropdown-content").get_by_text(
+                "Tissue", exact=False).first.click()
+            page.wait_for_timeout(3000)
 
             # The ticks are the user's, and only a new retrieval may reset them.
             # This callback also fires on a dimensionality switch, because the
@@ -551,6 +658,31 @@ def main() -> int:
                  "switching to 3-D leaves the hidden arm hidden")
             c.ok(len((page.evaluate(MAP_OVERLAY_JS) or {}).get("members", [])) == 1,
                  "and 3-D draws the one arm, with no unknown-symbol error")
+            # Scatter3d rejects `star`, so a member draws as a diamond there.
+            # A key that kept showing a star would be asserting a mark 3-D does
+            # not draw, which is worse than the silence it replaced.
+            glyphs_3d = [c for g in page.eval_on_selector_all(
+                "#legend-retrieval .bm-key-glyph",
+                "els => els.map(e => [...e.classList])") for c in g
+                if c.startswith("is-")]
+            c.ok("is-diamond" in glyphs_3d and "is-star" not in glyphs_3d,
+                 f"the key follows 3-D's diamond substitution: {glyphs_3d}")
+            # 3-D used to discard the OSDR overlay's symbol and its white ring
+            # outright, so 2,108 spaceflight samples arrived as plain circles in
+            # the same palette hue as the 940,455 they sit among.
+            osdr_3d = page.evaluate("""() => {
+              const gd = document.querySelector('.js-plotly-plot');
+              const t = gd._fullData.find(t => t.customdata && t.customdata.length
+                        && Array.isArray(t.customdata[0])
+                        && String(t.customdata[0][0]).includes('|'));
+              return t ? {symbol: t.marker.symbol,
+                          line: t.marker.line && t.marker.line.width} : null;
+            }""")
+            if c.ok(osdr_3d is not None, "the OSDR overlay is locatable in 3-D"):
+                c.ok(osdr_3d["symbol"] == "diamond",
+                     f"and keeps its diamond in 3-D: {osdr_3d}")
+                c.ok((osdr_3d["line"] or 0) > 0,
+                     f"and its white ring: {osdr_3d}")
             page.locator("#dims label", has_text="2D").first.click()
             page.wait_for_timeout(4000)
 
@@ -598,6 +730,36 @@ def main() -> int:
                 c.ok(drawn.get("query", 0) >= 2,
                      f"and the whole cohort reached the map: {drawn}")
             shot(page, "09-sweep")
+
+            # A single query has one tick, and it hides the whole overlay. The
+            # key ignored it at first, so the plot lost its star and its rings
+            # while the key went on counting them - the failure the count rule
+            # exists to prevent, in the commonest state the map has.
+            print("\n=== 9b. unticking a single query ===")
+            ticks = page.locator("#show-retrieval input[type=checkbox]")
+            c.ok(ticks.count() == 1,
+                 f"a single query gets one tick: {ticks.count()}")
+            before = page.evaluate(MAP_OVERLAY_JS) or {}
+            c.ok(before.get("members") and before.get("hits"),
+                 "the overlay is drawn to begin with")
+            ticks.first.uncheck()
+            page.wait_for_timeout(3000)
+            after = page.evaluate(MAP_OVERLAY_JS) or {}
+            c.ok(not after.get("members") and not after.get("hits"),
+                 f"unticking takes the whole overlay off the plot: {after}")
+            key = page.locator("#legend-retrieval").inner_text()
+            c.ok("hidden" in key,
+                 f"and the key says so rather than counting on: {key[:70]!r}")
+            c.ok(page.locator("#legend-retrieval .bm-key-row.is-hidden").count()
+                 == page.locator("#legend-retrieval .bm-key-row").count(),
+                 "with every row receded, because none of them is drawn")
+            summary = page.locator("#retrieval-summary").inner_text()
+            c.ok("Not drawn" in summary,
+                 f"and the rail agrees with the plot: {summary[:60]!r}")
+            ticks.first.check()
+            page.wait_for_timeout(2500)
+            c.ok(bool((page.evaluate(MAP_OVERLAY_JS) or {}).get("members")),
+                 "and reticking brings it back")
 
             # ---- 10. nothing broke on the way out --------------------------
             print("\n=== 10. console ===")

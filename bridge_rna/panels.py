@@ -177,8 +177,17 @@ def build_status_banner(message: str, kind: str = "info", detail: str | None = N
 # --- The cohort card: how much to trust this pooled query --------------------
 
 
-def build_cohort_card(cohort, geometry) -> Any:
-    """Size and result stability for the cohort currently selected.
+#: What each role is called on the rail. A comparison pools two cohorts and
+#: draws both, in the network figure and on the map, and the only thing binding
+#: a card to those glyphs is the color of the dot beside this name - so
+#: `.cohort-role-dot` in assets/retrieve.css mirrors GRAPH_THEME's `cohort_a`
+#: and `cohort_b` exactly, and a test pins the pair.
+COHORT_ROLES = {"a": "Cohort A", "b": "Cohort B"}
+
+
+def build_cohort_card(cohort, geometry, role: str = "",
+                      contrast: str = "") -> Any:
+    """Size and result stability for one pooled cohort.
 
     One number, and that is the point. **Stability** is a property of *k*: the
     measured agreement between this cohort's top-5 and the top-5 it would have
@@ -193,6 +202,15 @@ def build_cohort_card(cohort, geometry) -> Any:
     for one of thirty, so it never changed a decision while looking like a
     grade. The per-member leave-one-out cosine stays, in the member list on the
     rail, because that one varies and points at a specific animal.
+
+    ``role`` names which arm of a comparison this is, and is empty when only
+    one cohort is being pooled - a lone card needs no letter, and adding one
+    would be chrome for a distinction that does not exist yet. When it is set
+    the card gains a colored role line and the cohort's own name, because a
+    comparison runs **two** pooled queries and describing only the selected one
+    was the gap this closed: the second query got a color on two canvases and
+    a size nowhere. ``contrast`` is the one facet the two differ in, stated on
+    the second card because it is a property of the pair.
     """
     from .cohorts import (
         LOW_N_THRESHOLD,
@@ -202,11 +220,12 @@ def build_cohort_card(cohort, geometry) -> Any:
         TIER_SINGLETON,
     )
 
+    role_class = f" is-{role}" if role in COHORT_ROLES else ""
     k = geometry.size
     tier = geometry.tier
     if tier == TIER_SINGLETON:
         return html.Div(
-            className="cohort-card cohort-card--empty",
+            className="cohort-card cohort-card--empty" + role_class,
             children=html.Div(
                 "Pooling needs at least two samples. Select a larger cohort, or "
                 "use Sample mode for a single one.",
@@ -260,9 +279,26 @@ def build_cohort_card(cohort, geometry) -> Any:
             ],
         ))
 
+    head: list[Any] = []
+    if role in COHORT_ROLES:
+        head = [
+            html.Div(
+                className="cohort-role",
+                children=[
+                    html.Span(className="cohort-role-dot"),
+                    html.Span(COHORT_ROLES[role], className="cohort-role-name"),
+                    (html.Span(f"differs by {contrast}",
+                               className="cohort-role-contrast")
+                     if contrast else None),
+                ],
+            ),
+            html.Div(cohort.label, className="cohort-card-title"),
+        ]
+
     return html.Div(
-        className="cohort-card",
+        className="cohort-card" + role_class,
         children=[
+            *head,
             html.Div(
                 className="cohort-card-head",
                 children=[
@@ -276,21 +312,29 @@ def build_cohort_card(cohort, geometry) -> Any:
     )
 
 
-def build_cohort_details(query: pd.Series) -> list[Any]:
+def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
     """Inspector view of a pooled cohort query node.
 
     The single-sample panel would render this as one sample with a blank name,
     so a cohort gets its own: what defined it, how many went in, what came back
     out about its spread, and which members were excluded.
+
+    ``role`` names which arm of a comparison this is, and only a comparison
+    passes one. Without it the panel opened on cohort A and read as *the* pooled
+    query rather than as one of two, with nothing saying the other star on the
+    canvas leads to its twin. It is the same letter and the same dot the rail's
+    cards carry, so the card, the star and this heading name one thing.
     """
     label = _safe_str(query.get("cohort_label")) or "Cohort"
     study = _safe_str(query.get("study_id"))
     members = [m for m in _safe_str(query.get("members")).split("\n") if m]
     excluded = [m for m in _safe_str(query.get("excluded")).split("\n") if m]
     outliers = {m for m in _safe_str(query.get("outliers")).split("\n") if m}
+    kicker = ("Pooled OSDR cohort" if role not in COHORT_ROLES
+              else f"Pooled OSDR cohort · {COHORT_ROLES[role]}")
 
     parts: list[Any] = [
-        _details_head("Pooled OSDR cohort", label),
+        _details_head(kicker, label),
         _detail_section(
             "Definition",
             [
@@ -387,12 +431,13 @@ def _build_osdr_query_metadata_block(query: pd.Series) -> list[Any]:
     return blocks
 
 
-def _build_query_details(query: pd.Series, compact: bool) -> list[Any]:
+def _build_query_details(query: pd.Series, compact: bool,
+                         role: str = "") -> list[Any]:
     """Details for the OSDR query node. ``compact`` omits the finer biology rows."""
     # A pooled cohort is a query too, and rendering it through the single-sample
     # path would show one blank sample name where a group belongs.
     if _safe_str(query.get("is_cohort")) == "1":
-        return build_cohort_details(query)
+        return build_cohort_details(query, role=role)
     heading = _safe_str(query.get("sample_name")) or _safe_str(query.get("sample_id")) or "OSDR query"
     biology_rows = [
         _detail_row("Species", "Mus musculus"),
@@ -427,7 +472,10 @@ def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | Non
     node_id = _safe_str(selected_payload.get("node_id")) if selected_payload else ""
 
     if not selected_payload or node_kind == "query":
-        return _build_query_details(query, compact=not selected_payload)
+        # A comparison is on screen exactly when there is a second query, so
+        # the letters appear only when there are two arms to tell apart.
+        return _build_query_details(query, compact=not selected_payload,
+                                    role="a" if query_b is not None else "")
 
     # The comparison figure draws a second query star, tagged `query2`. Without
     # this it fell through to the GSM lookup, found nothing, and reported "No
@@ -441,7 +489,7 @@ def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | Non
             ]
         # `compact` has no default, and False is what the `query` branch above
         # resolves to whenever a node was actually clicked.
-        return _build_query_details(query_b, compact=False)
+        return _build_query_details(query_b, compact=False, role="b")
 
     if node_kind == "gse":
         df = hits_df[hits_df["gse"] == node_id]

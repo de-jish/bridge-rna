@@ -181,8 +181,7 @@ def build_cohort_panel() -> Any:
                         className="cohort-members-body",
                         children=[
                             html.Div(
-                                "Untick a sample to leave it out of the pool. "
-                                "Nothing is dropped for you.",
+                                "Untick a sample to leave it out of the pool.",
                                 className="control-hint"),
                             dcc.Checklist(id="cohort-members",
                                           className="member-list",
@@ -204,6 +203,13 @@ def build_cohort_panel() -> Any:
                     html.Div(id="cohort-compare-hint", className="control-hint"),
                 ],
             ),
+            # The second pooled query gets its own card, under its own picker,
+            # for the same reason the first one sits under the cohort dropdown:
+            # the fact that qualifies a control belongs against that control. A
+            # comparison runs two independent pooled queries and the interface
+            # used to state the size and stability of only one of them, while
+            # giving the other a color in the network figure and on the map.
+            html.Div(id="cohort-compare-card", className="cohort-card-slot"),
             dcc.Store(id="cohort-facets-store",
                       data=list(C.DEFAULT_FACETS)),
         ],
@@ -226,8 +232,8 @@ CANVAS_SUBTITLES = {
 def build_graph_legend(kind: str = "sample") -> Any:
     """Horizontal legend strip explaining node shapes/colors + edge encoding.
 
-    The comparison figure draws no GSE nodes and two query stars whose colours
-    carry meaning, so it gets a different strip: the colour key lives in the
+    The comparison figure draws no GSE nodes and two query stars whose colors
+    carry meaning, so it gets a different strip: the color key lives in the
     figure's own legend, and this one is left to say what the marks are.
     """
     query_label = {"sample": "OSDR query",
@@ -252,7 +258,7 @@ def build_graph_legend(kind: str = "sample") -> Any:
     items.append(html.Div(className="legend-note", children=[
         html.Span(className="legend-edge"),
         html.Span("edge width = cosine similarity"
-                  + (", colour = which cohort retrieved it"
+                  + (", color = which cohort retrieved it"
                      if kind == "comparison" else "")),
     ]))
     return items
@@ -424,6 +430,14 @@ def build_view() -> html.Div:
                                             # it for the one hit you click, and
                                             # the AI panel fetches it for all of
                                             # them before it writes.
+                                            #
+                                            # That cost used to be spelled out in
+                                            # a hint under the tick. It is gone:
+                                            # the toggle sits inside a disclosure
+                                            # already labelled Optional, the
+                                            # default is off, and the sentence
+                                            # was three lines of rail explaining
+                                            # a control most searches never open.
                                             dcc.Checklist(
                                                 id="biopython-toggle",
                                                 options=[{
@@ -432,13 +446,6 @@ def build_view() -> html.Div:
                                                 }],
                                                 value=[],
                                                 className="dash-checklist",
-                                            ),
-                                            html.Div(
-                                                "Adds roughly two seconds per hit. "
-                                                "Off, a search is local and instant, and "
-                                                "abstracts are fetched for a hit when you "
-                                                "open it or when the AI hypothesis needs them.",
-                                                className="control-hint",
                                             ),
                                         ],
                                     ),

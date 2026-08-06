@@ -919,6 +919,63 @@ summary:focus-visible,
 }
 .cohort-card-note { line-height: 1.45; }
 
+/* --- Two pooled queries, named ---------------------------------------------
+   A comparison runs two independent pooled queries, and each one gets its own
+   card under its own picker: the selected cohort under the cohort dropdown,
+   the sibling under "Compare against". The rail's standing rule, applied to a
+   feature that had grown a second query without a second description.
+
+   The dot and the left rule are the binding between a card and a glyph. Their
+   hues are literally GRAPH_THEME's `cohort_a` and `cohort_b`, which are
+   --accent-teal and --accent-warm, and a test pins that pair - Plotly cannot
+   read a CSS variable, so the figure and the card would otherwise be free to
+   drift apart. A lone cohort gets no role line at all: with no second arm on
+   screen there is nothing for a letter to distinguish it from. */
+.cohort-card.is-a { border-left: 3px solid var(--accent-teal); }
+.cohort-card.is-b { border-left: 3px solid var(--accent-warm); }
+
+.cohort-role {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.cohort-role-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-teal);
+}
+.cohort-card.is-b .cohort-role-dot { background: var(--accent-warm); }
+.cohort-role-name {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+/* The facet the two arms differ in belongs to the pair, not to either cohort,
+   so it is stated once - on the second card, beside the name that completes
+   the pair. --text-secondary rather than --text-muted, which measures 2.90:1
+   on white and fails AA at this size. */
+.cohort-role-contrast {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+/* A cohort label runs long ("Liver · Space Flight"), and the rail is 288px, so
+   it wraps rather than truncating: the name is how a reader ties this card to
+   the star on the canvas and to the row in the map's key. */
+.cohort-card-title {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
 .cohort-card-head {
   display: flex;
   align-items: baseline;

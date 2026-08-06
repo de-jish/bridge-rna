@@ -108,7 +108,7 @@ def archs4_tissue() -> np.ndarray | None:
     """Per-ARCHS4-point tissue bucket, or None if the join was never fetched.
 
     Already canonicalized by the precompute step, so it shares a vocabulary with
-    `osdr_tissue` and the two can be coloured by one field.
+    `osdr_tissue` and the two can be colored by one field.
     """
     df = archs4_metadata()
     if df is None or "tissue" not in df.columns:
@@ -179,7 +179,7 @@ def projection_stats() -> dict:
     Returns ``{}`` when the file is absent or unreadable rather than raising.
     This feeds a label on the control rail, not a correctness gate, so a cache
     built before a stage existed shows fewer parameters instead of taking the
-    map down - the same degradation `osdr_field_values` chooses for a colour-by
+    map down - the same degradation `osdr_field_values` chooses for a color-by
     the precompute step never populated. `precompute/validate_artifacts.py` is
     where a missing or malformed record is an error.
     """

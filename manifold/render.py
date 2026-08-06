@@ -15,14 +15,14 @@ Two decisions here are what keep the map honest.
 
 *One palette for both corpora.* Categories are ranked once over the whole
 covered population and every layer draws from that single mapping, so a liver in
-GEO and a liver in OSDR are the same colour. Ranking per layer - the previous
-behaviour - silently gave the same category two different colours whenever the
+GEO and a liver in OSDR are the same color. Ranking per layer - the previous
+behaviour - silently gave the same category two different colors whenever the
 two corpora had different category orderings, which is a legend that lies.
 
 *A corpus a field does not describe is drawn as context, not as data.* Picking
 an OSDR-only field used to paint 940,455 uniform grey glyphs, which reads as
 "ARCHS4 was measured and has no structure here". Instead those points are drawn
-in one deliberately faint context colour at 0.35 opacity, outside the legend, so
+in one deliberately faint context color at 0.35 opacity, outside the legend, so
 they read as scenery rather than as a category. See manifold/colorby.py.
 """
 
@@ -76,7 +76,7 @@ def _category_plan(values: np.ndarray) -> tuple[dict, list[dict]]:
 
     Returns a lookup mapping every raw category to its *display* category, and
     the legend rows. The counts here are whole-corpus counts, and they do two
-    jobs: they rank the categories - which fixes each one's colour and legend
+    jobs: they rank the categories - which fixes each one's color and legend
     order stably, independent of budget or zoom - and they back the
     point-to-slot consistency check. They are not what the user sees: build_figure
     overrides each row's displayed count with the number of points that field
@@ -134,7 +134,7 @@ def _display_codes(values: np.ndarray, lookup: dict, legend: list[dict]) -> np.n
     Memory: under pandas 3.0 a string Series materializes a *fresh* Python str
     per element on ``.to_numpy()``, so the string version of this array held
     942,563 distinct objects to represent 13 distinct values - 127 MB per
-    colour-by, measured, which across the registry would have made the memoized
+    color-by, measured, which across the registry would have made the memoized
     plan below cost more than a gigabyte. The codes cost 1.9 MB.
 
     Speed: ``codes == slot`` is a vectorized integer compare, where
@@ -157,13 +157,13 @@ def _display_codes(values: np.ndarray, lookup: dict, legend: list[dict]) -> np.n
 
 
 @lru_cache(maxsize=len(colorby.REGISTRY))
-def _colour_plan(key: str) -> tuple[np.ndarray, list[dict]]:
-    """The (legend slot per point, legend rows) for a colour-by, cached.
+def _color_plan(key: str) -> tuple[np.ndarray, list[dict]]:
+    """The (legend slot per point, legend rows) for a color-by, cached.
 
     This is the dominant per-figure cost - resolving one label array over all
     942,563 points, ranking the categories, and assigning each point a slot runs
     about 0.8 s for Tissue - and none of it depends on the projection, the
-    dimensionality, the point budget, or the viewport. Only the colour-by key
+    dimensionality, the point budget, or the viewport. Only the color-by key
     changes the answer.
 
     Caching it here is what keeps a zoom, a budget change, or a switch between
@@ -182,12 +182,12 @@ def _legend_with_drawn_counts(legend: list[dict],
                               drawn_codes: list[np.ndarray]) -> list[dict]:
     """Legend rows re-counted to the points actually plotted.
 
-    The colour plan ranks categories over the whole corpus, which fixes each
-    row's colour and order. The count, though, is read as "how many of these
+    The color plan ranks categories over the whole corpus, which fixes each
+    row's color and order. The count, though, is read as "how many of these
     are on screen", so it is recomputed here from the slot codes of the drawn
     points - the ARCHS4 sample the budget and zoom selected, plus the OSDR
     overlay - and a category with nothing currently drawn drops out of the key.
-    Colours and order are untouched, so a category keeps its colour and its
+    Colors and order are untouched, so a category keeps its color and its
     place whether or not it happens to be on screen right now.
     """
     if drawn_codes:
@@ -214,11 +214,26 @@ def _scatter(coords, idx, color, is_3d, size, symbol, outline, name,
     hovertemplate = ("<br>".join(hover_lines) + "<extra></extra>") if hover_on else None
 
     if is_3d:
+        # 3-D used to discard both the symbol and the outline: this branch
+        # passed no `symbol` at all and hard-coded `line=dict(width=0)`. So the
+        # OSDR overlay - a white-ringed diamond in 2-D, and the module docstring
+        # above still says so - arrived in 3-D as a plain circle in the same
+        # palette hue as the cloud drawn beneath it, and only hover could tell
+        # 2,108 spaceflight samples from 940,455 GEO ones. That is the one thing
+        # this map may not do.
+        #
+        # Both channels survive the trip. `diamond` is in Scatter3d's eight-
+        # symbol vocabulary (which is also why the retrieval overlay's star
+        # falls back to a diamond there), and gl-scatter3d honours `marker.line`
+        # as a per-point border. Only "circle" and theme.OSDR_SYMBOL ever reach
+        # this function, so no symbol outside that vocabulary can arrive here.
         return go.Scatter3d(
             x=x, y=y, z=coords[idx, 2], mode="markers", name=name,
             marker=dict(size=size * 0.5, color=color,
                         opacity=0.85 if opacity is None else opacity,
-                        line=dict(width=0)),
+                        symbol=symbol,
+                        line=(dict(width=1.4, color=outline) if outline
+                              else dict(width=0))),
             customdata=customdata,
             hovertemplate=hovertemplate,
             hoverinfo=None if hover_on else "skip",
@@ -246,7 +261,7 @@ def _scatter(coords, idx, color, is_3d, size, symbol, outline, name,
 # competing with points that have one. Adding more palette hues would be the
 # wrong fix - the eleven are already at the limit of what stays separable on a
 # scatter, and the dataviz rule is to fold the tail into Other, not to invent
-# colours for it.
+# colors for it.
 RESIDUAL_OPACITY = 0.26
 RESIDUAL_SIZE_SCALE = 0.82
 
@@ -254,14 +269,14 @@ RESIDUAL_SIZE_SCALE = 0.82
 def _categorical_traces(coords, idx, codes, legend, is_3d, size, symbol,
                         outline, hover_lines=(), customdata=None, opacity=None,
                         recede_residual=False):
-    """One trace per display category, coloured from the shared legend mapping.
+    """One trace per display category, colored from the shared legend mapping.
 
     ``codes`` holds each point's legend slot, so selecting a category is one
     vectorized integer compare rather than 942,563 Python string comparisons.
 
     Residual categories are emitted FIRST so they sit underneath. Plotly paints
     traces in the order they are added, and with the residual bucket last its
-    ~308,000 grey glyphs were drawn on top of every coloured category - the map
+    ~308,000 grey glyphs were drawn on top of every colored category - the map
     read as grey even where it was not.
     """
     rows_for = (lambda sel: None) if customdata is None else (
@@ -334,6 +349,11 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     retrieved by both cohorts receives both traces and therefore draws as a
     ring inscribed in a square, so the shared set is emergent rather than
     computed and cannot disagree with the number the status banner quotes.
+
+    Every mark this function draws is keyed on screen by
+    `manifold/layout.retrieval_key_children`, which reads the same theme
+    constants. Adding a mark here without a row there leaves a glyph a viewer
+    can only decode by hovering it.
     """
     n = len(coords)
     cohorts = retrieval.get("cohorts")
@@ -393,7 +413,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         prepared.append((cohort, hits, members, _style(cohort.get("role", "a"))))
 
     # --- Layer 1: halos, behind everything -----------------------------------
-    for _cohort, _hits, members, (_colour, rgb, _sym, _size) in prepared:
+    for _cohort, _hits, members, (_color, rgb, _sym, _size) in prepared:
         if not members:
             continue
         # A wide, faint ring so the query is findable in 942,563 points without
@@ -411,31 +431,55 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
             hoverinfo="skip", showlegend=False))
 
     # --- Layer 2: hit rings, larger symbol last so it cannot occlude ---------
-    for cohort, hits, members, (_colour, _rgb, symbol, size) in prepared:
-        if not hits:
-            continue
-        labels = cohort.get("hit_labels") or []
+    #
+    # A pre-pass, because a hit both cohorts retrieved has to name both of them
+    # in one tooltip. Two traces sit at the identical coordinate and Plotly
+    # resolves exactly one hover per position, so building each cohort's rows
+    # from its own hit list alone meant that for the very points a comparison
+    # exists to show, one arm's rank and cosine were unreachable - while the
+    # numerals, dropped in a comparison on the grounds that "the hover says
+    # strictly more", were gone too. This is what makes that claim true.
+    #
+    # It reads across the arms; it does not compute the shared set for drawing.
+    # A hit is still drawn twice because it is in two hit lists, so the ring
+    # inside a square stays emergent and cannot drift from the banner's count.
+    facts: dict[int, list[str]] = {}
+    map_ranks: list[list] = []
+    for cohort, hits, members, _style_ in prepared:
+        ranks = _map_ranks(coords, hits, members)
+        map_ranks.append(ranks)
         scores = cohort.get("hit_scores") or []
         name = str(cohort.get("label") or "")
-        ranks = _map_ranks(coords, hits, members)
         # Only say "pooled member" when something was actually pooled. For a
         # single-sample or uploaded search the one member *is* the query.
         origin = (" from the nearest pooled member" if len(members) > 1 else "")
-        rows = []
         for i, point in enumerate(hits):
-            gsm = str(labels[i]) if i < len(labels) else ""
             score = f"{float(scores[i]):.4f}" if i < len(scores) else "-"
             mr = ranks[i]
-            who = f"{name}  ·  " if comparing and name else ""
-            rows.append([
-                gsm,
-                f"{who}512-d rank {i + 1} of {len(hits)} retrieved"
-                f"  ·  cosine {score}",
-                f"map rank {mr:,} of {n:,}{origin}" if mr is not None else "",
-            ])
+            if comparing:
+                # Each arm carries its own map rank here, because a shared hit
+                # is one coordinate with two nearest members and two answers.
+                line = (f"<b>{name}</b>  ·  512-d rank {i + 1} of {len(hits)}"
+                        f"  ·  cosine {score}")
+                if mr is not None:
+                    line += f"  ·  map rank {mr:,}"
+            else:
+                line = (f"512-d rank {i + 1} of {len(hits)} retrieved"
+                        f"  ·  cosine {score}")
+                if mr is not None:
+                    line += f"<br>map rank {mr:,} of {n:,}{origin}"
+            facts.setdefault(point, []).append(line)
+
+    for (cohort, hits, members, (_color, _rgb, symbol, size)), ranks in zip(
+            prepared, map_ranks):
+        if not hits:
+            continue
+        labels = cohort.get("hit_labels") or []
+        rows = [[str(labels[i]) if i < len(labels) else "",
+                 "<br>".join(facts.get(point, []))]
+                for i, point in enumerate(hits)]
         # Numerals are dropped in a comparison: two competing rank sets over the
-        # same few hundred pixels is illegible, and the hover says strictly more
-        # (a shared hit names both cohorts, both ranks and both cosines).
+        # same few hundred pixels is illegible.
         marker_mode = "markers" if comparing else "markers+text"
         numerals = ([] if comparing else
                     [str(i + 1) if i < theme.RETRIEVAL_MAX_NUMERALS else ""
@@ -451,11 +495,11 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                                   color=theme.RETRIEVAL_HIT_RING)),
             customdata=rows,
             hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[1]}"
-                           "<br>%{customdata[2]}<extra></extra>"),
+                           "<extra></extra>"),
             showlegend=False, **text_extras))
 
     # --- Layer 3: the members themselves, on top ----------------------------
-    for cohort, _hits, members, (colour, _rgb, _sym, _size) in prepared:
+    for cohort, _hits, members, (color, _rgb, _sym, _size) in prepared:
         if not members:
             continue
         label = str(cohort.get("label") or "OSDR query")
@@ -465,7 +509,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         size = theme.RETRIEVAL_QUERY_SIZE * scale * (0.7 if pooled else 1.0)
         traces.append(Scatter(
             **_xyz(members), mode="markers", name="query",
-            marker=dict(size=size, symbol=query_symbol, color=colour,
+            marker=dict(size=size, symbol=query_symbol, color=color,
                         line=dict(width=2, color="#ffffff")),
             customdata=[[label]] * len(members),
             hovertemplate=("<b>%{customdata[0]}</b><br>"
@@ -545,7 +589,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
         return fig, legend_data, [f"{method.upper()} not available"]
 
     coords_xy = coords[:, :2]
-    codes, legend = _colour_plan(spec.key)
+    codes, legend = _color_plan(spec.key)
 
     covers_archs4 = colorby.covers_corpus(spec.key, colorby.ARCHS4)
 
@@ -571,7 +615,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
             badges.append(f"ARCHS4 live: <b>{len(idx):,}</b>")
         else:
             # These points have no value under this field, so they are drawn as
-            # scenery: one faint colour, no legend row, nothing that could be
+            # scenery: one faint color, no legend row, nothing that could be
             # read as a category. A uniform grey glyph *in the palette* is what
             # made 99.8% of the map look like measured-and-empty.
             fig.add_trace(_scatter(coords, idx, theme.ARCHS4_CONTEXT, is_3d,
@@ -595,7 +639,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
         else:
             # An ARCHS4-only field. OSDR keeps its distinct glyph in a single
             # warm highlight so the spaceflight corpus stays locatable without
-            # borrowing a colour that means something else in the legend.
+            # borrowing a color that means something else in the legend.
             fig.add_trace(_scatter(coords, osdr_global, theme.OSDR_HIGHLIGHT,
                                    is_3d, OSDR_SIZE, theme.OSDR_SYMBOL,
                                    theme.OSDR_OUTLINE, name="OSDR",
@@ -604,22 +648,28 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
         badges.append(f"OSDR: <b>{n_osdr:,}</b>")
 
     # The legend reports the points that were actually plotted above, not the
-    # whole-corpus tallies the colour plan ranked with.
+    # whole-corpus tallies the color plan ranked with.
     legend_data["items"] = _legend_with_drawn_counts(legend, drawn)
 
     # --- Layer 3: the retrieval, on top of everything ----------------------
     if showing_retrieval:
         for trace in _retrieval_traces(coords, is_3d, retrieval):
             fig.add_trace(trace)
-        n_hits = len(retrieval.get("hit_points", []))
+        # Distinct points, not drawn marks. `hit_points` is a concatenation
+        # across the arms, so a hit both cohorts retrieved is in it twice, and
+        # counting its length made the badge quote 10 for the same comparison
+        # whose banner on the retrieval view said "share 2 of 8 retrieved
+        # samples". The badge counts what is on screen; two rings on one point
+        # are still one sample.
+        n_hits = len(set(retrieval.get("hit_points", [])))
         cohorts = retrieval.get("cohorts") or []
         if len(cohorts) > 1:
             # The badge reports what is drawn right now, so it has to count both
-            # arms and say how many marks carry both rings - the number the
-            # whole comparison is about.
+            # arms and say how many carry both rings - the number the whole
+            # comparison is about.
             n_shared = len(retrieval.get("shared_points") or [])
             badges.append(
-                f"Showing <b>2</b> cohorts · <b>{n_hits}</b> hits · "
+                f"Showing <b>2</b> cohorts · <b>{n_hits}</b> samples · "
                 f"<b>{n_shared}</b> retrieved by both")
         else:
             badges.append(

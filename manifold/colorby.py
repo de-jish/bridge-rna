@@ -16,7 +16,7 @@ downstream:
     run attached, instead of silently missing or silently grey,
   * the control rail states the exact point count a field colors, and
   * the renderer never paints a uniform grey glyph cloud: a corpus a field does
-    not describe is drawn as *context*, in one faint colour with no legend row,
+    not describe is drawn as *context*, in one faint color with no legend row,
     which shows the real manifold shape instead of impersonating data.
 
 `labels()` returns one array over the full corpus in fixed global order, with
@@ -61,7 +61,7 @@ class ColorBy:
     needs: tuple[Callable[[], bool], str] | None = None
 
     def covers(self) -> tuple[str, ...]:
-        """Corpora this field can colour on this machine, right now."""
+        """Corpora this field can color on this machine, right now."""
         if self.needs and not self.needs[0]():
             # The missing artifact only ever gates ARCHS4; OSDR metadata is
             # built by the same job as the embeddings and is never absent alone.
@@ -112,18 +112,20 @@ _ARCHS4_META_NEEDS = (
 
 REGISTRY: tuple[ColorBy, ...] = (
     # --- Whole map: every point gets a real category. -----------------------
+    # No hint. The shared tissue vocabulary is the point of the field, but the
+    # menu already says "whole map", the legend names every bucket, and the
+    # sentence that used to sit here was a paragraph of method under a control
+    # that had already answered the question.
     ColorBy(
         key="tissue", label="Tissue", scope=(ARCHS4, OSDR), resolver=_tissue,
         needs=_ARCHS4_META_NEEDS,
-        hint="Both corpora folded onto one anatomical vocabulary, so a liver in "
-             "GEO and a NASA liver share a colour.",
     ),
     ColorBy(
         key="species", label="Species", scope=(ARCHS4, OSDR), resolver=_species,
         hint="The cleanest partition on the map, and the reference for what a "
-             "working colour-by looks like. OSDR is entirely mouse.",
+             "working color-by looks like. OSDR is entirely mouse.",
     ),
-    # There is deliberately no unsupervised-cluster colour-by here. A k-means
+    # There is deliberately no unsupervised-cluster color-by here. A k-means
     # partition of the same 512-d vectors the projection was fit on was built,
     # measured, and cut: 81.9% of its labels are recoverable from the 2-D
     # coordinates alone, so it mostly redraws the shape already on screen, and
@@ -144,7 +146,7 @@ REGISTRY: tuple[ColorBy, ...] = (
     ColorBy(key="sex", label="Sex", scope=(OSDR,), resolver=_osdr_field("sex")),
     ColorBy(key="genotype", label="Genotype", scope=(OSDR,), resolver=_osdr_field("genotype")),
     ColorBy(key="study", label="Study", scope=(OSDR,), resolver=_osdr_field("study"),
-            hint="Each OSD study is one batch. Colour by this to see how much "
+            hint="Each OSD study is one batch. Color by this to see how much "
                  "apparent structure is study rather than biology."),
     ColorBy(key="habitat", label="Habitat", scope=(OSDR,), resolver=_osdr_field("habitat")),
     ColorBy(key="duration", label="Mission duration", scope=(OSDR,),
@@ -168,7 +170,7 @@ def get(key: str) -> ColorBy:
 
 
 def default_key() -> str:
-    """The best colour-by to open on: the first whole-map field that works."""
+    """The best color-by to open on: the first whole-map field that works."""
     for spec in REGISTRY:
         if len(spec.covers()) > 1:
             return spec.key
@@ -185,7 +187,7 @@ def labels(key: str) -> np.ndarray:
 
 
 def coverage(key: str) -> tuple[int, int]:
-    """(points this field colours, total points)."""
+    """(points this field colors, total points)."""
     spec = get(key)
     n_archs4, n_osdr, total = data.counts()
     covered = 0
@@ -215,7 +217,7 @@ def menu_options() -> list[dict]:
     The exact point count lives in the coverage line under the control, where it
     has room to be precise.
 
-    An option that cannot colour anything is shown and disabled rather than
+    An option that cannot color anything is shown and disabled rather than
     hidden. Hiding it makes the app look like it never had the feature; showing
     it disabled, next to the command that enables it, says the feature exists
     and how to switch it on.
