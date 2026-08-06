@@ -148,10 +148,17 @@ Three changes fixed it, and each one is a rule rather than a nudge.
 
 **The caution is one line.** It was a title over a three-line body, and the body said the same thing twice on a comparison. It now reads "Under 70%: read these as a neighbourhood, not a ranking", with the threshold interpolated from `STABILITY_FLOOR` so the sentence cannot drift from the rule that fires it.
 
-**The details panel yields first.** `.details-panel` has `flex-shrink: 20` against the stability panel's 1. With equal shrink factors the overflow was split between them and the stability panel lost 165 px it needed; the details panel is the right one to give way, because it scrolls a reference list where the panel above it carries two numbers that only mean anything side by side. It stops at its 120 px floor, after which the stability panel shrinks and scrolls in turn, so a short viewport degrades instead of clipping the AI panel off the bottom of the column.
+**The details panel yields first.** `.details-panel` had `flex-shrink: 20` against the stability panel's 1. With equal shrink factors the overflow was split between them and the stability panel lost 165 px it needed; the details panel is the right one to give way, because it scrolls a reference list where the panel above it carries two numbers that only mean anything side by side.
 
-`tests/e2e_cohort_check.py` measures this rather than trusting it: after a two-arm search it reads both bounding boxes and asserts the second block ends inside the panel.
-That check is what caught the overflow, and it caught it twice more while the fix was being tuned.
+That mechanism was replaced on 2026-08-06 and the replacement is worth stating here, because the `20` was a workaround rather than a rule.
+With `flex-basis: auto` the details panel asks for the ~506 px its content measures - a height it will never get and does not need - so every layout pass began in overflow and ended by taking that overflow back off *both* panels in proportion.
+The 20 made the details panel's share large; it never made the stability panel's share zero.
+`.details-panel` is now `flex: 1 1 0`, so it claims the leftovers instead of claiming its content and giving it back, and there is no overflow to divide.
+The degradation path is unchanged and now falls out of the same rule: a zero-basis item contributes nothing to shrink, so on a column too short for all three the details panel stops at its 120 px floor and the stability panel is the one that scrolls.
+`docs/stability_panel_even_split.md` has the measurements.
+
+`tests/e2e_cohort_check.py` measures this rather than trusting it: after a two-arm search it reads the panel's scroll box and content box and asserts that nothing is clipped and that the two arms are the same size.
+The first version of that check compared the last block against `bounding_box()`, which is the *border* box, so it allowed a block to run through the panel's own 20 px bottom padding - and it passed for weeks while cohort B's last row was clipped at every viewport. That is recorded in section 2 of `docs/stability_panel_even_split.md`.
 
 ## 8. Alternatives considered and rejected
 

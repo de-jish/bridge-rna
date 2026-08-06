@@ -350,17 +350,27 @@ input.dash-input:focus,
    Details / inspector panel
    ========================================================================== */
 
-/* `flex-shrink: 20`, not 1, and that number is load-bearing rather than
-   decorative. When the stability panel appeared above it, an equal shrink
-   factor split the overflow between the two and squeezed a two-cohort
-   measurement from the 554px it needs down to 389px, putting cohort B below
-   the fold - which is the one thing measuring two arms exists to prevent.
-   This panel is the right one to yield: it scrolls a reference list, where the
-   panel above it carries two numbers that only mean something side by side.
-   It still stops at its 120px floor, after which the stability panel shrinks
-   and scrolls in turn, so a short viewport degrades rather than clipping. */
+/* `flex-basis: 0`, so this panel claims the leftovers rather than claiming its
+   content and giving it back.
+
+   It was `flex: 1 20 auto` and the 20 was a workaround for the `auto`. With a
+   content basis this panel asks for the ~506px its definition, member list and
+   estimator prose actually measure - a height it will never get and does not
+   need, since it scrolls by design - so every layout pass began in overflow and
+   ended by taking that overflow back off both panels in proportion. The 20 made
+   its share large, not the stability panel's share zero: measured after the two
+   cohort arms went side by side, the stability panel was still losing 3px at
+   1680x1050 and 11px at 1280x800, which is enough to cut the descenders off the
+   last line of a sample key.
+
+   With a zero basis there is no overflow to divide. The stability panel and the
+   AI panel state their heights, this panel takes what is left, and `flex-grow: 1`
+   makes "what is left" mean all of it. The degradation path is unchanged and now
+   falls out of the same rule: on a column too short for all three, a zero-basis
+   item contributes nothing to shrink, so this panel stops at its 120px floor and
+   the stability panel is the one that scrolls internally. */
 .details-panel {
-  flex: 1 20 auto;
+  flex: 1 1 0;
   overflow-y: auto;
   min-height: 120px;
 }
@@ -1077,15 +1087,15 @@ summary:focus-visible,
    details panel, because it describes the whole result rather than whichever
    node is open - clicking a hit must not scroll it away.
 
-   `flex: 0 1 auto` with a cap rather than `0 0 auto`: a comparison renders two
-   blocks, and on a short viewport the panel yields and scrolls internally
-   instead of squeezing the details panel below its 120px floor. */
-/* A comparison renders two blocks and both have to be readable at once: a
-   second measurement below the fold is a second measurement nobody made. The
-   cap keeps it from crowding out the inspector entirely, and the details panel
-   below yields to it first (see its `flex-shrink: 20`). It stays shrinkable
-   rather than `flex: 0 0 auto` so a short viewport scrolls this panel instead
-   of clipping the AI panel off the bottom of the column. */
+   `flex: 0 1 auto` with a cap rather than `0 0 auto`, and the cap is now the
+   backstop it was always meant to be rather than the thing holding the panel
+   together. A comparison used to want 456px and the details panel below it was
+   left with 264px for 506px of content; side-by-side columns brought that to
+   354px, so at 1600x1000 the panel asks for well under the 65% it is allowed and
+   the details panel gets about 100px back. The cap still earns its place on a
+   genuinely short window, where two flagged arms reach 409px and the panel should
+   scroll itself rather than push the AI panel off the bottom. The details panel
+   yields first either way - see its `flex: 1 1 0`. */
 .stability-panel {
   flex: 0 1 auto;
   max-height: 65%;
@@ -1099,12 +1109,59 @@ summary:focus-visible,
 .stability-panel .panel-header { align-items: flex-start; }
 .stability-panel .panel-dot { margin-top: 6px; }
 .stability-panel .panel-subtitle { max-width: 42ch; }
-
-.stability-cohort + .stability-cohort {
-  margin-top: var(--space-3);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--border-subtle);
+/* The facet the two arms differ in. It sits with the heading and the subtitle
+   because it is the one fact in the panel that belongs to neither arm: it
+   describes the pair. It hung off cohort B's role line until the blocks went
+   side by side, where it made B's name start a line below A's. */
+.stability-contrast {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
+
+/* --- The two arms, side by side ---------------------------------------------
+   Stacked until 2026-08-06, and stacking gave the two arms visibly unequal
+   treatment. Measured on the real app at study OSD-100's two six-animal left-eye
+   arms: the panel held 456px of content in 445px, so cohort B's last row - the
+   one naming the animal whose absence moves the result furthest - was clipped by
+   7.8px at 1680x1050 and by 65.6px at 1280x800. Cohort A was complete at every
+   viewport and cohort B was complete at none.
+
+   Two columns fix the size and the argument at once. The panel holds 354px where
+   it held 456, so nothing is clipped and the details panel below gets the ~100px
+   back; the two arms are equal by construction rather than by coincidence; and
+   0.89 sits on the same baseline as 0.94 rather than 160px below it, which is
+   the comparison the panel exists to support.
+
+   `subgrid` is what aligns those baselines: each arm is a grid whose rows are
+   the parent's, so the name row, the number row, the member row and the flag row
+   line up across both columns however many lines any of them wraps to. Rows are
+   assigned by class, not by child order, because either of the last two can be
+   absent from either arm - a cohort whose members all matter equally names none,
+   and only a shaky arm is flagged - and counting children would let cohort B's
+   flag land in the row holding cohort A's member name. Where `subgrid` is
+   unsupported the declaration is dropped and each arm falls back to its own
+   four-row grid: the columns stay even and only the cross-column baselines go. */
+.stability-pair { display: grid; }
+/* `minmax(0, 1fr)` rather than `1fr`, which is `minmax(auto, 1fr)` and floors a
+   track at its min-content width. A sample key is mono and can run to 39
+   characters - `Mmus_C57-6J_LVR_RR1_BSL_noERCC_Rep5_M10`, measured across all
+   2,108 - and any unbreakable run inside a column would push that column wider
+   than its twin, silently undoing the even split this rule exists to make. */
+.stability-pair.is-pair {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: var(--space-3);
+  grid-template-rows: auto auto auto auto;
+}
+.stability-pair.is-pair > .stability-cohort {
+  display: grid;
+  grid-row: 1 / -1;
+  grid-template-rows: subgrid;
+}
+.stability-pair.is-pair > .stability-cohort > .stability-name    { grid-row: 1; }
+.stability-pair.is-pair > .stability-cohort > .cohort-stat       { grid-row: 2; }
+.stability-pair.is-pair > .stability-cohort > .stability-weakest { grid-row: 3; }
+.stability-pair.is-pair > .stability-cohort > .cohort-flag       { grid-row: 4; }
 /* The number is the focal point now that nothing labels it in-line, so it takes
    the treatment the rail's pooled-size figure takes. `of 5` rides its baseline
    to say what the share is of, which is the depth the slider is on. */
@@ -1130,14 +1187,24 @@ summary:focus-visible,
 
 /* Which animal moves the list most. It is the per-member half of the headline:
    the mean is above, and this names the member the mean is worst for, which is
-   something a reader can go and look at. */
+   something a reader can go and look at.
+
+   Label and score on one line, the animal's name on its own line beneath. All
+   three sat on one baseline row while the panel was a single 322px column; in a
+   155px one they cannot. The label and the value are fixed-width, which left
+   about 29px for a 27-character sample key and - since the key wraps rather than
+   truncates, on purpose - broke it one character per line into a 400px column. */
 .stability-weakest {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
+  display: block;
   margin-top: var(--space-2);
   padding-top: var(--space-2);
   border-top: 1px dashed var(--border-subtle);
+}
+.stability-weakest-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 .stability-weakest-label {
   flex: none;
@@ -1150,12 +1217,22 @@ summary:focus-visible,
 /* A sample key is "OSD-137|RR9_LVR_FLT_..." and the inspector is not wide, so
    it wraps rather than truncating: a half-printed key names no animal. */
 .stability-weakest-name {
-  flex: 1 1 auto;
+  display: block;
+  margin-top: 2px;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.4;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+}
+/* No member moves the list further than any other, which `cohorts.weakest_member`
+   reports as None. It is an answer, not a gap, so it is said in words and in the
+   text face rather than left to an absent row - an absent row and a clipped row
+   look identical, and a clipped row on this exact line is what this layout was
+   built to fix. */
+.stability-weakest-name.is-none {
+  font-family: inherit;
+  color: var(--text-secondary);
 }
 .stability-weakest-value {
   flex: none;

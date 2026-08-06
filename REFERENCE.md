@@ -759,7 +759,7 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**330 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-06 by running the suite.
+**334 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-06 by running the suite.
 
 | file | tests |
 | --- | --- |
@@ -777,7 +777,7 @@ The rows sum to the headline; regenerate both with `pytest tests/ -q --collect-o
 Every row above was regenerated that way on 2026-08-06, which caught two that had drifted independently of this session's work: `test_app.py` was recorded at 63 against an actual 76, so the table summed to 290 while the headline said 307.
 A hand-maintained count is the same failure mode the browser suites fixed by counting themselves.
 
-Plus **266 browser checks**, which are not collected by pytest and need the real cache: 50 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, 146 in `tests/e2e_cohort_check.py`.
+Plus **270 browser checks**, which are not collected by pytest and need the real cache: 50 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, 150 in `tests/e2e_cohort_check.py`.
 These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
