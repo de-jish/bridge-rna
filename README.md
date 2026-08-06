@@ -233,7 +233,7 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 334 tests, about twenty-five seconds
+.venv/bin/python -m pytest tests/ -q             # 335 tests, about twenty-five seconds
 .venv/bin/python tests/e2e_check.py              # 50 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
 .venv/bin/python tests/e2e_cohort_check.py       # 146 checks of cohort retrieval

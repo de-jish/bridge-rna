@@ -33,7 +33,23 @@ The low-stability flag stays deliberately unequalized: a counterpart badge for a
 The shipped check compared the last block's bottom against `bounding_box()`, which is the *border* box, so a block could run through the panel's own 20 px bottom padding and stop 1 px short of the border - at 1600x1000 the block ended 9.9 px below the content box and 10.1 px above the border box, satisfied by exactly the margin that hid the failure. It never compared `scrollHeight` to `clientHeight` either.
 It now measures the content box and the scroll box, and asserts the two arms share a top, a height, and a baseline for their numbers.
 
-**Tests.** 334 pytest (up 4) and 150 cohort browser checks (up 4). All 50 main and 70 upload checks re-run unchanged, because `.details-panel` is shared.
+**The flex fix regressed every width below 1180 px, and an adversarial review of the working tree is what found it.**
+`flex: 1 1 0` is right in the desktop column, whose height is fixed, and wrong the moment the app grid collapses to one column and the inspector's height comes from its contents instead - because a zero-basis item contributes nothing to that height.
+So the column sized itself to the other two panels and pinned the details panel to its 120 px floor, hiding **372 px at 900 px wide and 388 px at 390 px**, where with a content basis it had stood at its full 491 px and let the page scroll.
+Measured both ways against the running app before writing the fix, which is `flex: 1 1 auto` and `overflow: visible` inside the existing `@media (max-width: 1180px)` block, beside the two rules already there that lift the caps on the stability and AI panels for exactly the same reason.
+Every desktop measurement of the even split was clean while this was broken, which is the lesson: a flex basis is a claim about which axis is constrained, and changing one is only correct for the breakpoints where that claim holds.
+
+**Two smaller things came out of the same review.**
+At 320 px of page width the "moves it most" label and its score stop fitting on one line in a 121 px column, and cohort A's score sat against cohort B's label; `.stability-weakest-label` is `flex: 0 1 auto` with `min-width: 0` now, so it wraps identically in both columns and the even split survives 320 px without a breakpoint that would have stacked the arms on a phone.
+And the 12.4 px by which the two blocks used to differ was **not** the `differs by` phrase, which costs nothing: it is +13.0 px of separator box on the second block, -15.94 px from cohort A's sentence wrapping where B's did not, and +15.28 px from cohort B's key wrapping where A's did not.
+Two content terms that nearly cancelled by luck, over one structural offset - so the old layout was metastable rather than stably asymmetric, and the gap moved from one search to the next. `docs/stability_panel_even_split.md` carries the decomposition; the first draft of that document got it wrong and is corrected.
+
+**Five dead CSS rules went with it**, all orphaned by earlier deletions rather than by this change: `.cohort-stat + .cohort-stat`, `.cohort-stat-head`, `.cohort-stat-label` and `.cohort-stat-value` dressed the two-stat card whose second stat was `R̄`, removed on 2026-08-05, and `.cohort-flag-body` was orphaned when the caution became one line.
+`test_app.py`'s stylesheet check could not see any of them: it filters to `bm-` and `app-` prefixes.
+
+**Tests.** 335 pytest (up 5) and 156 cohort browser checks (up 10). All 50 main and 70 upload checks re-run unchanged, because `.details-panel` is shared.
+`test_every_row_the_pair_grid_places_has_a_rule_that_places_it` is the one worth keeping in mind: it reads the stylesheet and fails if a direct child of an arm has no `grid-row`, because such a row lands in an implicit track the other column does not have and shears the two apart. Verified by injecting a fifth row and watching it fail, then removing it.
+The browser suite now re-measures the panel at 900, 390 and 320 px, which is the regression above turned into a check.
 Ten payload shapes were also rendered through the shipping `build_stability_panel` and measured in Chromium at 1700 px and 390 px - both arms named, one arm without a weakest member, neither, one flagged, both flagged, the corpus's longest key in both columns, long labels at top-k 50, a zero baseline, and a lone cohort with and without a named member - every one with equal widths, equal heights, aligned names, aligned numbers, no horizontal overflow.
 The layout was chosen by a design workflow that specified three candidates in full and judged them on information design, doctrine fidelity and implementation risk; all three judges ranked this one first. Its measurements and the rejected alternatives: `docs/stability_panel_even_split.md`.
 

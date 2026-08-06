@@ -881,6 +881,67 @@ def test_every_row_of_an_arm_is_addressable_so_the_columns_can_align():
         assert {"stability-name", "cohort-stat"} <= direct
 
 
+def test_every_row_the_pair_grid_places_has_a_rule_that_places_it():
+    """A fifth row added to an arm would shear the two columns, silently.
+
+    `subgrid` aligns only the rows the parent declares and the child places. A
+    direct child with no `grid-row` lands in an implicit track, which the other
+    column does not have unless it emits the same row - so one arm's flag could
+    end up beside the other arm's member name, which is the failure that
+    addressing rows by class exists to prevent.
+
+    Nothing else guards this: `test_app.py`'s stylesheet check filters to `bm-`
+    and `app-` prefixes, so no `stability-*` class is covered by it.
+    """
+    import re
+    from pathlib import Path
+
+    from bridge_rna.panels import build_stability_panel
+
+    css = (Path(__file__).resolve().parent.parent
+           / "assets" / "retrieve.css").read_text()
+
+    placed = {}
+    for m in re.finditer(
+            r"\.stability-pair\.is-pair\s*>\s*\.stability-cohort\s*>\s*"
+            r"\.([a-z-]+)\s*\{[^}]*grid-row:\s*(\d+)", css):
+        placed[m.group(1)] = int(m.group(2))
+    assert placed, "no row is placed at all; the columns cannot align"
+
+    # The mirror-image payload, so both optional rows are represented: arm A
+    # names a member and arm B is flagged instead.
+    children, _ = build_stability_panel({
+        "mode": "cohort",
+        "stability": _measured(pooled=0.86, weakest="OSD-1|a2"),
+        "query": {"cohort_label": "Liver · Space Flight"},
+        "comparison": {"facet": "spaceflight arm",
+                       "query_b": {"cohort_label": "Liver · Ground Control"},
+                       "stability": _measured(pooled=0.31, weakest=None)}})
+    emitted = set()
+    for arm in _find(children, "stability-cohort"):
+        for kid in (arm.children or []):
+            emitted.update(c for c in
+                           (getattr(kid, "className", "") or "").split()
+                           if c)
+
+    missing = emitted - set(placed)
+    assert not missing, (
+        f"{sorted(missing)} are direct children of an arm with no `grid-row` "
+        f"rule, so each lands in an implicit track the other column does not "
+        f"have and the two arms shear apart")
+    stale = set(placed) - emitted
+    assert not stale, (
+        f"{sorted(stale)} are placed in the pair grid but nothing emits them")
+
+    tracks = re.search(r"\.stability-pair\.is-pair\s*\{[^}]*grid-template-rows:"
+                       r"\s*([^;]+);", css)
+    assert tracks, "the pair grid declares no rows for its arms to borrow"
+    assert len(tracks.group(1).split()) >= max(placed.values()), (
+        f"row {max(placed.values())} is placed but only "
+        f"{len(tracks.group(1).split())} tracks are declared, so it falls into "
+        f"an implicit one that `subgrid` does not align")
+
+
 def test_the_member_that_moves_it_most_puts_its_name_on_its_own_line():
     """Label, score and a 27-character sample key shared one baseline row while
     the panel was a single 322px column. In a 155px one they cannot: the label

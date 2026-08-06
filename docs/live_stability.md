@@ -160,6 +160,15 @@ The degradation path is unchanged and now falls out of the same rule: a zero-bas
 `tests/e2e_cohort_check.py` measures this rather than trusting it: after a two-arm search it reads the panel's scroll box and content box and asserts that nothing is clipped and that the two arms are the same size.
 The first version of that check compared the last block against `bounding_box()`, which is the *border* box, so it allowed a block to run through the panel's own 20 px bottom padding - and it passed for weeks while cohort B's last row was clipped at every viewport. That is recorded in section 2 of `docs/stability_panel_even_split.md`.
 
+**The three cuts above were not enough, and the layout changed the same day.**
+Saying the shared parts once, cutting the caution to one line and making the details panel yield brought a comparison from 644 px down to 456 px in a 445 px box, which is a great deal better and is still 11 px short.
+Cohort B's last row stayed clipped at every viewport the app is used at, and the two arms were never the same height - the gap between them was a property of how their sentences and member keys happened to wrap, so it moved from one search to the next.
+The two arms are drawn as even columns with their rows aligned by `subgrid` now, at 354 px, and `docs/stability_panel_even_split.md` is the whole account of it.
+
+One number in this section is worth correcting rather than leaving to be re-derived: `max-height: 65%` was never what constrained the panel.
+At the inspector heights measured it allows about 581 px against a natural height of 458 px, so it did not bind at any of them.
+Flex shrink did all of the constraining, which is why the fix was a flex basis rather than a taller cap.
+
 ## 8. Alternatives considered and rejected
 
 **Keep the curve on the rail and add the measurement on the right.**

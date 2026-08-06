@@ -729,6 +729,19 @@ summary:focus-visible,
   .inspector { padding: 0 var(--space-4) var(--space-4); }
   .ai-panel { max-height: none; }
   .stability-panel { max-height: none; overflow: visible; }
+  /* And the details panel goes back to a content basis here, for the same
+     reason the two rules above lift their caps: once the document scrolls, a
+     panel should be as tall as what it holds.
+
+     `flex: 1 1 0` is right in the desktop column, where the column's height is
+     fixed and this panel's job is to take what the other two leave. It is wrong
+     the moment the column's height comes from its contents instead, because an
+     item with a zero basis contributes nothing to that height - so the column
+     sized itself to the other two panels and left this one on its 120px floor,
+     scrolling internally with 372px hidden at 900px wide and 388px at 390px,
+     where it used to stand at its full 491px and let the page scroll. Measured
+     both ways on the running app before this rule was written. */
+  .details-panel { flex: 1 1 auto; overflow: visible; }
 }
 
 /* Phone: relax padding, let the header wrap, keep touch targets comfortable. */
@@ -1015,28 +1028,14 @@ summary:focus-visible,
 }
 .cohort-card-k-label { font-size: 11.5px; color: var(--text-secondary); }
 
-.cohort-stat + .cohort-stat { margin-top: var(--space-3); }
-.cohort-stat-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-}
-.cohort-stat-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-secondary);
-}
-/* Mono for the measurements only. "Result stability" in a numeral font would
-   be noise; 0.74 and R 0.9994 want to sit on one grid. */
-.cohort-stat-value {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-}
+/* `.cohort-stat + .cohort-stat`, `.cohort-stat-head`, `.cohort-stat-label` and
+   `.cohort-stat-value` were deleted here on 2026-08-06. They dressed a two-stat
+   card - a labelled row per statistic, the label left and a mono figure right -
+   and the second statistic was `R̄`, removed on 2026-08-05 for reading as a
+   grade while grading nothing. An arm has carried exactly one stat since, with
+   its own `.stability-head`, so none of the four could match anything. Deleted
+   rather than left unused, which is what this repository did with
+   `resultant_length` itself. */
 .cohort-stat-note {
   margin-top: 5px;
   font-size: 11px;
@@ -1078,7 +1077,9 @@ summary:focus-visible,
   font-weight: 700;
   color: var(--status-warn);
 }
-.cohort-flag-body { font-size: 11px; line-height: 1.45; color: #7d5a12; }
+/* `.cohort-flag-body` was deleted here on 2026-08-06: the caution became one
+   line rather than a title over a body when two arms had to fit on screen at
+   once, and nothing has emitted a body since. */
 
 /* --- The stability panel ----------------------------------------------------
    Result stability is measured during the search rather than looked up from a
@@ -1206,8 +1207,18 @@ summary:focus-visible,
   justify-content: space-between;
   gap: var(--space-2);
 }
+/* `flex: 0 1 auto` with `min-width: 0`, not `flex: none`, and only the narrowest
+   phones can tell. The label is 97.8px at its natural width and the score 26.4,
+   which with the 8px gap needs 132.2px on one line; a column is half the page
+   less 78px of padding, border and gutter, so the two stop fitting below about
+   342px of page width. Unshrinkable, the pair then ran out of its own track and
+   cohort A's score sat against cohort B's label - measured at 320px, where a
+   column is 121px. Shrinkable, the label wraps to two lines instead and both
+   columns wrap identically, which keeps the even split at every width rather
+   than buying it back with a breakpoint that stacks the arms on a phone. */
 .stability-weakest-label {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;

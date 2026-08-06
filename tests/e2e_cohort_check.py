@@ -101,6 +101,26 @@ PANEL_FIT_JS = """() => {
   };
 }"""
 
+# The same panel below 1180px, where the app grid collapses to one column and
+# the document scrolls instead of the panels.
+NARROW_FIT_JS = """() => {
+  const p = document.querySelector('#stability-panel');
+  const d = document.querySelector('#details-panel');
+  if (!p || !d) return null;
+  const boxes = [...p.querySelectorAll('.stability-cohort')]
+    .map(b => b.getBoundingClientRect());
+  const near = xs => xs.length < 2 ? true
+    : Math.max(...xs) - Math.min(...xs) <= 1;
+  return {
+    detailsH: +d.getBoundingClientRect().height.toFixed(1),
+    detailsContent: d.scrollHeight,
+    detailsHidden: d.scrollHeight - d.clientHeight,
+    armH: boxes.map(b => +b.height.toFixed(1)),
+    sameHeight: near(boxes.map(b => b.height)),
+    overflowX: p.scrollWidth - p.clientWidth > 1,
+  };
+}"""
+
 QUERY_NODE_JS = """() => {
   const gd = document.querySelector('#network-graph .js-plotly-plot');
   if (!gd || !gd._fullData) return null;
@@ -597,6 +617,34 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
          "with the facet the pair differs in stated once, above both arms")
     c.ok(page.locator("#stability-panel .stability-pair.is-pair").count() == 1,
          "and the two arms are laid out as one even pair rather than stacked")
+
+    # The same panel at the widths where the app grid collapses to one column
+    # and the document scrolls. Two things are checked that only exist there.
+    #
+    # The details panel must size to its content, not to a leftover. `flex: 1 1
+    # 0` is right in the fixed-height desktop column and wrong the moment the
+    # column's height comes from its contents, because a zero-basis item adds
+    # nothing to that height - which pinned this panel to its 120px floor with
+    # 372px hidden. That regression shipped in the same change as the even split
+    # and was invisible to every desktop measurement of it.
+    #
+    # And 320px is the width where the "moves it most" label and its score stop
+    # fitting on one line in a column, so the label has to wrap rather than run
+    # into the other arm.
+    was = page.viewport_size
+    for width in (900, 390, 320):
+        page.set_viewport_size({"width": width, "height": 950})
+        page.wait_for_timeout(700)
+        narrow = page.evaluate(NARROW_FIT_JS)
+        c.ok(bool(narrow) and narrow["detailsHidden"] <= 1,
+             f"at {width}px the page scrolls and the inspector is not clipped: "
+             f"details panel {narrow and narrow['detailsH']}px holds "
+             f"{narrow and narrow['detailsContent']}px")
+        c.ok(bool(narrow) and narrow["sameHeight"] and not narrow["overflowX"],
+             f"and the two arms are still an even split at {width}px: "
+             f"{narrow and narrow['armH']}")
+    page.set_viewport_size(was)
+    page.wait_for_timeout(700)
     shot(page, "07b-two-measurements")
 
     nodes = page.evaluate(NODES_JS) or {}

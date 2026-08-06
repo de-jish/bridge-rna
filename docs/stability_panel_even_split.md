@@ -20,9 +20,20 @@ Driving the real app in Chromium against study OSD-100, cohort `left eye · Grou
 At every viewport tested, cohort A's block is complete and cohort B's is not.
 The row that goes is the one naming the animal whose absence moves the result furthest, which is the only actionable line in the block.
 
-The two blocks are also unequal before any clipping: cohort A measures 148.3 px and cohort B measures 160.7 px, a difference of 12.4 px that comes from two places.
-Cohort B's role head carries the `differs by spaceflight arm` phrase that belongs to the pair and is stated once, on the second block.
-Cohort B's weakest-member name, `Mmus_C57-6J_EYE_FLT_Rep4_M26`, is one character longer than cohort A's and wraps onto a second line at 322 px where cohort A's does not.
+The two blocks are also unequal before any clipping: cohort A measures 148.3 px and cohort B measures 160.7 px.
+That 12.4 px is worth decomposing, because the obvious culprit is not one of the terms and the real shape of it is the argument for the fix.
+
+| term | px |
+| --- | ---: |
+| the separator box that exists on the second block only (`padding-top: 12` + `border-top: 1`) | **+13.00** |
+| cohort A's scale sentence wrapping to two lines where cohort B's fits on one | **-15.94** |
+| cohort B's 28-character member key wrapping where cohort A's 27-character key does not | **+15.28** |
+| | **+12.34** |
+
+The `differs by spaceflight arm` phrase costs nothing: at 322 px it sits on cohort B's role line beside the letter and adds no height at all.
+What is left is one structural offset and **two content terms that happened to nearly cancel**, each swinging between roughly -16 px and +29 px depending on how a given cohort's sentence and member name wrap.
+So the layout was not stably asymmetric, it was *metastable*: the gap between the two arms was a property of the strings in them, and it moved from one search to the next.
+That is the case for an arrangement in which the two arms are the same size because of how they are laid out rather than because of what they happen to contain.
 
 The panel is not the only thing starved.
 In the same measurements `#details-panel` had 506 px of content and was given between 118 px and 310 px, so the inspector below is scrolling hard while the panel above it holds 447 px to say two numbers.
@@ -135,6 +146,19 @@ The degradation path is unchanged and now falls out of the same rule rather than
 `.stability-panel`'s `max-height: 65%` stays, demoted to the backstop it was always meant to be.
 At 1600 x 1000 the panel asks for 354 px of an allowed 607 px, so it never binds; it still earns its place on a genuinely short window, where two flagged arms and long labels reach about 409 px.
 
+**`flex: 1 1 0` is right only while the column's height is fixed, and getting that wrong regressed every width below 1180 px.**
+There the app grid collapses to one column and the document scrolls, so the inspector's height comes from its contents - and an item with a zero basis contributes nothing to that height.
+The column therefore sized itself to the other two panels and left the details panel sitting on its 120 px floor, scrolling internally with **372 px hidden at 900 px wide and 388 px at 390 px**, where with a content basis it had stood at its full 491 px and let the page scroll.
+Measured both ways against the running app rather than reasoned about.
+The `@media (max-width: 1180px)` block now restores `flex: 1 1 auto` and `overflow: visible`, alongside the two rules already there that lift the caps on `.stability-panel` and `.ai-panel` for exactly the same reason: once the document scrolls, a panel should be as tall as what it holds.
+
+### The narrowest phones
+
+The label and the score of the "moves it most" row are 97.8 px and 26.4 px, so with the 8 px gap the pair needs 132.2 px on one line.
+A column is half the page less 78 px of padding, border and gutter, so the two stop fitting below about 342 px of page width - reached only by the narrowest phones, and measured at 320 px, where a column is 121 px and cohort A's score sat against cohort B's label.
+`.stability-weakest-label` is now `flex: 0 1 auto` with `min-width: 0` rather than `flex: none`, so it wraps to two lines instead, identically in both columns.
+Stacking the arms under a breakpoint was the alternative and was rejected: it buys the same fix by making the phone the one place the two arms cannot be compared, and the even split survives 320 px without it.
+
 ## 5. Alternatives considered and rejected
 
 Three layouts were specified in full and judged on information design, fidelity to this repository's recorded decisions, and implementation risk.
@@ -151,9 +175,10 @@ Rejected because it does not improve the reading the panel exists to support - t
 It is also not what was asked for.
 Its diagnosis of the flex bug was correct and is kept; so is its argument that a vanished row and a clipped row look the same, which is why "every member equally" is now printed.
 
-**Stack the two columns again below 680 px.**
-Rejected on measurement: at a 390 px phone width the two columns are 160 px each, which is *wider* than the 155 px they get on a 1600 px desktop, because the inspector goes full-bleed when the app grid collapses to one column.
-Every edge case renders clean there. A breakpoint would have made the phone the only place the two arms cannot be compared.
+**Stack the two columns again below 680 px, or below 360 px.**
+Rejected on measurement: at a 390 px phone width the two columns are 156 px each, which is *wider* than the 155 px they get on a 1600 px desktop, because the inspector goes full-bleed when the app grid collapses to one column.
+The one width where anything did break was 320 px, and letting the row's label wrap fixes it without a breakpoint.
+A breakpoint would have made the phone the only place the two arms cannot be compared.
 
 **Give cohort B's meter the warm hue its dot carries.**
 Rejected because the meter's fill already encodes something else: it turns amber when the measurement is below `STABILITY_FLOOR`.

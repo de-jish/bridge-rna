@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `app.py` is the single entry point and owns the header and the router.
 **The router must decline to repaint a route that is already on screen.** `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` alone let the router rebuild the view on every load. Rebuilding the retrieval view reads the OSDR catalog, so its response landed a few hundred milliseconds later, on top of whatever the user had done meanwhile - clicking Cohort on arrival opened the cohort panel and then closed it again, 6 times out of 6, while the click's own callback had returned the right answer. `route-store` records what was painted and `app.navigation_for` is the decision, split out so it is testable without Dash plumbing. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 334 tests pass in about twenty-five seconds, plus 270 browser checks: 50 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 150 in `tests/e2e_cohort_check.py`.
+**Current state: built, run on the real corpus, and tested.** 335 tests pass in about twenty-five seconds, plus 276 browser checks: 50 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 156 in `tests/e2e_cohort_check.py`.
 Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
@@ -344,10 +344,10 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 334 tests, about twenty-five seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 335 tests, about twenty-five seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 50 browser checks, about three minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 150 cohort checks, about four minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 156 cohort checks, about four minutes
 ```
 
 **The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.
