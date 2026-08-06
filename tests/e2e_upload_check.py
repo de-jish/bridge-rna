@@ -509,13 +509,42 @@ def main() -> int:
             out.append(f"{d.name} (pid {pid}, {state})")
         return "; ".join(out) or "none"
 
+    def _owner_is_dead(d: Path) -> bool:
+        m = re.match(r"bridge_rna_uploads_(\d+)_", d.name)
+        if not m:
+            return False
+        pid = int(m.group(1))
+        if pid <= 0 or pid == os.getpid():
+            return False
+        try:
+            os.kill(pid, 0)
+            return False
+        except ProcessLookupError:
+            return True
+        except OSError:
+            return False
+
     left = sorted(Path(tempfile.gettempdir()).glob("bridge_rna_uploads_*"))
     c.note(f"after SIGTERM: {_describe(left)}")
-    reaped = _sweep_abandoned_upload_dirs()
+    abandoned = [d for d in left if _owner_is_dead(d)]
+    reaped = set(_sweep_abandoned_upload_dirs())
     still = sorted(Path(tempfile.gettempdir()).glob("bridge_rna_uploads_*"))
-    c.ok(bool(reaped) and not still,
-         f"the next run reaps the killed server's staging directory "
-         f"(reaped {len(reaped)}, left: {_describe(still)})")
+    orphaned = [d for d in still if _owner_is_dead(d)]
+
+    # The guarantee is "every directory whose owner is gone is reaped", not
+    # "the temp directory is empty". Those are not the same claim, and asserting
+    # the second one made this check fail whenever anything else on the machine
+    # was holding a staging directory of its own - `pytest tests/ -q` does
+    # exactly that, because two upload tests call `_stage_upload`, so running
+    # the suites concurrently failed a check about a bug that was not there.
+    # A live owner's directory surviving is the mechanism working: PID reuse can
+    # only make a dead directory look alive and delay its cleanup by one run, and
+    # it must never let one process remove another's staged file.
+    c.ok(bool(abandoned), f"the SIGTERMed server left one to reap: {_describe(abandoned)}")
+    c.ok(all(d in reaped and not d.exists() for d in abandoned),
+         f"and the next run reaps every abandoned directory (reaped {len(reaped)})")
+    c.ok(not orphaned,
+         f"leaving nothing behind whose owner is gone: {_describe(orphaned)}")
 
     print("\n" + "=" * 62)
     for n in c.notes:

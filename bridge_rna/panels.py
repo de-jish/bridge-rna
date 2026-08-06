@@ -315,7 +315,7 @@ def _stability_block(measurement: dict[str, Any], label: str = "",
     if gain is None:
         scale = "no two of them agree on a hit alone."
     else:
-        scale = (f"one alone agrees with another {_share(single)} of the time, "
+        scale = (f"one alone overlaps another by {_share(single)}, "
                  f"a {float(gain):.1f}x gain.")
 
     children: list[Any] = [

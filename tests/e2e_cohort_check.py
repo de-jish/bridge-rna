@@ -423,8 +423,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
          "and what dropping one of them did")
     # The scale, measured on this cohort in the same pass, which is what
     # replaced the fixed 0.16 constant the rail used to quote.
-    c.ok("AGREES WITH ANOTHER" in panel or "AGREE ON A SINGLE HIT" in panel,
-         f"and what one sample alone would have agreed: {panel[:160]!r}")
+    c.ok("OVERLAPS ANOTHER BY" in panel or "AGREE ON A HIT ALONE" in panel,
+         f"and what one sample alone would have overlapped: {panel[:170]!r}")
     # The heading names the statistic; a per-block label would repeat it twice
     # over and push cohort B's measurement below the fold on a comparison.
     c.ok(panel.count("RESULT STABILITY") == 1,

@@ -9,7 +9,7 @@ This is the implementation document for a copy pass over both views plus one rea
 | Encodings it explained before this | **1** |
 | Defects found on the way and fixed | **5** - two in the map as it stood, three in this change, all found by audit or review rather than by a test |
 | Sentences removed from the interface | **7** |
-| Tests | 330 unit tests, 264 browser checks across 3 suites |
+| Tests | 330 unit tests, 266 browser checks across 3 suites |
 
 ## 1. What was asked for
 
@@ -174,7 +174,7 @@ Cohort A survives the trip unchanged at `#0bab9f`, which is what made the differ
 
 ## 5. Three defects this change introduced, and what caught them
 
-An adversarial review of the finished branch raised 27 candidates, of which these three survived a refutation pass. None was visible to any of the 330 tests or the 264 browser checks, because all three were *statements* rather than crashes.
+An adversarial review of the finished branch raised 27 candidates, of which these three survived a refutation pass. None was visible to any of the 330 tests or the 266 browser checks, because all three were *statements* rather than crashes.
 
 **The single-query key ignored the show/hide tick.** `retrieval_key_children`'s comparison branch reads `roles` and recedes a hidden arm; the single-query branch never read it. So unticking "Show it on the map" for a plain search took the star and the rings off the plot while the key went on reading "the query sample 1 / retrieved hit 5" - the exact failure the count rule exists to prevent, in the commonest state the map has. The rail sentence beside it had the same gap, under a docstring this change had just rewritten to claim it read the ticks.
 

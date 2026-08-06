@@ -735,8 +735,8 @@ def test_a_baseline_too_small_for_two_decimals_is_not_printed_as_zero():
     children, _ = build_stability_panel({
         "mode": "cohort", "stability": _measured(pooled=0.85, single=0.0025)})
     text = _series(children)
-    assert "0.00 of the time" not in text
-    assert "0.003 of the time" in text
+    assert "overlaps another by 0.00," not in text
+    assert "overlaps another by 0.003," in text
     assert "340.0x" in text
 
 

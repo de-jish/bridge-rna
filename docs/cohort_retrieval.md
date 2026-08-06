@@ -160,15 +160,20 @@ So a cohort hit carries the same schema as a single-sample hit, and everything d
 
 ```python
 def run_cohort_retrieval(sample_ids, topk):
-    rows  = np.stack([cached_query_vector(s) for s in sample_ids])
-    q_vec = cohort_query_vector(rows)
-    idx, score = _topk_cosine_from_memmap(index_vecs=..., q_vec=q_vec, k=topk)
-    hits = _annotate_from_cache(idx, score)
-    hits["archs4_index"] = idx.astype(int)
-    return hits
+    rows = np.stack([cached_query_vector(s) for s in sample_ids])
+    # Row 0 answers the query; the rest exist only to measure how far it
+    # survives dropping one member, and are scored in the same pass.
+    q_mat = np.concatenate([cohort_query_vector(rows).reshape(1, -1),
+                            leave_one_out_vectors(rows), rows])
+    idx, score = _topk_cosine_matrix(index_vecs=..., q_mat=q_mat, k=topk)
+    hits = _annotate_from_cache(idx[0], score[0])
+    hits["archs4_index"] = idx[0].astype(int)
+    return hits, rows, measure_stability(sample_ids, idx[0], ..., depth=topk)
 ```
 
-No model, no subprocess, no torch, no new artifact, and one memmap scan, so the same ~0.5 s as the cached path.
+No model, no subprocess, no torch and no new artifact, and still **one** memmap scan whatever the cohort size.
+The scan carries `2k+1` query vectors rather than one since 2026-08-06, which is what makes result stability a measurement instead of a lookup: 0.44 s for the pooled query alone, 0.50 s at the median cohort size of 10, and 1.00 s for the 77 vectors a 38-animal cohort needs.
+`docs/live_stability.md` section 4 has the full table and the reason the extra queries are nearly free.
 
 | file | change |
 | --- | --- |

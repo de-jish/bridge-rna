@@ -180,6 +180,9 @@ Against the fixture corpus, in pytest, with no real artifact:
 - The rail card renders no stability, no meter, and no flag; the panel renders the measured value.
 - The deleted names stay deleted.
 
+One thing the units cannot see, caught by an adversarial review of the diff rather than by any of them: `gain` guards a baseline of exactly zero, but the panel printed the baseline at two decimals, so the one real corpus combination with a baseline of 0.0048 (OSD-612's 4-animal cerebral hemisphere at top-18) rendered "one alone overlaps another by 0.00, a 88.6x gain".
+`panels._share` drops to three decimals below 0.005 rather than suppressing the ratio, because a near-zero baseline is exactly when the gain is worth stating.
+
 Against the real corpus, in the browser:
 
 - `tests/e2e_cohort_check.py` now gains a `--loops` flag and asserts that the panel is absent before a search, present after it with a number, carries both arms of a comparison, and reports a stability that is not the value the deleted curve would have produced for that size.

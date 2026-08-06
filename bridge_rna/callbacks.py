@@ -745,21 +745,27 @@ def register(app) -> None:
     )
     def update_cohort_card(included: list[str] | None, cohort_id: str | None,
                            compare_id: str | None, facets: list[str] | None):
-        """Restate size and stability for every pooled query that will run.
+        """Restate the pooled size of every query that is about to run.
 
-        This reads the *included* members rather than the cohort's full
-        membership, because excluding two of six changes every number on the
-        card. A card that kept quoting the cohort's nominal size while the pool
-        shrank underneath it would be the same failure as the status banner that
-        announced cached results as subprocess output.
+        Size, and nothing else. This used to restate a stability figure too,
+        looked up from a curve by that size; the number is measured during the
+        search now and `build_stability_panel` reports it in the inspector
+        afterwards, so what is left here is the one fact the rail can state
+        before anything has been scored.
+
+        It reads the *included* members rather than the cohort's full
+        membership, because excluding two of six changes the size the card
+        states. A card that kept quoting the cohort's nominal size while the
+        pool shrank underneath it would be the same failure as the status banner
+        that announced cached results as subprocess output.
 
         The same argument reaches one step further and is why this writes two
         cards. Arming a comparison runs a *second* independent pooled query, and
-        the rail used to say nothing about its size or its stability while both
-        the network figure and the map gave it a color and drew it. A pooled
-        query that is described nowhere is one the reader cannot weigh: cohort
-        B can easily be the smaller and shakier of the two, and that changes how
-        much of the overlap number to believe.
+        the rail used to say nothing about its size at all while both the
+        network figure and the map gave it a color and drew it. A pooled query
+        that is described nowhere is one the reader cannot weigh: cohort B can
+        easily be the smaller and shakier of the two, which is exactly what
+        decides how much of the overlap number to believe.
 
         B's membership is not editable - the member ticks belong to the
         selected cohort - so its card always describes the whole sibling.
@@ -767,7 +773,11 @@ def register(app) -> None:
         empty = ""
         cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
         if cohort is None:
-            return (html.Div("Select a cohort to see how far to trust it.",
+            # It promised the trust readout this card used to carry. Nothing
+            # here can deliver that any more, and in the only state that shows
+            # this line the study has no poolable cohort to select either.
+            return (html.Div("No cohort in this study has two or more samples "
+                             "to pool.",
                              className="cohort-card cohort-card--empty"),
                     empty, "Members", True)
         members = [m for m in (included or []) if m in set(cohort.members)]

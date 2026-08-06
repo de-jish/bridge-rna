@@ -61,7 +61,7 @@ That is not a defect in either query: the entire top-500 of a 940,455-sample ind
 
 **Cohort** mode asks the question the study is actually powered to answer.
 It groups the samples the way OSDR already curates them, by study, tissue and flight condition, averages the group's embeddings into one query, and searches with that.
-Measured over all 212 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.74**, a 4.6-fold gain, and it costs no more than a single-sample search.
+Measured over all 212 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.74**, a 4.6-fold gain, and it still reads the index only once however large the group is.
 
 You can widen what counts as one cohort by dropping tissue or condition, which merges a study's organs or its arms into one larger group.
 Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
@@ -235,7 +235,7 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ```bash
 .venv/bin/python -m pytest tests/ -q             # 330 tests, about twenty-five seconds
 .venv/bin/python tests/e2e_check.py              # 50 browser checks; needs the built cache
-.venv/bin/python tests/e2e_upload_check.py       # 68 checks of the upload path
+.venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
 .venv/bin/python tests/e2e_cohort_check.py       # 146 checks of cohort retrieval
 ```
 

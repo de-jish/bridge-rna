@@ -49,6 +49,17 @@ The load-bearing unit test is the one that scores every leave-one-out pool the s
 One finding worth keeping: a batch of queries and a single query agree to about 1.3e-07 rather than bit for bit, because one is a BLAS matrix-matrix product and the other a matrix-vector product. That is a couple of float32 ulps, and it is the same effect check 1 of the validator documents.
 Design, measurements and rejected alternatives: `docs/live_stability.md`.
 
+**Hosted on 8050 and checked against the running instance rather than against a suite.**
+The port was already occupied by a server from 01:10 that morning, serving pre-change code and looking perfectly healthy - the second time that has happened, and the reason last session's entry says a green e2e proves the code works rather than that the hosted process runs it.
+It was replaced and the new instance verified directly: the rail card states the pooled size and nothing else, no stability panel exists before a search, and one appears after it with a measured 0.59 on a 2.4 s query.
+
+**One upload browser check was failing, and the bug was in the assertion rather than in the app.**
+`e2e_upload_check.py` asserted that after its server is SIGTERMed the next run reaps the abandoned staging directory and **none is left**. Two directories existed at that point, and the second belonged to a live PID, so the reaper skipped it and the check failed.
+Twice I concluded it reproduced "in isolation" and twice I was wrong: `pytest tests/ -q` was running alongside, and two upload tests call `_stage_upload`, so the suite holds a staging directory of its own for as long as it runs. Watching the temp directory and printing each new one's owner named the culprit in one line - `Python -m pytest tests/ -q`. Run genuinely alone, all 39 checks passed.
+So the reaper was doing exactly what it documents: a live owner's directory must survive, because PID reuse can only make a dead directory look alive and delay cleanup by one run, and must never let one process delete another's staged file.
+The check now asserts the guarantee instead of a proxy for it - every directory whose owner is *gone* is reaped, and none whose owner is gone survives - and it names each directory, its PID and whether that PID lives, because "reaped 1, 1 left" was not a diagnosis. Verified by running the upload suite with pytest looping against it throughout, which is what used to break it.
+The transferable lesson is the cheap one: "I ran it in isolation" is a claim to check, not to assert. Both times the confounding process was one I had started myself in the same message.
+
 ## 2026-08-06 (merged to main, hosted locally, and the meeting Q&A corrected)
 
 No new features. This session integrated the branch below, stood the app up, and fixed a document that had gone false.

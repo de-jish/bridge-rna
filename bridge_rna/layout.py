@@ -138,7 +138,13 @@ def build_cohort_facet_chips() -> Any:
 
 
 def build_cohort_panel() -> Any:
-    """Cohort mode: define the group, see how far to trust it, then search it."""
+    """Cohort mode: define the group, search it, then read how far it held up.
+
+    That order is deliberate and changed on 2026-08-06. Result stability used to
+    be predicted from cohort size and shown here on selection; it is measured on
+    the query now, so it cannot appear until the search has run and it lives in
+    the inspector rather than on this rail.
+    """
     return html.Div(
         id="mode-panel-cohort",
         className="mode-panel",
