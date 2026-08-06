@@ -287,13 +287,24 @@ def _share(x: float) -> str:
 
 
 def _stability_block(measurement: dict[str, Any], label: str = "",
-                     role: str = "", contrast: str = "") -> Any:
+                     role: str = "") -> Any:
     """One measured cohort: the number, the meter, and what was measured.
 
     ``measurement`` is `cohorts.StabilityMeasurement.as_dict()` as it came back
     through `hits-store`, so this renders JSON rather than the dataclass and
     survives the round trip the router forces when someone walks to the map and
     back.
+
+    The four parts are wrapped rather than emitted flat, and each wrapper is one
+    row of the pair grid: the name, the number with its meter and note, the
+    member that moves it most, and the low-stability flag. `.stability-pair`
+    aligns those rows across the two arms with `grid-template-rows: subgrid`,
+    which is what puts cohort A's 0.89 on the same baseline as cohort B's 0.94.
+    Either of the last two rows can be absent from either arm - a cohort whose
+    members all matter equally names none, and only a shaky arm is flagged - so
+    the rows are assigned by class rather than by counting children. Assigning
+    them by position would let cohort B's flag land in the row holding cohort
+    A's member name.
     """
     from .cohorts import STABILITY_FLOOR
 
@@ -318,8 +329,13 @@ def _stability_block(measurement: dict[str, Any], label: str = "",
         scale = (f"one alone overlaps another by {_share(single)}, "
                  f"a {float(gain):.1f}x gain.")
 
+    # The role line and the cohort's name are one grid row, so the two names sit
+    # on one baseline however many lines either of them wraps to. A lone cohort
+    # gets no head at all - there is nothing for a letter to distinguish it from
+    # - and the row simply collapses.
+    head = _cohort_role_head(label, role, contrast="")
     children: list[Any] = [
-        *_cohort_role_head(label, role, contrast),
+        *([html.Div(className="stability-name", children=head)] if head else []),
         html.Div(
             className="cohort-stat",
             children=[
@@ -347,20 +363,40 @@ def _stability_block(measurement: dict[str, Any], label: str = "",
         ),
     ]
 
-    if weakest and weakest_value is not None:
-        children.append(html.Div(
-            className="stability-weakest",
-            children=[
-                html.Span("Moves it most", className="stability-weakest-label"),
-                # The accession is dropped: every member of a cohort shares it,
-                # the details panel below states it once, and carrying it here
-                # wrapped the name onto a second line for nothing.
-                html.Span(weakest.split("|", 1)[-1],
-                          className="stability-weakest-name"),
-                html.Span(f"{float(weakest_value):.2f}",
-                          className="stability-weakest-value"),
-            ],
-        ))
+    # The row is always drawn, and when there is no such member it says so.
+    # `cohorts.weakest_member` returns None when every member's absence moves the
+    # list equally far, which is a real answer and not a missing one - but an
+    # absent row and a clipped row look identical on screen, and a clipped row on
+    # exactly this line is the defect this layout was built to fix. Saying it in
+    # words is what keeps the two columns the same shape and keeps silence from
+    # having two meanings.
+    named = bool(weakest) and weakest_value is not None
+    children.append(html.Div(
+        className="stability-weakest",
+        children=[
+            # Label and score on one line, the name on its own beneath it. All
+            # three cannot share a baseline row in a 155px column: the label and
+            # the value are fixed width, which left about 29px for a
+            # 27-character sample key and wrapped it one character per line.
+            html.Div(
+                className="stability-weakest-row",
+                children=[
+                    html.Span("Moves it most",
+                              className="stability-weakest-label"),
+                    (html.Span(f"{float(weakest_value):.2f}",
+                               className="stability-weakest-value")
+                     if named else None),
+                ],
+            ),
+            # The accession is dropped from the name: every member of a cohort
+            # shares it, the details panel below states it once, and carrying it
+            # here wrapped the name onto a second line for nothing.
+            html.Span(weakest.split("|", 1)[-1] if named
+                      else "every member equally",
+                      className="stability-weakest-name"
+                      + ("" if named else " is-none")),
+        ],
+    ))
 
     if low:
         # Amber, not red, for the reason the map's coverage bar is amber: a
@@ -402,6 +438,18 @@ def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], di
     cards: stability is a property of each arm separately, and an overlap of 0.25
     between two arms measuring 0.86 means something quite different from the same
     0.25 between one at 0.86 and one at 0.31.
+
+    **The two blocks sit side by side, in even columns, with their rows aligned.**
+    They were stacked until 2026-08-06, and stacking gave the two arms visibly
+    unequal treatment: cohort A rendered complete and cohort B's last row was
+    clipped by the panel's own fold at every viewport measured, from 7.8 px at
+    1680x1050 to 65.6 px at 1280x800. The row that went was the one naming the
+    animal whose absence moves the result furthest, which is the only actionable
+    line in the block. Side by side the panel holds 354 px of content where it
+    held 456, so nothing is clipped, the two arms are the same size by
+    construction rather than by coincidence, and 0.89 sits on the same baseline
+    as 0.94 instead of 160 px below it - which is the comparison this panel
+    exists to support. `docs/stability_panel_even_split.md` has the measurements.
     """
     payload = payload or {}
     primary = payload.get("stability")
@@ -421,12 +469,18 @@ def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], di
     if paired:
         query_b = comparison.get("query_b") or {}
         blocks.append(_stability_block(
-            second, label=_safe_str(query_b.get("cohort_label")),
-            role="b", contrast=contrast))
+            second, label=_safe_str(query_b.get("cohort_label")), role="b"))
 
     # Both arms are retrieved at the same depth, so what was measured is said
     # once, in the subtitle, rather than in every block. That is what keeps two
     # measurements on screen together, which is the whole point of measuring two.
+    #
+    # The facet the two differ in is said here for the same reason, and it moved
+    # here from cohort B's role line when the blocks went side by side. It is a
+    # fact about the pair, not about either arm - the one thing in the panel that
+    # is neither shared nor differing - and hanging it under B's letter made B's
+    # name start a line lower than A's, which is exactly the ragged edge that
+    # side-by-side columns exist to remove.
     depth = int(primary.get("depth") or 0)
     return (
         [
@@ -441,10 +495,16 @@ def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], di
                             f"hits comes back when any one pooled sample is "
                             f"dropped, averaged over all of them.",
                             className="panel-subtitle"),
+                        (html.P(f"The two arms differ by {contrast}.",
+                                className="stability-contrast")
+                         if paired and contrast else None),
                     ]),
                 ],
             ),
-            *blocks,
+            html.Div(
+                className="stability-pair" + (" is-pair" if paired else ""),
+                children=blocks,
+            ),
         ],
         {},
     )

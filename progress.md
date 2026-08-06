@@ -6,6 +6,37 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-06 (the two arms of a comparison get an even split, and the clipping under it is fixed)
+
+**The two cohort sections of the stability panel are now even columns with their rows aligned.**
+Asked whether they could be "split evenly UI wise", and the answer turned out to be that they were not merely uneven, they were unequal: cohort A rendered complete and cohort B's last row was clipped by the panel's own fold at **every** viewport measured on the real app - 7.8 px at 1680x1050, 9.9 px at 1600x1000, 14.2 px at 1440x900, 65.6 px at 1280x800.
+The row that went was "Moves it most", which names the animal whose absence moves the result furthest and is the only actionable line in the block.
+The two blocks were also unequal before any clipping, 148.3 px against 160.7 px, and the details panel below was being given 264 px for 506 px of content while the panel above held 447 px to say two numbers.
+
+Side by side the panel holds **354 px where it held 456**, nothing is clipped at any viewport, the two arms are equal by construction, and **0.89 sits on the same baseline as 0.94** instead of 160 px below it - which is the comparison the panel exists to support, and which previously cost the reader a memory hop.
+The details panel gained about 100 px at every size.
+
+**The alignment is `subgrid` with rows addressed by class, never by child order.**
+Either of the last two rows can be missing from either arm, so counting children would let cohort B's flag land in the row holding cohort A's member name.
+The tracks are `minmax(0, 1fr)` rather than `1fr`, which floors at min-content: sample keys run to 39 characters in mono across the corpus and any unbreakable run would push one column wider than its twin.
+
+**Making the panel shorter was not sufficient, and the residue named a real bug.**
+With the columns in place the panel still lost 3-11 px, enough to cut descenders off a sample key's last line.
+The cause was `.details-panel { flex: 1 20 auto }`: with a content basis that panel asks for the ~506 px it measures - a height it will never get and does not need, since it scrolls by design - so every layout pass began in overflow and gave it back off *both* panels in proportion. `flex-shrink: 20` made the details panel's share large; it never made the stability panel's share zero.
+It is now `flex: 1 1 0` and claims the leftovers instead, so there is no overflow to divide, and the degradation path falls out of the same rule rather than a tuned constant.
+
+**"differs by *facet*" moved to the panel header**, because it describes the pair rather than either arm and hanging it under B's letter started B's name a line below A's.
+**"Moves it most" is now always drawn**, saying "every member equally" when no member moves it further than another, because an absent row and a clipped row look identical on screen and a clipped row on that exact line is what this change fixed.
+The low-stability flag stays deliberately unequalized: a counterpart badge for a healthy arm is the grade `R̄` was deleted for being.
+
+**The guard that should have caught this had a 20 px hole in it.**
+The shipped check compared the last block's bottom against `bounding_box()`, which is the *border* box, so a block could run through the panel's own 20 px bottom padding and stop 1 px short of the border - at 1600x1000 the block ended 9.9 px below the content box and 10.1 px above the border box, satisfied by exactly the margin that hid the failure. It never compared `scrollHeight` to `clientHeight` either.
+It now measures the content box and the scroll box, and asserts the two arms share a top, a height, and a baseline for their numbers.
+
+**Tests.** 334 pytest (up 4) and 150 cohort browser checks (up 4). All 50 main and 70 upload checks re-run unchanged, because `.details-panel` is shared.
+Ten payload shapes were also rendered through the shipping `build_stability_panel` and measured in Chromium at 1700 px and 390 px - both arms named, one arm without a weakest member, neither, one flagged, both flagged, the corpus's longest key in both columns, long labels at top-k 50, a zero baseline, and a lone cohort with and without a named member - every one with equal widths, equal heights, aligned names, aligned numbers, no horizontal overflow.
+The layout was chosen by a design workflow that specified three candidates in full and judged them on information design, doctrine fidelity and implementation risk; all three judges ranked this one first. Its measurements and the rejected alternatives: `docs/stability_panel_even_split.md`.
+
 ## 2026-08-06 (result stability is measured on the query that ran, not looked up)
 
 **The rail's confidence number is gone, and the honest version replaced it on the right.**

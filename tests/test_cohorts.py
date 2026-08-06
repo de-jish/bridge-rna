@@ -779,11 +779,148 @@ def test_a_comparison_measures_both_arms_separately():
     # Each arm is named beside its own mark, because cohort B's hex cannot agree
     # across the retrieval network and the map.
     assert "Liver · Space Flight" in text and "Liver · Ground Control" in text
-    assert "differs by spaceflight arm" in text
+    # The facet the two differ in is a fact about the pair, so it is stated with
+    # the heading and the subtitle rather than hanging off cohort B's letter,
+    # where it made B's name start a line below A's once the two went side by
+    # side. Once, either way.
+    assert "differ by spaceflight arm" in text
+    assert text.count("spaceflight arm") == 1
     classes = _classes(children)
     assert "is-a" in classes and "is-b" in classes
     # Cohort B is the shakier arm here and says so on its own block.
     assert "cohort-flag" in classes
+
+
+def _find(node, want: str):
+    """Every node in the tree carrying `want` among its classes, in tree order.
+
+    Tree order matters: these tests assert which arm carries which row, so a
+    traversal that returned cohort B first would pass on the wrong evidence.
+    """
+    found = []
+
+    def walk(n):
+        if n is None:
+            return
+        if isinstance(n, (list, tuple)):
+            for child in n:
+                walk(child)
+            return
+        if want in (getattr(n, "className", "") or "").split():
+            found.append(n)
+        walk(getattr(n, "children", None))
+
+    walk(node)
+    return found
+
+
+def test_two_arms_are_laid_out_as_an_even_pair_and_one_arm_is_not():
+    """Stacked, the two arms got visibly unequal treatment: cohort A rendered
+    complete and cohort B's last row was clipped by the panel's own fold at every
+    viewport measured, 7.8px at 1680x1050 and 65.6px at 1280x800. `is-pair` is
+    what makes them two even columns, and a lone cohort must not get it - a
+    single block in a two-column grid is a half-empty table."""
+    from bridge_rna.panels import build_stability_panel
+
+    paired, _ = build_stability_panel({
+        "mode": "cohort", "stability": _measured(),
+        "query": {"cohort_label": "Liver · Space Flight"},
+        "comparison": {"facet": "spaceflight arm",
+                       "query_b": {"cohort_label": "Liver · Ground Control"},
+                       "stability": _measured(pooled=0.7)}})
+    pair = _find(paired, "stability-pair")
+    assert len(pair) == 1, "both arms live in one grid, so their rows can align"
+    assert "is-pair" in (pair[0].className or "")
+    assert len(_find(pair[0], "stability-cohort")) == 2
+
+    alone, _ = build_stability_panel({
+        "mode": "cohort", "stability": _measured(),
+        "query": {"cohort_label": "Liver · Space Flight"}})
+    solo = _find(alone, "stability-pair")
+    assert len(solo) == 1
+    assert "is-pair" not in (solo[0].className or "")
+    assert len(_find(solo[0], "stability-cohort")) == 1
+
+
+def test_every_row_of_an_arm_is_addressable_so_the_columns_can_align():
+    """`subgrid` aligns the two arms row by row, and the rows are assigned by
+    class rather than by child order. Either of the last two can be missing from
+    either arm - a cohort whose members all matter equally names none, and only a
+    shaky arm is flagged - so counting children would let cohort B's flag land in
+    the row holding cohort A's member name."""
+    from bridge_rna.panels import build_stability_panel
+
+    children, _ = build_stability_panel({
+        "mode": "cohort",
+        "stability": _measured(pooled=0.86, weakest="OSD-1|a2"),
+        "query": {"cohort_label": "Liver · Space Flight"},
+        "comparison": {
+            "facet": "spaceflight arm",
+            "query_b": {"cohort_label": "Liver · Ground Control"},
+            # No weakest member, and low enough to be flagged: the mirror image
+            # of arm A's rows.
+            "stability": _measured(pooled=0.31, weakest=None)}})
+    arms = _find(children, "stability-cohort")
+    assert len(arms) == 2
+    rows_a = {c for row in ("stability-name", "cohort-stat", "stability-weakest",
+                            "cohort-flag") for c in [row] if _find(arms[0], row)}
+    rows_b = {c for row in ("stability-name", "cohort-stat", "stability-weakest",
+                            "cohort-flag") for c in [row] if _find(arms[1], row)}
+    # The weakest row is on both arms - arm B's says there is no such member
+    # rather than going missing. The flag is on the shaky arm only, and stays
+    # that way: the counterpart badge an equalized flag would need is a pass mark
+    # for a healthy cohort, which is the grade `R̄` was deleted for being.
+    assert rows_a == {"stability-name", "cohort-stat", "stability-weakest"}
+    assert rows_b == {"stability-name", "cohort-stat", "stability-weakest",
+                      "cohort-flag"}
+    # Each row is a direct child of its arm, which is what `grid-row` needs: a
+    # row nested one level deeper would not be a grid item at all.
+    for arm in arms:
+        direct = {c for kid in (arm.children or [])
+                  for c in (getattr(kid, "className", "") or "").split()}
+        assert {"stability-name", "cohort-stat"} <= direct
+
+
+def test_the_member_that_moves_it_most_puts_its_name_on_its_own_line():
+    """Label, score and a 27-character sample key shared one baseline row while
+    the panel was a single 322px column. In a 155px one they cannot: the label
+    and the value are fixed width, which left about 29px for the key and - since
+    it wraps rather than truncates, deliberately - broke it one character per
+    line into a 400px column."""
+    from bridge_rna.panels import build_stability_panel
+
+    children, _ = build_stability_panel({
+        "mode": "cohort",
+        "stability": _measured(weakest="OSD-137|Mmus_C57-6J_EYE_GC_Rep1_M33")})
+    weakest = _find(children, "stability-weakest")
+    assert len(weakest) == 1
+    row = _find(weakest[0], "stability-weakest-row")
+    assert len(row) == 1, "the label and the score share one line"
+    assert _find(row[0], "stability-weakest-label")
+    assert _find(row[0], "stability-weakest-value")
+    # The name is a sibling of that row, not a third item inside it.
+    assert not _find(row[0], "stability-weakest-name")
+    assert _find(weakest[0], "stability-weakest-name")
+
+
+def test_a_cohort_with_no_weakest_member_says_so_rather_than_dropping_the_row():
+    """`cohorts.weakest_member` returns None when every member's absence moves
+    the list equally far. That is an answer, not a gap - and an absent row and a
+    clipped row look identical on screen, which is the exact ambiguity the even
+    split was built to remove."""
+    from bridge_rna.panels import build_stability_panel
+
+    children, _ = build_stability_panel({
+        "mode": "cohort", "stability": _measured(weakest=None)})
+    weakest = _find(children, "stability-weakest")
+    assert len(weakest) == 1, "the row is drawn even with nobody to name"
+    text = _series(weakest[0])
+    assert "Moves it most" in text
+    assert "every member equally" in text
+    # No score, because there is no member for one to belong to.
+    assert not _find(weakest[0], "stability-weakest-value")
+    # And it is not dressed as a sample key: it is prose, not an accession.
+    assert "is-none" in _classes(weakest[0])
 
 
 def test_the_inspector_names_which_arm_it_is_opening_only_in_a_comparison():

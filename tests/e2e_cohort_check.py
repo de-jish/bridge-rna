@@ -71,6 +71,36 @@ NODES_JS = """() => {
   return out;
 }"""
 
+# Whether the stability panel actually contains what it is rendering. Measured
+# against the *content* box and the scroll box, because the border box is what
+# the first version of this check used and it is 20px of padding too generous -
+# see the comment at the assertion.
+PANEL_FIT_JS = """() => {
+  const p = document.querySelector('#stability-panel');
+  if (!p) return null;
+  const blocks = [...p.querySelectorAll('.stability-cohort')];
+  if (!blocks.length) return null;
+  const padBottom = parseFloat(getComputedStyle(p).paddingBottom);
+  const contentBottom = p.getBoundingClientRect().bottom - padBottom;
+  const last = blocks[blocks.length - 1].getBoundingClientRect();
+  const boxes = blocks.map(b => b.getBoundingClientRect());
+  const near = (xs) => Math.max(...xs) - Math.min(...xs) <= 1;
+  const valueTops = [...p.querySelectorAll('.stability-value')]
+    .map(n => +n.getBoundingClientRect().top.toFixed(1));
+  return {
+    scrollH: p.scrollHeight,
+    clientH: p.clientHeight,
+    overflow: p.scrollHeight - p.clientHeight,
+    lastBlockOverrun: +(last.bottom - contentBottom).toFixed(1),
+    tops: boxes.map(b => +b.top.toFixed(1)),
+    heights: boxes.map(b => +b.height.toFixed(1)),
+    sameTop: near(boxes.map(b => b.top)),
+    sameHeight: near(boxes.map(b => b.height)),
+    valueTops,
+    valuesShareABaseline: valueTops.length > 1 && near(valueTops),
+  };
+}"""
+
 QUERY_NODE_JS = """() => {
   const gd = document.querySelector('#network-graph .js-plotly-plot');
   if (!gd || !gd._fullData) return null;
@@ -526,18 +556,47 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
     values = stability_values(page)
     c.ok(len(values) == 2, f"two numbers, one per arm: {values}")
     # Both have to be readable without scrolling, or measuring the second arm
-    # bought nothing. The panel is what scrolls if anything must.
-    box = stab.bounding_box() or {}
-    last = stab.locator(".stability-cohort").last.bounding_box() or {}
-    c.ok(bool(box) and bool(last)
-         and last["y"] + last["height"] <= box["y"] + box["height"] + 1,
-         f"and both fit on screen at once: panel {box.get('height')}px, "
-         f"second arm ends at {last.get('y', 0) + last.get('height', 0)}")
+    # bought nothing.
+    #
+    # This is the second version of this check, and the first one passed while
+    # cohort B's last row was clipped at every viewport the app is used at. It
+    # compared the last block's bottom against `bounding_box()`, which is the
+    # *border* box, so a block was allowed to run through the panel's own 20px
+    # bottom padding and stop 1px short of its border. At 1600x1000 the last
+    # block ended 9.9px below the content box and 10.1px above the border box,
+    # which is to say the assertion was satisfied by exactly the margin that hid
+    # the failure. It also never compared scrollHeight against clientHeight, so
+    # 11px of unreachable content was invisible to it.
+    #
+    # `PANEL_FIT_JS` measures the content box and the scroll box instead. Both
+    # matter: a panel can scroll internally while every block's border box still
+    # sits inside it.
+    fit = page.evaluate(PANEL_FIT_JS)
+    c.ok(bool(fit) and fit["overflow"] <= 1,
+         f"the panel does not scroll internally: {fit and fit['scrollH']}px of "
+         f"content in {fit and fit['clientH']}px")
+    c.ok(bool(fit) and fit["lastBlockOverrun"] <= 1,
+         f"and the second arm's last row is inside the panel's content box, "
+         f"not its padding: overruns by {fit and fit['lastBlockOverrun']}px")
+    # An even split is a measurement, not an intention. The two arms have to
+    # start on the same line and be the same height, or one of them is again the
+    # footnote to the other.
+    c.ok(bool(fit) and fit["sameTop"] and fit["sameHeight"],
+         f"the two arms are an even split: tops {fit and fit['tops']}, "
+         f"heights {fit and fit['heights']}")
+    c.ok(bool(fit) and fit["valuesShareABaseline"],
+         f"and the two numbers sit on one baseline, which is the whole reason "
+         f"to measure two: {fit and fit['valueTops']}")
     c.ok(stab.locator(".stability-cohort.is-a").count() == 1
          and stab.locator(".stability-cohort.is-b").count() == 1,
          "and each carries the role color its card and its glyphs carry")
-    c.ok("DIFFERS BY" in panel,
-         "with the facet the pair differs in stated once")
+    # The facet moved from cohort B's role line into the header when the two
+    # arms went side by side: it describes the pair, and hanging it under B's
+    # letter started B's name a line below A's.
+    c.ok("DIFFER BY" in panel and panel.count("DIFFER BY") == 1,
+         "with the facet the pair differs in stated once, above both arms")
+    c.ok(page.locator("#stability-panel .stability-pair.is-pair").count() == 1,
+         "and the two arms are laid out as one even pair rather than stacked")
     shot(page, "07b-two-measurements")
 
     nodes = page.evaluate(NODES_JS) or {}
