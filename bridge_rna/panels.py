@@ -185,45 +185,64 @@ def build_status_banner(message: str, kind: str = "info", detail: str | None = N
 COHORT_ROLES = {"a": "Cohort A", "b": "Cohort B"}
 
 
+def _cohort_role_head(cohort_label: str, role: str, contrast: str) -> list[Any]:
+    """The `● COHORT B · differs by spaceflight arm` line, and the cohort's name.
+
+    Shown only when there are two pooled queries, because a lone one has nothing
+    to be distinguished from. The name is beside the mark rather than left to
+    the color, because cohort B's hex cannot agree across the retrieval network
+    and the map (`docs/map_key.md`), so the binding is the name.
+    """
+    if role not in COHORT_ROLES:
+        return []
+    return [
+        html.Div(
+            className="cohort-role",
+            children=[
+                html.Span(className="cohort-role-dot"),
+                html.Span(COHORT_ROLES[role], className="cohort-role-name"),
+                (html.Span(f"differs by {contrast}",
+                           className="cohort-role-contrast")
+                 if contrast else None),
+            ],
+        ),
+        html.Div(cohort_label, className="cohort-card-title"),
+    ]
+
+
 def build_cohort_card(cohort, geometry, role: str = "",
                       contrast: str = "") -> Any:
-    """Size and result stability for one pooled cohort.
+    """What is true about a pooled cohort *before* it is searched: its size.
 
-    One number, and that is the point. **Stability** is a property of *k*: the
-    measured agreement between this cohort's top-5 and the top-5 it would have
-    produced with any one animal left out. It says how far to trust the list,
-    and it is quoted rather than reduced to a word, because "low confidence"
-    tells a researcher nothing they can act on while "3 samples, 0.51" tells
-    them exactly how far down the list to stop reading.
+    That is the whole card, and the narrowing is the point. It used to carry a
+    result-stability figure read out of `STABILITY_BY_K`, a curve of mean
+    leave-one-out agreement against cohort size measured over all 212 cohorts.
+    The number was real and the label was accurate, and it was still misleading
+    where it sat: a population average printed beside one cohort's name is read
+    as a property of *that* cohort, and the spread inside a size bucket is most
+    of the range. Measured live, a cohort of 7 scoring 0.316 and a cohort of 6
+    scoring 0.849 were both told 0.72.
 
-    A second stat sat beside it and was removed: `R̄`, the vMF resultant
-    length, labelled "Group tightness". Measured over all 212 real cohorts it
-    is near-constant at a median 0.9991, and no lower for a cohort of two than
-    for one of thirty, so it never changed a decision while looking like a
-    grade. The per-member leave-one-out cosine stays, in the member list on the
-    rail, because that one varies and points at a specific animal.
+    So stability moved to where it can be measured instead of predicted: it is
+    computed during the search, over this cohort's own leave-one-out pools at
+    the depth on screen, and it is reported by `build_stability_panel` on the
+    right afterwards. A live number cannot sit under the picker, because it does
+    not exist until the query runs - showing the previous cohort's figure there
+    would be worse than the curve was. `docs/live_stability.md` has the
+    evidence and the rejected alternatives.
 
-    ``role`` names which arm of a comparison this is, and is empty when only
-    one cohort is being pooled - a lone card needs no letter, and adding one
-    would be chrome for a distinction that does not exist yet. When it is set
-    the card gains a colored role line and the cohort's own name, because a
-    comparison runs **two** pooled queries and describing only the selected one
-    was the gap this closed: the second query got a color on two canvases and
-    a size nowhere. ``contrast`` is the one facet the two differ in, stated on
-    the second card because it is a property of the pair.
+    ``role`` names which arm of a comparison this is, and is empty when only one
+    cohort is being pooled. When it is set the card gains a colored role line
+    and the cohort's own name, because a comparison runs **two** pooled queries
+    and describing only the selected one left the second with a color on two
+    canvases and a size nowhere. ``contrast`` is the one facet the two differ
+    in, stated on the second card because it is a property of the pair.
     """
-    from .cohorts import (
-        LOW_N_THRESHOLD,
-        SINGLE_SAMPLE_STABILITY,
-        STABILITY_BY_K,
-        TIER_LOW_N,
-        TIER_SINGLETON,
-    )
+    from .cohorts import TIER_SINGLETON
 
     role_class = f" is-{role}" if role in COHORT_ROLES else ""
     k = geometry.size
-    tier = geometry.tier
-    if tier == TIER_SINGLETON:
+    if geometry.tier == TIER_SINGLETON:
         return html.Div(
             className="cohort-card cohort-card--empty" + role_class,
             children=html.Div(
@@ -232,73 +251,10 @@ def build_cohort_card(cohort, geometry, role: str = "",
                 className="cohort-card-note"),
         )
 
-    stability = geometry.stability
-    low = tier == TIER_LOW_N
-    best = STABILITY_BY_K[max(STABILITY_BY_K)]
-
-    rows: list[Any] = [
-        html.Div(
-            className="cohort-stat",
-            children=[
-                html.Div(
-                    className="cohort-stat-head",
-                    children=[
-                        html.Span("Result stability", className="cohort-stat-label"),
-                        html.Span(f"{stability:.2f}", className="cohort-stat-value"),
-                    ],
-                ),
-                html.Div(
-                    className="cohort-meter",
-                    children=html.Div(
-                        className="cohort-meter-fill" + (" is-low" if low else ""),
-                        style={"width": f"{max(0.0, min(1.0, stability)) * 100:.1f}%"},
-                    ),
-                ),
-                html.Div(
-                    f"Measured share of the top 5 that survives dropping any one "
-                    f"of these {k} samples. One sample alone scores "
-                    f"{SINGLE_SAMPLE_STABILITY:.2f}.",
-                    className="cohort-stat-note"),
-            ],
-        ),
-    ]
-
-    if low:
-        # Amber, not red, and the same reason the map's coverage bar is amber:
-        # a small cohort is working correctly, not failing.
-        rows.insert(0, html.Div(
-            className="cohort-flag",
-            children=[
-                html.Span(f"Only {k} sample{'s' if k != 1 else ''} in this cohort",
-                          className="cohort-flag-title"),
-                html.Span(
-                    f"Pooled results reach {stability:.2f} stability at this size, "
-                    f"against {best:.2f} at {LOW_N_THRESHOLD * 3} or more. Read "
-                    "the hits as a neighbourhood, not as a ranking.",
-                    className="cohort-flag-body"),
-            ],
-        ))
-
-    head: list[Any] = []
-    if role in COHORT_ROLES:
-        head = [
-            html.Div(
-                className="cohort-role",
-                children=[
-                    html.Span(className="cohort-role-dot"),
-                    html.Span(COHORT_ROLES[role], className="cohort-role-name"),
-                    (html.Span(f"differs by {contrast}",
-                               className="cohort-role-contrast")
-                     if contrast else None),
-                ],
-            ),
-            html.Div(cohort.label, className="cohort-card-title"),
-        ]
-
     return html.Div(
         className="cohort-card" + role_class,
         children=[
-            *head,
+            *_cohort_role_head(cohort.label, role, contrast),
             html.Div(
                 className="cohort-card-head",
                 children=[
@@ -307,8 +263,190 @@ def build_cohort_card(cohort, geometry, role: str = "",
                               className="cohort-card-k-label"),
                 ],
             ),
-            *rows,
         ],
+    )
+
+
+# --- The stability panel: how far this result survived being poked ------------
+
+
+def _share(x: float) -> str:
+    """A share in [0, 1], at two decimals, unless that would round it to zero.
+
+    The baseline and the gain it produced sit in one sentence, so rounding the
+    baseline to `0.00` while printing `340.0x` beside it makes the sentence
+    contradict itself: nothing divided by nothing does not give 340. A cohort
+    whose members share almost no hits alone is exactly the case where the gain
+    is most worth stating, so the fix is to print the small number honestly
+    rather than to suppress the ratio.
+
+    Real 0.0 keeps two decimals; the caller says "no two of them agree on a hit
+    alone" for that case and never reaches the ratio at all.
+    """
+    return f"{x:.2f}" if x <= 0.0 or x >= 0.005 else f"{x:.3f}"
+
+
+def _stability_block(measurement: dict[str, Any], label: str = "",
+                     role: str = "", contrast: str = "") -> Any:
+    """One measured cohort: the number, the meter, and what was measured.
+
+    ``measurement`` is `cohorts.StabilityMeasurement.as_dict()` as it came back
+    through `hits-store`, so this renders JSON rather than the dataclass and
+    survives the round trip the router forces when someone walks to the map and
+    back.
+    """
+    from .cohorts import STABILITY_FLOOR
+
+    pooled = float(measurement.get("pooled") or 0.0)
+    single = float(measurement.get("single_sample") or 0.0)
+    depth = int(measurement.get("depth") or 0)
+    size = int(measurement.get("size") or 0)
+    gain = measurement.get("gain")
+    low = bool(measurement.get("is_low"))
+    weakest = _safe_str(measurement.get("weakest_member"))
+    weakest_value = measurement.get("weakest_value")
+
+    # The scale, measured on this cohort in the same pass at the same depth. A
+    # bare 0.62 has none, and the constant that used to supply one was fixed at
+    # top-5 while this number follows the slider.
+    # Kept to one short sentence. A comparison renders this block twice, and
+    # every line spent here is a line of cohort B's measurement pushed off the
+    # bottom of the panel.
+    if gain is None:
+        scale = "no two of them agree on a hit alone."
+    else:
+        scale = (f"one alone agrees with another {_share(single)} of the time, "
+                 f"a {float(gain):.1f}x gain.")
+
+    children: list[Any] = [
+        *_cohort_role_head(label, role, contrast),
+        html.Div(
+            className="cohort-stat",
+            children=[
+                # No "Result stability" label here: the panel heading above is
+                # that label, and printing it again per block cost a line each
+                # and pushed cohort B's whole measurement below the fold on a
+                # comparison - which is the one thing this panel exists to show.
+                html.Div(
+                    className="stability-head",
+                    children=[
+                        html.Span(f"{pooled:.2f}", className="stability-value"),
+                        html.Span(f"of {depth}", className="stability-value-unit"),
+                    ],
+                ),
+                html.Div(
+                    className="cohort-meter",
+                    children=html.Div(
+                        className="cohort-meter-fill" + (" is-low" if low else ""),
+                        style={"width": f"{max(0.0, min(1.0, pooled)) * 100:.1f}%"},
+                    ),
+                ),
+                html.Div(f"{size} pooled, and {scale}",
+                         className="cohort-stat-note"),
+            ],
+        ),
+    ]
+
+    if weakest and weakest_value is not None:
+        children.append(html.Div(
+            className="stability-weakest",
+            children=[
+                html.Span("Moves it most", className="stability-weakest-label"),
+                # The accession is dropped: every member of a cohort shares it,
+                # the details panel below states it once, and carrying it here
+                # wrapped the name onto a second line for nothing.
+                html.Span(weakest.split("|", 1)[-1],
+                          className="stability-weakest-name"),
+                html.Span(f"{float(weakest_value):.2f}",
+                          className="stability-weakest-value"),
+            ],
+        ))
+
+    if low:
+        # Amber, not red, for the reason the map's coverage bar is amber: a
+        # result that moves when an animal is dropped is reporting correctly,
+        # not failing. What changed is that the trigger is now the measurement
+        # itself rather than cohort size standing in for it.
+        # One line, not two. The three-line version said the same thing twice
+        # over on a comparison and cost cohort B its place on screen; the
+        # threshold is still read from the constant that triggered the flag, so
+        # the sentence cannot drift away from the rule.
+        children.append(html.Div(
+            className="cohort-flag",
+            children=html.Span(
+                f"Under {round(STABILITY_FLOOR * 100)}%: read these as a "
+                "neighbourhood, not a ranking.",
+                className="cohort-flag-title"),
+        ))
+
+    role_class = f" is-{role}" if role in COHORT_ROLES else ""
+    return html.Div(className="stability-cohort" + role_class, children=children)
+
+
+def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], dict[str, Any]]:
+    """The inspector's stability panel, and whether to show it at all.
+
+    Returns `(children, style)`. The panel is hidden outright unless the
+    retrieval on screen is a pooled cohort that carries a measurement, because
+    there is no such thing as leave-one-out stability for a single sample or an
+    uploaded file: there is nothing to leave out. Offering an empty panel for
+    those modes would be the same empty promise as the map link before a search.
+
+    It lives here, on the right, rather than on the control rail, because it is
+    a property of the **result** and not of the selection. It cannot exist until
+    the query has run, and a live number under the picker would either turn every
+    dropdown change into a memmap pass or show the previous cohort's figure.
+
+    A comparison ran two independent pooled queries and gets two blocks, each
+    under its own role dot and its own name, for the reason the rail carries two
+    cards: stability is a property of each arm separately, and an overlap of 0.25
+    between two arms measuring 0.86 means something quite different from the same
+    0.25 between one at 0.86 and one at 0.31.
+    """
+    payload = payload or {}
+    primary = payload.get("stability")
+    if not isinstance(primary, dict) or not primary:
+        return [], {"display": "none"}
+
+    comparison = payload.get("comparison") or {}
+    second = comparison.get("stability")
+    paired = isinstance(second, dict) and bool(second)
+
+    query = payload.get("query") or {}
+    label_a = _safe_str(query.get("cohort_label"))
+    contrast = _safe_str(comparison.get("facet"))
+
+    blocks = [_stability_block(primary, label=label_a,
+                               role="a" if paired else "")]
+    if paired:
+        query_b = comparison.get("query_b") or {}
+        blocks.append(_stability_block(
+            second, label=_safe_str(query_b.get("cohort_label")),
+            role="b", contrast=contrast))
+
+    # Both arms are retrieved at the same depth, so what was measured is said
+    # once, in the subtitle, rather than in every block. That is what keeps two
+    # measurements on screen together, which is the whole point of measuring two.
+    depth = int(primary.get("depth") or 0)
+    return (
+        [
+            html.Div(
+                className="panel-header",
+                children=[
+                    html.Span(className="panel-dot panel-dot--teal"),
+                    html.Div(children=[
+                        html.H2("Result stability", className="panel-title"),
+                        html.P(
+                            f"Measured on this query: how much of these {depth} "
+                            f"hits comes back when any one pooled sample is "
+                            f"dropped, averaged over all of them.",
+                            className="panel-subtitle"),
+                    ]),
+                ],
+            ),
+            *blocks,
+        ],
+        {},
     )
 
 
@@ -341,7 +479,11 @@ def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
                 _detail_row("Study", study, mono=True),
                 _detail_row("Grouped by", _safe_str(query.get("grouped_by"))),
                 _detail_row("Samples pooled", str(len(members))),
-                _detail_row("Result stability", _safe_str(query.get("stability"))),
+                # Result stability used to be a fourth row here. It is measured
+                # now rather than looked up, and `build_stability_panel` reports
+                # it directly above this panel on the same column - two copies of
+                # one number stacked vertically is noise, and this one would go
+                # off screen the moment a hit node was clicked.
             ],
         ),
     ]

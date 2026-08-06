@@ -397,29 +397,91 @@ def _load_precomputed_osdr_queries(path: Path) -> pd.DataFrame:
     )
 
 
-def _topk_cosine_from_memmap(index_vecs: np.memmap, q_vec: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
-    q = np.asarray(q_vec, dtype=np.float32).reshape(-1)
-    if q.size == 0:
+def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
+                        block_bytes: int = 200_000_000,
+                        progress: Any = None) -> tuple[np.ndarray, np.ndarray]:
+    """Top-k for `m` query vectors in **one** pass over the index.
+
+    The single implementation of the cosine scan. Every path in this module
+    reaches the ARCHS4 index through here, so a pooled cohort query, each of its
+    leave-one-out variants, and a plain single sample are all scored by the same
+    code rather than by three that could drift.
+
+    Returns `(idx, scores)`, both `(m, k)`, each row sorted best first.
+
+    Scoring `m` queries at once is what makes live result stability affordable:
+    the read and the float16-to-float32 normalization dominate, and the matrix
+    multiply against `m` queries is nearly free beside them. Measured against
+    the real 963 MB memmap: 0.44 s at m=1, 0.50 s at m=11, 1.00 s at m=77, so
+    the largest cohort in the corpus costs about half a second more than the
+    single pooled query it already paid for.
+
+    The top-k is kept as a running merge per query rather than by partitioning a
+    full `(n, m)` score matrix, which would allocate 290 MB at m=77 and grow
+    without bound. Memory stays at one block. That is the same technique
+    `precompute/validate_cohorts.py` and `validate_artifacts.py --mixing` use,
+    and the validator now calls straight in here rather than keeping a second
+    copy of it: `progress(rows_done, total)` is what lets a several-thousand
+    query sweep still print where it has got to.
+    """
+    Q = np.asarray(q_mat, dtype=np.float32)
+    if Q.ndim == 1:
+        Q = Q.reshape(1, -1)
+    if Q.size == 0 or Q.shape[0] == 0:
         raise RuntimeError("Query embedding is empty.")
-    q = q / (float(np.linalg.norm(q)) + 1e-12)
+    Q = Q / np.maximum(np.linalg.norm(Q, axis=1, keepdims=True), 1e-12)
 
     n = int(index_vecs.shape[0])
     d = int(index_vecs.shape[1])
-    if q.shape[0] != d:
-        raise RuntimeError(f"Embedding dimension mismatch: query dim={q.shape[0]} but ARCHS4 dim={d}")
+    if Q.shape[1] != d:
+        raise RuntimeError(
+            f"Embedding dimension mismatch: query dim={Q.shape[1]} but ARCHS4 dim={d}")
 
+    m = Q.shape[0]
     k = max(1, min(int(k), n))
-    chunk = 25000
-    scores = np.empty(n, dtype=np.float32)
+    Qt = np.ascontiguousarray(Q.T)                      # (d, m)
+
+    # The block *height* is derived from the query count, because the score
+    # block is (rows x queries): a fixed 25,000 rows is 3.9 MB at m=39 and would
+    # be far more if a caller ever batched hundreds. It resolves to exactly the
+    # 25,000 the single-query scan always used for any m up to 2,000.
+    chunk = int(max(2000, min(25000, int(block_bytes) // (4 * m))))
+
+    best_idx = np.zeros((m, 0), dtype=np.int64)
+    best_score = np.zeros((m, 0), dtype=np.float32)
     for start in range(0, n, chunk):
         end = min(start + chunk, n)
         x = np.asarray(index_vecs[start:end], dtype=np.float32)
         x /= (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
-        scores[start:end] = x @ q
+        block = (x @ Qt).T                              # (m, rows in block)
 
-    top_idx = np.argpartition(scores, -k)[-k:]
-    top_idx = top_idx[np.argsort(scores[top_idx])[::-1]]
-    return top_idx, scores[top_idx]
+        take = min(k, block.shape[1])
+        part = np.argpartition(block, -take, axis=1)[:, -take:]
+        cand_idx = np.concatenate([best_idx, part + start], axis=1)
+        cand_score = np.concatenate(
+            [best_score, np.take_along_axis(block, part, axis=1)], axis=1)
+        keep = min(k, cand_idx.shape[1])
+        sel = np.argpartition(cand_score, -keep, axis=1)[:, -keep:]
+        best_idx = np.take_along_axis(cand_idx, sel, axis=1)
+        best_score = np.take_along_axis(cand_score, sel, axis=1)
+        if progress is not None:
+            progress(end, n)
+
+    order = np.argsort(-best_score, axis=1)
+    return (np.take_along_axis(best_idx, order, axis=1),
+            np.take_along_axis(best_score, order, axis=1))
+
+
+def _topk_cosine_from_memmap(index_vecs: np.memmap, q_vec: np.ndarray,
+                             k: int) -> tuple[np.ndarray, np.ndarray]:
+    """One query vector's top-k. A one-row call into `_topk_cosine_matrix`.
+
+    Verified against the previous standalone implementation on the real corpus
+    before it was replaced: identical top-30 in order, maximum score difference
+    exactly 0.0.
+    """
+    idx, score = _topk_cosine_matrix(index_vecs, np.asarray(q_vec).reshape(1, -1), k)
+    return idx[0], score[0]
 
 
 def run_precomputed_query_retrieval(sample_id: str, sample_name: str, topk: int) -> pd.DataFrame:
@@ -715,8 +777,8 @@ def run_uploaded_retrieval(
 COHORT_MODE = "cohort"
 
 
-def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...],
-                         topk: int) -> tuple[pd.DataFrame, np.ndarray]:
+def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
+                         ) -> tuple[pd.DataFrame, np.ndarray, Any]:
     """Pool a cohort's cached vectors into one query, then run the cached scan.
 
     The pooled vector is the only new thing. The cosine scan, the offline
@@ -727,14 +789,25 @@ def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...],
     is why nothing downstream of the hits frame needs to know a cohort produced
     it.
 
-    Costs one memmap pass regardless of cohort size, because k vectors are
-    averaged before the scan rather than scanned separately. So a 38-animal
-    cohort costs the same ~0.5 s as one sample.
+    **Result stability is measured here, not predicted.** The scan also scores
+    every leave-one-out pool and every member on its own, which answers "how
+    much of this list survives dropping one animal, and how much would one
+    animal alone have agreed with another" for *this* cohort at *this* depth. It
+    replaces a bucketed curve looked up by cohort size, which was a population
+    average being printed beside one cohort's name; `docs/live_stability.md`
+    carries the measured spread that motivated the change.
 
-    Returns `(hits, rows)`; the members' stacked vectors come back so the caller
-    can compute the cohort's geometry without loading them twice.
+    Still **one memmap pass**, because all `2k+1` query vectors are built before
+    the index is touched and scored together. Measured: 0.44 s for the pooled
+    query alone, 1.00 s for the 77 vectors a 38-animal cohort needs, against a
+    963 MB read that dominates both.
+
+    Returns `(hits, rows, stability)`. The members' stacked vectors come back so
+    the caller can compute the cohort's geometry without loading them twice;
+    `stability` is a `cohorts.StabilityMeasurement`, or None for a pool with
+    nothing to leave out.
     """
-    from .cohorts import cohort_query_vector
+    from .cohorts import cohort_query_vector, leave_one_out_vectors, measure_stability
 
     ids = [_safe_str(s) for s in sample_ids if _safe_str(s)]
     if not ids:
@@ -749,13 +822,27 @@ def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...],
             detail="Missing: " + ", ".join(missing[:20]),
         )
 
-    q_vec = cohort_query_vector(rows)
+    # Row 0 is the query whose hits are returned; the leave-one-out pools and
+    # the members' own vectors follow it, and exist only to measure the first.
+    loo = leave_one_out_vectors(rows)
+    q_mat = np.concatenate([cohort_query_vector(rows).reshape(1, -1), loo, rows])
+
     index_vecs, _, _ = _load_archs4_index()
-    idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk)
-    hits = _annotate_from_cache(idx, score)
-    hits["archs4_index"] = idx.astype(int)
+    idx, score = _topk_cosine_matrix(index_vecs=index_vecs, q_mat=q_mat, k=topk)
+
+    hits = _annotate_from_cache(idx[0], score[0])
+    hits["archs4_index"] = idx[0].astype(int)
     hits = hits.sort_values("score", ascending=False).reset_index(drop=True)
-    return hits, rows
+
+    k = len(rows)
+    stability = measure_stability(
+        members=ids,
+        pooled_top=idx[0],
+        loo_tops=idx[1:1 + len(loo)],
+        member_tops=idx[1 + len(loo):1 + len(loo) + k],
+        depth=int(topk),
+    )
+    return hits, rows, stability
 
 
 def search_hits(

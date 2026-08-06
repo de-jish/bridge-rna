@@ -222,6 +222,10 @@ input.dash-input:focus,
   flex: none;
 }
 .panel-dot--warm { background: var(--accent-warm); }
+/* Teal, because GRAPH_THEME's `cohort_a` is teal and this panel is about a
+   pooled cohort. With one cohort on screen it is the only teal mark in the
+   inspector; with two, the per-cohort role dots inside carry the distinction. */
+.panel-dot--teal { background: var(--accent-teal); }
 .panel-title {
   margin: 0;
   font-size: var(--text-lg);
@@ -346,8 +350,17 @@ input.dash-input:focus,
    Details / inspector panel
    ========================================================================== */
 
+/* `flex-shrink: 20`, not 1, and that number is load-bearing rather than
+   decorative. When the stability panel appeared above it, an equal shrink
+   factor split the overflow between the two and squeezed a two-cohort
+   measurement from the 554px it needs down to 389px, putting cohort B below
+   the fold - which is the one thing measuring two arms exists to prevent.
+   This panel is the right one to yield: it scrolls a reference list, where the
+   panel above it carries two numbers that only mean something side by side.
+   It still stops at its 120px floor, after which the stability panel shrinks
+   and scrolls in turn, so a short viewport degrades rather than clipping. */
 .details-panel {
-  flex: 1 1 auto;
+  flex: 1 20 auto;
   overflow-y: auto;
   min-height: 120px;
 }
@@ -705,6 +718,7 @@ summary:focus-visible,
   .sidebar { border-right: none; border-bottom: 1px solid var(--border-strong); }
   .inspector { padding: 0 var(--space-4) var(--space-4); }
   .ai-panel { max-height: none; }
+  .stability-panel { max-height: none; overflow: visible; }
 }
 
 /* Phone: relax padding, let the header wrap, keep touch targets comfortable. */
@@ -1055,6 +1069,113 @@ summary:focus-visible,
   color: var(--status-warn);
 }
 .cohort-flag-body { font-size: 11px; line-height: 1.45; color: #7d5a12; }
+
+/* --- The stability panel ----------------------------------------------------
+   Result stability is measured during the search rather than looked up from a
+   curve, so it cannot live on the rail beside the picker: it does not exist
+   until the query runs. It sits at the top of the inspector instead, above the
+   details panel, because it describes the whole result rather than whichever
+   node is open - clicking a hit must not scroll it away.
+
+   `flex: 0 1 auto` with a cap rather than `0 0 auto`: a comparison renders two
+   blocks, and on a short viewport the panel yields and scrolls internally
+   instead of squeezing the details panel below its 120px floor. */
+/* A comparison renders two blocks and both have to be readable at once: a
+   second measurement below the fold is a second measurement nobody made. The
+   cap keeps it from crowding out the inspector entirely, and the details panel
+   below yields to it first (see its `flex-shrink: 20`). It stays shrinkable
+   rather than `flex: 0 0 auto` so a short viewport scrolls this panel instead
+   of clipping the AI panel off the bottom of the column. */
+.stability-panel {
+  flex: 0 1 auto;
+  max-height: 65%;
+  overflow-y: auto;
+}
+/* The heading names the statistic once and the subtitle says what was measured
+   once, so a block carries only what differs between the two arms. Before that,
+   every block repeated "RESULT STABILITY" and the full definition, and cohort
+   B's measurement sat entirely below the fold on a comparison - which is the
+   one thing a two-arm measurement exists to put side by side. */
+.stability-panel .panel-header { align-items: flex-start; }
+.stability-panel .panel-dot { margin-top: 6px; }
+.stability-panel .panel-subtitle { max-width: 42ch; }
+
+.stability-cohort + .stability-cohort {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+/* The number is the focal point now that nothing labels it in-line, so it takes
+   the treatment the rail's pooled-size figure takes. `of 5` rides its baseline
+   to say what the share is of, which is the depth the slider is on. */
+.stability-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.stability-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.stability-value-unit { font-size: 11.5px; color: var(--text-secondary); }
+/* The same binding the rail's two cards use, for the same reason: a comparison
+   colors two arms across two canvases, and cohort B's hex cannot agree across
+   them, so the name sits beside the mark. These hues are GRAPH_THEME's
+   `cohort_a` and `cohort_b`. */
+.stability-cohort.is-b .cohort-role-dot { background: var(--accent-warm); }
+
+/* Which animal moves the list most. It is the per-member half of the headline:
+   the mean is above, and this names the member the mean is worst for, which is
+   something a reader can go and look at. */
+.stability-weakest {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--border-subtle);
+}
+.stability-weakest-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+/* A sample key is "OSD-137|RR9_LVR_FLT_..." and the inspector is not wide, so
+   it wraps rather than truncating: a half-printed key names no animal. */
+.stability-weakest-name {
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.stability-weakest-value {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+/* The flag is the last thing in this panel rather than the first thing in the
+   card it came from, so its margin belongs underneath the number it qualifies,
+   and it is one line rather than a title over a body. */
+.stability-cohort .cohort-flag {
+  margin-top: var(--space-2);
+  margin-bottom: 0;
+  padding: 6px 9px;
+}
+.stability-cohort .cohort-flag-title {
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 /* --- The member list ------------------------------------------------------- */
 

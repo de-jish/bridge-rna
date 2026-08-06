@@ -6,6 +6,49 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-06 (result stability is measured on the query that ran, not looked up)
+
+**The rail's confidence number is gone, and the honest version replaced it on the right.**
+`cohorts.STABILITY_BY_K` was a bucketed curve of leave-one-out top-5 agreement against cohort size, measured offline over all 212 cohorts, and it was quoted on the cohort card the moment a cohort was selected.
+Every number in it was real and the label was accurate, and it still misled, because a population average printed beside one cohort's name is read as a property of that cohort.
+The sd column was the tell: at 0.18 within the 5-9 bucket, "0.72" covers real cohorts measuring 0.316 and 0.849.
+Measured on the live app, OSD-137's two 6-animal liver arms score **0.59** and **0.64**, and the curve told both of them 0.72.
+
+What replaced it is the same statistic, computed during the search over this cohort's own leave-one-out pools, **at the depth the slider is on** rather than at a fixed 5.
+Beside it, measured the same way in the same pass, is what one of those animals alone would have agreed with another, which is what replaced the fixed `SINGLE_SAMPLE_STABILITY = 0.16` and is what makes the headline readable.
+The member whose absence moves the list furthest is named, because that is the per-member half of a mean and it points at an animal.
+
+**It cost one memmap pass, which is the whole reason it is affordable.**
+`retrieval._topk_cosine_matrix` is now the single implementation of the cosine scan in the repository: `_topk_cosine_from_memmap` is a one-row wrapper over it, and `validate_cohorts.py`'s `QueryBatch` had its own near-identical copy deleted in favour of calling it with a progress hook.
+Measured against the real 963 MB memmap: 0.44 s for 1 query vector, 0.50 s at 11, 1.00 s at 77, which is the worst case a 38-animal cohort can produce.
+The read and the float16 normalization dominate; the queries are nearly free.
+Verified before the swap that the fused scan reproduces the old standalone scan exactly - identical top-30 in order, max score difference 0.0 - and the full validator run afterwards returns the same science numbers as before (0.738 / 0.161 / 4.6x, all six checks passing over all 212 cohorts).
+
+**Two things about where it sits are load-bearing.**
+A measured number cannot live under the picker, because it does not exist until the query runs: putting it there would mean either a memmap pass per dropdown change or the previous cohort's figure under the current cohort's name, which is worse than the curve was.
+And the panel sits *above* the inspector rather than inside it, so clicking a hit does not scroll away the number describing the whole result.
+A comparison gets one block per arm, because an overlap of 0.25 between two arms at 0.86 is a different finding from 0.25 between one at 0.86 and one at 0.31.
+
+**What survives.**
+`LOW_N_THRESHOLD` is still 5 and still comes from that curve, because "how large should a cohort be" is the question a population average can answer honestly, and the picker is the one place where size is all that is known.
+`validate_cohorts.py` check 5 still measures the curve and now fails if the knee moves - but only on a **full** sweep. A first attempt failed the build on a `--cohorts 40` run whose knee landed at 10, from buckets standing on one cohort each, which is exactly the noise the bucketing exists to survive.
+`STABILITY_FLOOR = 0.70` is that same 0.70, applied to the measurement instead of to size standing in for it, and it is what turns the amber flag on.
+
+**Fitting two measurements on screen took three goes, and the browser check is what caught it.**
+The first panel labelled every block "RESULT STABILITY", restated the full definition under each number, and added a three-line amber caution: fine for one cohort, and on a comparison the two blocks wanted 644 px inside a panel that had 389, so cohort B's whole measurement sat below the fold. A second measurement nobody can see is a second measurement nobody made.
+Fixed by saying the shared parts once in the heading and subtitle, cutting the caution to one line, and giving `.details-panel` `flex-shrink: 20` against the stability panel's 1 - with equal factors the two split the overflow and the panel that mattered lost 165 px it needed.
+The check that found it reads both bounding boxes after a two-arm search and asserts the second block ends inside the panel; it failed twice more while the fix was tuned, which is the whole argument for asserting on geometry rather than on presence.
+
+**One real bug came out of an adversarial review of the diff** (10 findings survived refutation out of 39, and most of the rest were stale doc prose).
+`StabilityMeasurement.gain` guards only a baseline of exactly zero, but the panel printed the baseline at two decimals, so a cohort whose members share almost nothing alone read "one alone agrees with another 0.00 of the time, a 340.0x gain" - a sentence that contradicts itself. `panels._share` prints three decimals below 0.005 instead of suppressing the ratio, because a near-zero baseline is exactly the case where the gain is most worth stating.
+The review also caught that `REFERENCE.md`'s per-file test table had been stale independently of this work: it listed `test_app.py` at 63 against an actual 76 and summed to 290 while its own headline said 307. Regenerated from `--collect-only`.
+
+**Tests.** 330 pytest (up 23) and 146 cohort browser checks (up 22), plus a `--loops` flag on `e2e_cohort_check.py` that reruns the whole suite against one warm server.
+Two passes were run and produced byte-identical measurements, which is what a state-carried-between-runs bug would have broken.
+The load-bearing unit test is the one that scores every leave-one-out pool the slow and obvious way, one scan each, and requires the fused path to agree.
+One finding worth keeping: a batch of queries and a single query agree to about 1.3e-07 rather than bit for bit, because one is a BLAS matrix-matrix product and the other a matrix-vector product. That is a couple of float32 ulps, and it is the same effect check 1 of the validator documents.
+Design, measurements and rejected alternatives: `docs/live_stability.md`.
+
 ## 2026-08-06 (merged to main, hosted locally, and the meeting Q&A corrected)
 
 No new features. This session integrated the branch below, stood the app up, and fixed a document that had gone false.

@@ -65,10 +65,12 @@ Measured over all 212 cohorts in the corpus, this raises the agreement of the re
 
 You can widen what counts as one cohort by dropping tissue or condition, which merges a study's organs or its arms into one larger group.
 Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
-Splitting finer than this is deliberately not offered: every further split makes the cohort smaller, and size is what the stability above is a function of.
+Splitting finer than this is deliberately not offered: every further split makes the cohort smaller, and the gain above rises steeply with group size.
 
-The panel says how far to trust each result rather than leaving you to guess.
-A cohort of three is flagged in amber with the measured number for that size, every member is listed with how far it sits from the rest, and you can exclude one and watch the numbers restate.
+**Once the search has run, the app tells you how far to trust that particular result, by measuring it.**
+It re-runs the same query with each animal left out in turn and reports how much of the list survives, alongside what one of those animals alone would have agreed with another, at whatever depth you are reading.
+That replaced a figure looked up from a curve of cohort size, which was a corpus-wide average being shown against one cohort's name: it told every group of five to nine animals 0.72, while real ones in that range measure anywhere from 0.32 to 0.85.
+A result that moves when one animal is dropped is flagged in amber, every member is listed with how far it sits from the rest, and you can exclude one and search again.
 An optional comparison runs a second cohort as its own separate query, so you can ask how much of the Earth that a study's flight animals resemble is also resembled by its ground controls.
 It is deliberately not a flight-minus-ground difference vector: a difference of two directions is not a transcriptome, and an earlier attempt at exactly that turned out to be measuring something else entirely.
 
@@ -77,7 +79,7 @@ The overlap the panel reports is a number about two *sets* of hits, and two arms
 Each cohort's pooled animals are drawn in its own color, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
 You can untick either arm when the picture gets crowded.
 
-Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md).
+Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md), and [`docs/live_stability.md`](docs/live_stability.md) for how the trust number is measured.
 
 ### The map
 
@@ -231,10 +233,10 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 307 tests, about twenty-five seconds
+.venv/bin/python -m pytest tests/ -q             # 330 tests, about twenty-five seconds
 .venv/bin/python tests/e2e_check.py              # 50 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 68 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 124 checks of cohort retrieval
+.venv/bin/python tests/e2e_cohort_check.py       # 146 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.

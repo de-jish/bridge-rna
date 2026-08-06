@@ -562,6 +562,15 @@ def build_view() -> html.Div:
                     html.Aside(
                         className="inspector",
                         children=[
+                            # Above the inspector, because it describes the whole
+                            # result rather than whichever node is open, and it
+                            # must not scroll away when a hit is clicked. Hidden
+                            # until a pooled cohort has actually been searched:
+                            # a single sample has nothing to leave out, so there
+                            # is no leave-one-out stability to report for it.
+                            html.Div(id="stability-panel",
+                                     className="panel stability-panel",
+                                     style={"display": "none"}),
                             html.Div(id="details-panel", className="panel details-panel"),
                             html.Div(
                                 className="panel ai-panel",

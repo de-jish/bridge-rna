@@ -482,13 +482,40 @@ def main() -> int:
     sys.path.insert(0, str(REPO))
     from bridge_rna.callbacks import _sweep_abandoned_upload_dirs
 
+    def _describe(dirs) -> str:
+        """Name each staging directory, its owner PID, and whether that PID lives.
+
+        "reaped 1, 1 left" is not a diagnosis: it says a directory survived
+        without saying whose it was, and the whole mechanism turns on the PID in
+        the name. This is what it took to find out that the survivor belongs to
+        this very process.
+        """
+        out = []
+        for d in dirs:
+            m = re.match(r"bridge_rna_uploads_(\d+)_", d.name)
+            pid = int(m.group(1)) if m else None
+            if pid is None:
+                state = "unparseable"
+            elif pid == os.getpid():
+                state = "this checker"
+            else:
+                try:
+                    os.kill(pid, 0)
+                    state = "alive"
+                except ProcessLookupError:
+                    state = "dead"
+                except OSError:
+                    state = "not ours"
+            out.append(f"{d.name} (pid {pid}, {state})")
+        return "; ".join(out) or "none"
+
     left = sorted(Path(tempfile.gettempdir()).glob("bridge_rna_uploads_*"))
-    c.note(f"the SIGTERMed server left {len(left)} staging dir(s), as expected")
+    c.note(f"after SIGTERM: {_describe(left)}")
     reaped = _sweep_abandoned_upload_dirs()
     still = sorted(Path(tempfile.gettempdir()).glob("bridge_rna_uploads_*"))
     c.ok(bool(reaped) and not still,
          f"the next run reaps the killed server's staging directory "
-         f"(reaped {len(reaped)}, {len(still)} left)")
+         f"(reaped {len(reaped)}, left: {_describe(still)})")
 
     print("\n" + "=" * 62)
     for n in c.notes:

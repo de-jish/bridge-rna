@@ -1,6 +1,7 @@
 # Cohort retrieval: querying with an experimental group
 
 **Status: built, measured on the real corpus, and tested, 2026-08-05.**
+**Amended 2026-08-06:** the confidence readout this document put on the rail is now measured per query and reported on the right; `docs/live_stability.md` is the current design, and the passages it supersedes are marked in place rather than rewritten.
 This is the implementation document for the feature `docs/cohort_pooling.md` specified and measured.
 That document is the prior evidence; this one is the build, and it carries its own measurements.
 Every number below was produced by `precompute/validate_cohorts.py` against the real 963 MB ARCHS4 memmap and the real 2,108 cached OSDR embeddings, over **all 212 cohorts**, not a sample of them.
@@ -12,8 +13,8 @@ Every number below was produced by `precompute/validate_cohorts.py` against the 
 | Pooled top-5 leave-one-out stability | **0.738**, against **0.161** for one sample: a **4.6x** gain |
 | Against a structure-free null | 0.331, so the cohort definition is worth **+0.407** |
 | Against a within-study null | 0.683, so tissue and arm are worth **+0.055** on top of the study |
-| Cost of a pooled query | one memmap pass, the same ~0.5 s as a single sample, at any k |
-| Tests | 40 unit tests, 124 browser checks, 6 corpus-scale validation checks |
+| Cost of a pooled query | one memmap pass at any k. Since 2026-08-06 that pass also measures the result's stability, so it carries `2k+1` query vectors: 0.44 s for the pooled query alone, 1.00 s at the 38-animal maximum |
+| Tests | 55 unit tests, 146 browser checks, 6 corpus-scale validation checks |
 
 ## Why this exists, in one paragraph
 
@@ -83,7 +84,7 @@ It is done anyway because it is the maximum-likelihood estimator for data compar
 Two statistics fall out of the same `u`, and both are shown:
 
 - **Each member's cosine to the leave-one-out centroid.** This is the correct outlier statistic. Using the full centroid instead lets an outlier pull the reference towards itself and hide inside it.
-- **Expected top-5 stability given k**, read off the measured curve in `precompute/validate_cohorts.py`. This is the honest confidence number, and it is a property of the cohort's size rather than of its tightness.
+- **Expected top-5 stability given k**, read off the measured curve in `precompute/validate_cohorts.py`. *This second one was replaced on 2026-08-06 by the same statistic measured on the query that just ran, at the depth on screen; see section 3 and `docs/live_stability.md`. It is no longer a function of the cohort's size, because it is no longer an estimate.*
 
 A third was shown and **was removed on 2026-08-05**: `R̄ = |u.mean(axis=0)|`, the vMF resultant length, labelled "Group tightness" on the card.
 It is a real statistic and it is measured in `docs/cohort_pooling.md`, but as a readout it was inert.
@@ -95,19 +96,24 @@ The medoid was measured and rejected: it agrees with the centroid on only 0.46 o
 
 ## 3. Low N, and what the interface says about it
 
+> **Superseded in part on 2026-08-06.** The stability figure this section put on the rail's cohort card is gone; it is measured per query and reported on the right after the search instead. `docs/live_stability.md` is the current design and carries the reason. What survives here is the size treatment in the picker, which is the one thing that can honestly be said before a search has run.
+
 A cohort of two is still a cohort, and it is still better than one sample.
-It is not as good as a cohort of nine, and the interface has to say so without either hiding the result or crying wolf.
+It is not as good as a cohort of nine, and the picker has to say so without either hiding the result or crying wolf.
 
 Three states, and the threshold comes from the measured stability-versus-k curve rather than from taste:
 
 | k | state | treatment |
 | --- | --- | --- |
 | 1 | not a cohort | disabled in the picker, reason shown: pooling needs at least two samples |
-| 2 to 4 | low confidence | selectable and searchable, with an amber flag naming the measured stability at that k |
-| 5 and up | normal | the stability figure is still shown, without the flag |
+| 2 to 4 | low N | selectable and searchable, marked "low N" in the picker's option label |
+| 5 and up | normal | no mark |
 
-Amber rather than red, for the same reason the map's coverage bar is amber: a small cohort is working correctly, not failing.
-The flag names the number rather than a word, because "low confidence" alone tells a researcher nothing they can act on while "3 samples, measured top-5 stability 0.51, against 0.86 at 15 or more" tells them how far down the list to stop reading.
+That is a statement about **size**, made in the one place where size is all that is known.
+The card underneath states the size and nothing else.
+
+The amber flag moved with the number: it now fires on the *measured* stability falling under `STABILITY_FLOOR`, which is the same 0.70 that picked `LOW_N_THRESHOLD`, and it appears in the stability panel beside the number that triggered it.
+Amber rather than red, for the same reason the map's coverage bar is amber: a result that moves when you drop an animal is reporting correctly, not failing.
 
 ### The curve, and why it is bucketed
 
@@ -123,13 +129,17 @@ Measured leave-one-out top-5 agreement, over all 212 cohorts:
 | 15+ | 37 | 0.86 | 0.11 |
 
 `LOW_N_THRESHOLD` is 5 because k >= 5 is the first bucket to reach 0.70.
-It is one constant in `bridge_rna/cohorts.py` carrying the measurement in its docstring, so it cannot drift from the evidence.
+It is one constant in `bridge_rna/cohorts.py` carrying the measurement in its comment, so it cannot drift from the evidence, and `validate_cohorts.py` check 5 exits non-zero if a full sweep moves the knee away from it.
+
+**This curve set that threshold and no longer does anything else.**
+It was `cohorts.STABILITY_BY_K` until 2026-08-06, quoted on the card, and the sd column above is why it could not stay there: at 0.18 within the 5-9 bucket, "0.72" covers real cohorts measuring 0.316 and 0.849.
+A population average printed beside one cohort's name is read as a property of that cohort.
 
 Two things about this table were corrections rather than choices, and both are worth keeping.
 
 **The first sweep quoted per-size figures and they were noise.** Sampling two cohorts per size produced 0.38 at k=5 sitting beside 0.90 at k=6, which is a fact about which two cohorts were drawn and not about size. A number quoted in the interface has to stand on enough cohorts that it does not swing by half its range when the seed changes, so sizes are pooled into buckets and each bucket reports its count and its spread.
 
-**Adjacent buckets inverted, and merging them is the honest repair.** Even over all 212 cohorts, 5-6 scored 0.736 and 7-9 scored 0.696, an inversion of 0.04 against a within-bucket sd of 0.18. A larger cohort must never be reported as less trustworthy than a smaller one, so `validate_cohorts.py` merges adjacent buckets that invert before printing the curve, which is what produced the 5-9 row. Clamping the number instead would have invented monotonicity; shipping the raw pair would have told a researcher their seven-animal cohort was worse than a five-animal one. A test pins the result monotone.
+**Adjacent buckets inverted, and merging them is the honest repair.** Even over all 212 cohorts, 5-6 scored 0.736 and 7-9 scored 0.696, an inversion of 0.04 against a within-bucket sd of 0.18. A larger cohort must never be reported as less trustworthy than a smaller one, so `validate_cohorts.py` merges adjacent buckets that invert before printing the curve, which is what produced the 5-9 row. Clamping the number instead would have invented monotonicity; shipping the raw pair would have told a researcher their seven-animal cohort was worse than a five-animal one. The unit test that pinned the shipped curve monotone went with the curve on 2026-08-06; `validate_cohorts.py` still does the merging, and what it now gates is that the knee still lands on `LOW_N_THRESHOLD`.
 
 ## 4. Two arms, run as two queries
 
@@ -225,7 +235,8 @@ It does not undermine the feature, since a pooled query is still 4.6x more stabl
 It does mean a pooled result is a cleaner measurement of "this study's samples" than of "this biology", and the docs say so rather than letting the gain be read as purely biological.
 
 **5. Stability versus k.**
-The bucketed curve in section 3, which sets `LOW_N_THRESHOLD` and populates the confidence readout.
+The bucketed curve in section 3, which sets `LOW_N_THRESHOLD` and nothing else since 2026-08-06.
+The check now compares the measured knee against the shipped threshold and fails on a mismatch, but only on a full sweep: a `--cohorts` sample draws one or two cohorts per size, which is the regime that produced 0.38 at k=5 beside 0.90 at k=6 in the first run of this script.
 
 **6. Normalization.**
 Over all 212 cohorts, `cos(spherical mean, raw mean)` has median **0.9999995** and worst case **0.99951**, and the two agree on the exact top-5 in 112 of 212 cohorts.
@@ -243,17 +254,21 @@ Cohort mode, top to bottom:
 1. **OSDR study** dropdown, the same one Sample mode uses.
 2. **Group by**, a row of facet chips. Study is pinned. A line under it reports how many cohorts the current definition produces and their size range.
 3. **Cohort** dropdown, listing this study's cohorts with size and confidence state. Singletons are disabled with the reason, matching how the sample picker treats an unretrievable sample.
-4. **The cohort card**: k pooled, the measured stability at this k, and the amber low-N flag when it applies.
+4. **The cohort card**: k pooled, and since 2026-08-06 nothing else.
 5. **Members**, a collapsed disclosure listing every sample with its leave-one-out cosine, each with a checkbox. Any member flagged as an outlier is marked, never removed.
 6. **Compare against**, an optional sibling-cohort picker, empty by default.
 7. **A second cohort card**, when one is armed. Added 2026-08-06.
 8. **Search cohort**.
 
-The rail's existing rule holds: the fact that qualifies a control sits directly under that control.
-The cohort-count line hangs under the facet chips, and the confidence card hangs under the cohort picker.
+The right-hand inspector gained a **stability panel** above the details panel on 2026-08-06, populated after the search, carrying one block per pooled query.
+It is not on the rail because it is a property of the result rather than of the selection, and it does not exist until the query runs.
+
+The rail's existing rule still holds where it can: the fact that qualifies a control sits directly under that control.
+The cohort-count line hangs under the facet chips, and each cohort's size sits under the picker that chose it.
 
 Step 7 exists because a comparison runs **two** independent pooled queries and the rail described one of them.
-That is not a symmetry argument. `STABILITY_BY_K` is a function of size, so an overlap of 0.25 between a 12-animal cohort at 0.81 and a 2-animal cohort at 0.34 means something quite different from the same 0.25 between two cohorts of twelve - and the number that decides how much of the overlap to believe was on screen for the first arm only, while the second got a color in the network figure and a mark on the map.
+That is not a symmetry argument. Stability is a property of each arm on its own, so an overlap of 0.25 between a 12-animal cohort measuring 0.86 and a 2-animal cohort measuring 0.31 means something quite different from the same 0.25 between two cohorts of twelve - and the number that decides how much of the overlap to believe was on screen for the first arm only, while the second got a color in the network figure and a mark on the map.
+The stability panel splits along the same line, for the same reason.
 It sits under "Compare against" rather than beside the first card for the rule above, and because that ordering keeps the member ticks - which belong to cohort A alone - next to cohort A's card.
 Both cards take a role line (`● COHORT A`, `● COHORT B · differs by spaceflight arm`) **only when there are two**; a lone cohort gets no letter, since there is nothing to tell it apart from.
 The contrast facet is stated once, on the second card, because it is a property of the pair.
@@ -262,7 +277,7 @@ The contrast facet is stated once, on the second card, because it is a property 
 
 Three layers, each answering a question the others cannot.
 
-**`tests/test_cohorts.py`, 40 tests, against the synthetic fixture corpus.**
+**`tests/test_cohorts.py`, 55 tests, against the synthetic fixture corpus.**
 Facet grouping, the estimator, leave-one-out cosines, low-N tiering, the pinned-study rule, and the sibling relation.
 Two are worth calling out because they pin claims made in prose everywhere else.
 `test_pooled_ranking_is_the_mean_of_the_members_own_cosines` checks the central algebraic claim directly: ranking by cosine to the spherical mean is identical to ranking by the unweighted average of the members' own cosines, which is what "ask every animal, then average the votes" means.
@@ -271,7 +286,7 @@ Two are worth calling out because they pin claims made in prose everywhere else.
 **`precompute/validate_cohorts.py`, 6 checks, against the real corpus.**
 Section 6. This is the only layer that can speak to whether pooling works, as opposed to whether it computes what it says.
 
-**`tests/e2e_cohort_check.py`, 124 browser checks, against the real app and the real cache.**
+**`tests/e2e_cohort_check.py`, 146 browser checks, against the real app and the real cache.**
 Define a cohort, retick facets, watch the count change, read the confidence card, open the member list, pool and search, open the inspector, exclude a member and watch every number restate, compare two arms, and follow the whole cohort to the map.
 It asserts on what the page reports about itself, and two of its checks exist because this feature shipped those exact regressions and had them fixed: callbacks firing at page load so the canvas greeted a visitor with "Cohort retrieval failed", and the legend continuing to advertise a GSE column while a comparison that draws none was on screen.
 

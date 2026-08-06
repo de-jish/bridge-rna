@@ -90,8 +90,10 @@ Pooling raises leave-one-out top-5 agreement to 0.738, a 4.6x gain, and that is 
 A cohort is `(study, tissue, spaceflight arm)`, which is OSDR's own curated factor grouping, and it yields 212 cohorts of two or more members across 70 studies, median size 10 and maximum 38, covering 2,105 of the 2,108 embedded samples.
 Study can never be unticked, because random samples drawn from one study already reach 0.9805 mean pairwise cosine against 0.9933 for a real cohort, so pooling across studies would average across the corpus's strongest batch boundary.
 Each member is L2-normalized before averaging, which is the maximum-likelihood vMF mean direction and makes ranking by the pooled vector exactly ranking by the unweighted mean of the members' own cosines, one animal one vote.
-The confidence readout quotes a measured stability curve as a function of cohort size (0.34, 0.51, 0.55, 0.72, 0.81 and 0.86 at k of 2, 3, 4, 5-9, 10-14 and 15+) rather than a tightness score, because tightness never separated a trustworthy group from an untrustworthy one.
-Design and every measurement behind it: `docs/cohort_retrieval.md`.
+How far to trust a pooled result is answered by a number measured on the query that just ran: the average overlap between the hits on screen and the hits the same cohort returns with any one of its animals dropped, at the retrieval depth being read.
+It first shipped as a curve of that same statistic against cohort size, measured offline over all 212 cohorts and quoted as soon as a cohort was picked, and that was replaced on 2026-08-06 because a population average printed beside one cohort's name gets read as a property of that cohort.
+The spread makes the difference concrete: the curve told every cohort of 5 to 9 animals 0.72, while real cohorts in that range measure anywhere from 0.32 to 0.85, and OSD-137's two 6-animal liver arms measure 0.59 and 0.64.
+Design and every measurement behind it: `docs/cohort_retrieval.md` and `docs/live_stability.md`.
 
 ### Would averaging multiple embeddings erase meaningful biological differences?
 

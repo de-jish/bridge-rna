@@ -759,23 +759,25 @@ It previously demanded the ARCHS4 memmap, `sample_locations.parquet` and the OSD
 
 ### Tests
 
-**307 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-06 by running the suite.
+**330 tests, all passing, in about 25 s** (`/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q`), measured 2026-08-06 by running the suite.
 
 | file | tests |
 | --- | --- |
-| `tests/test_app.py` | 63 |
+| `tests/test_app.py` | 76 |
 | `tests/test_render.py` | 55 |
+| `tests/test_cohorts.py` | 55 |
 | `tests/test_tissue.py` | 46 |
-| `tests/test_cohorts.py` | 36 |
-| `tests/test_retrieval.py` | 22 |
+| `tests/test_retrieval.py` | 30 |
 | `tests/test_data.py` | 22 |
 | `tests/test_colorby.py` | 18 |
 | `tests/test_projections.py` | 15 |
 | `tests/test_upload_ingestion.py` | 13 |
 
 The rows sum to the headline; regenerate both with `pytest tests/ -q --collect-only`.
+Every row above was regenerated that way on 2026-08-06, which caught two that had drifted independently of this session's work: `test_app.py` was recorded at 63 against an actual 76, so the table summed to 290 while the headline said 307.
+A hand-maintained count is the same failure mode the browser suites fixed by counting themselves.
 
-Plus **242 browser checks**, which are not collected by pytest and need the real cache: 50 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 124 in `tests/e2e_cohort_check.py`.
+Plus **264 browser checks**, which are not collected by pytest and need the real cache: 50 in `tests/e2e_check.py`, 68 in `tests/e2e_upload_check.py`, 146 in `tests/e2e_cohort_check.py`.
 These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
@@ -871,7 +873,9 @@ The within-study margin is the demanding one and is small.
 It is consistent with the earlier finding that same-study membership alone closes 84% of the distance to a real cohort, and it means a pooled query is a cleaner measurement of "this study's samples" than of "this biology".
 It does not undermine the 4.6x gain over a single sample, which is the claim the interface makes.
 
-### Stability versus cohort size (the curve behind the confidence readout)
+### Stability versus cohort size (the curve behind `LOW_N_THRESHOLD`)
+
+Re-measured over all 212 cohorts on 2026-08-06, unchanged from the 08-05 sweep:
 
 | k | cohorts | stability | sd |
 | --- | --- | --- | --- |
@@ -882,11 +886,47 @@ It does not undermine the 4.6x gain over a single sample, which is the claim the
 | 10-14 | 70 | 0.81 | 0.12 |
 | 15+ | 37 | 0.86 | 0.11 |
 
-`bridge_rna.cohorts.LOW_N_THRESHOLD` is **5**, the first bucket to reach 0.70.
+`bridge_rna.cohorts.LOW_N_THRESHOLD` is **5**, the first bucket to reach 0.70, and `precompute/validate_cohorts.py` check 5 now exits non-zero if a full sweep moves that knee.
 
-Two properties of this table are deliberate and are pinned by `tests/test_cohorts.py`.
+Two properties of this table are deliberate.
 It is bucketed rather than per-size because two cohorts per size produced 0.38 at k=5 beside 0.90 at k=6, which is an artifact of the draw.
 The 5-9 row is two buckets merged, because 5-6 scored 0.736 and 7-9 scored 0.696 - an inversion of 0.04 against a within-bucket sd of 0.18 - and a bigger cohort must never be reported as less trustworthy than a smaller one.
+
+**This table no longer reaches the interface, and that is the correction of 2026-08-06.**
+It used to be `cohorts.STABILITY_BY_K`, quoted on the rail's cohort card as soon as a cohort was selected.
+Every row above is a mean over tens of cohorts, and the sd column is the reason it could not describe any one of them: at 0.18 within the 5-9 bucket, "0.72" covers real cohorts measuring 0.316 and 0.849.
+The app measures the statistic per query now, at the retrieval depth on screen, and reports it on the right after the search.
+The constant is deleted; `docs/live_stability.md` carries the design and `tests/test_cohorts.py` pins the deletion.
+
+### Result stability, measured live (2026-08-06)
+
+Measured over 22 real cohorts, one per distinct size, with `bridge_rna.retrieval.run_cohort_retrieval`'s own fused scan:
+
+| depth | pooled | one sample alone | gain |
+| --- | --- | --- | --- |
+| top-5 | 0.745 | 0.101 | 7.3x |
+| top-20 | 0.774 | 0.129 | 6.0x |
+| top-30 | 0.791 | 0.150 | 5.3x |
+
+Deeper lists are slightly more stable, which is what a set-overlap statistic does as the sets grow, and the 0.046 drift across the slider's whole range is why `cohorts.STABILITY_FLOOR` can be a single depth-independent 0.70.
+
+The spread at fixed size is the finding that motivated the change: k=4 measured 0.339, k=6 measured 0.849, k=7 measured 0.316, k=10 and k=35 both measured 1.000.
+On the real app, OSD-137's two 6-animal liver arms measure **0.59** and **0.64**, where the curve told both of them 0.72.
+
+Cost of the fused scan against the real 963 MB memmap, which is what makes measuring it per query affordable:
+
+| query vectors in one pass | wall clock |
+| --- | --- |
+| 1 | 0.44 s |
+| 11 | 0.50 s |
+| 21 | 0.58 s |
+| 41 | 0.77 s |
+| 77 | 1.00 s |
+
+The largest cohort in the corpus has 38 members, so the worst case is 77 vectors and about 0.56 s over the pooled query it already paid for.
+`retrieval._topk_cosine_matrix` is the one implementation of the cosine scan in the repository; `_topk_cosine_from_memmap` is a one-row wrapper and `precompute/validate_cohorts.py`'s `QueryBatch` calls straight into it.
+Verified against the previous standalone single-query scan on the real corpus: identical top-30 in order, maximum score difference **0.0**.
+A batch of queries and a single query agree to about **1.3e-07** rather than bit for bit, because one is a BLAS matrix-matrix product and the other a matrix-vector product; that is a couple of float32 ulps and the same effect the identity check below documents.
 
 ### Spherical mean against raw mean
 

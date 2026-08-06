@@ -25,8 +25,12 @@ The six checks:
    tissue and arm contribute on top of the batch that same-study membership
    already supplies. Study alone supplies 84% of a cohort's coherence, so this
    is the uncomfortable one.
-5. **Stability versus k.** The curve that sets `cohorts.LOW_N_THRESHOLD` and
-   populates the confidence readout. Printed ready to paste.
+5. **Stability versus k.** The curve that sets `cohorts.LOW_N_THRESHOLD`, and
+   nothing else any more. It used to be pasted into `STABILITY_BY_K` and quoted
+   on the rail beside a selected cohort; the app measures this statistic live
+   now, per query, so the curve is back to answering only the question it can
+   answer honestly - how large a cohort has to be. *Correctness: a knee that no
+   longer matches the shipped threshold exits non-zero.*
 6. **Normalization.** Spherical against raw mean over every cohort, so "it
    changes almost nothing here" stays a measurement rather than a memory.
 
@@ -52,7 +56,7 @@ from bridge_rna import cohorts as C  # noqa: E402
 from bridge_rna.retrieval import (  # noqa: E402
     _cached_osdr_embeddings,
     _load_archs4_index,
-    _topk_cosine_from_memmap,
+    _topk_cosine_matrix,
 )
 
 # Deep enough that the agreement statistic is not dominated by ties, shallow
@@ -66,14 +70,23 @@ MIN_POOLED_STABILITY = 0.60      # check 2: well below 0.78, so noise cannot tri
 MIN_NULL_MARGIN = 0.03           # check 3: a real cohort must beat random by this
 
 
-def jaccard(a: np.ndarray, b: np.ndarray) -> float:
-    sa, sb = set(a.tolist()), set(b.tolist())
-    union = len(sa | sb)
-    return len(sa & sb) / union if union else 0.0
+# One definition of "how much do two hit lists share", shared with the live
+# path. `bridge_rna.cohorts.top_k_agreement` is what the app measures during a
+# search and reports in the inspector, so the number a user reads off the screen
+# and the number this gate computes over all 212 cohorts are the same statistic
+# rather than two that merely resemble each other.
+jaccard = C.top_k_agreement
 
 
 class QueryBatch:
-    """Accumulates query vectors, then scores them all in one memmap pass."""
+    """Accumulates query vectors, then scores them all in one memmap pass.
+
+    The sweep itself is `retrieval._topk_cosine_matrix`, which is the app's own
+    scan. It used to be a second copy living here, and the copy is gone for the
+    reason every duplicated source of truth in this repository is gone: the live
+    stability measurement now runs the same fan-out this validator does, and two
+    implementations of it could disagree while both looked right.
+    """
 
     def __init__(self) -> None:
         self._vectors: list[np.ndarray] = []
@@ -90,58 +103,21 @@ class QueryBatch:
         return len(self._vectors)
 
     def run(self, k: int = MAX_DEPTH, block_bytes: int = 200_000_000) -> None:
-        """One streaming sweep: block of index rows x every query at once.
-
-        `argpartition` over the whole (n, q) score matrix would need 17 GB at
-        940,455 x 4,700 in float32, so the top-k is kept as a running heap per
-        query instead: each block contributes its own top-k, which is merged
-        into the incumbent, and memory stays at one block.
-
-        The block *height* is derived from the query count rather than fixed,
-        because the score block is (queries x rows) and a full sweep over every
-        cohort runs several thousand queries at once. A fixed 25,000 rows was
-        fine at 60 cohorts and would allocate 930 MB at 212.
-        """
         if not self._vectors:
             return
         Q = np.stack(self._vectors)
-        Q /= np.maximum(np.linalg.norm(Q, axis=1, keepdims=True), 1e-12)
-        Q = np.ascontiguousarray(Q.T)                     # (d, q)
-
         index_vecs, _, _ = _load_archs4_index()
-        n, d = int(index_vecs.shape[0]), int(index_vecs.shape[1])
-        if Q.shape[0] != d:
-            raise RuntimeError(f"dim mismatch: queries {Q.shape[0]} vs index {d}")
-        q = Q.shape[1]
-        k = min(k, n)
-        chunk = int(max(2000, min(25000, block_bytes // (4 * max(q, 1)))))
-
-        best_idx = np.zeros((q, 0), dtype=np.int64)
-        best_score = np.zeros((q, 0), dtype=np.float32)
+        n = int(index_vecs.shape[0])
+        q = Q.shape[0]
 
         t0 = time.time()
-        for start in range(0, n, chunk):
-            end = min(start + chunk, n)
-            x = np.asarray(index_vecs[start:end], dtype=np.float32)
-            x /= np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-12)
-            block = (x @ Q).T                              # (q, block)
-            take = min(k, block.shape[1])
-            part = np.argpartition(block, -take, axis=1)[:, -take:]
-            part_scores = np.take_along_axis(block, part, axis=1)
 
-            cand_idx = np.concatenate([best_idx, part + start], axis=1)
-            cand_score = np.concatenate([best_score, part_scores], axis=1)
-            keep = min(k, cand_idx.shape[1])
-            sel = np.argpartition(cand_score, -keep, axis=1)[:, -keep:]
-            best_idx = np.take_along_axis(cand_idx, sel, axis=1)
-            best_score = np.take_along_axis(cand_score, sel, axis=1)
-            pct = 100.0 * end / n
-            print(f"\r  scanning {pct:5.1f}%  ({q} queries, {chunk:,}-row blocks)",
+        def tick(done: int, total: int) -> None:
+            print(f"\r  scanning {100.0 * done / total:5.1f}%  ({q} queries)",
                   end="", flush=True)
 
-        order = np.argsort(-best_score, axis=1)
-        best_idx = np.take_along_axis(best_idx, order, axis=1)
-        best_score = np.take_along_axis(best_score, order, axis=1)
+        best_idx, best_score = _topk_cosine_matrix(
+            index_vecs, Q, k=min(k, n), block_bytes=block_bytes, progress=tick)
         print(f"\r  scanned {n:,} rows x {q} queries in {time.time() - t0:.1f} s")
 
         for i, name in enumerate(self._names):
@@ -379,8 +355,7 @@ def main() -> int:
     # the UI has to be backed by enough cohorts that it does not swing by half
     # its range when the seed changes, so sizes are pooled into buckets and each
     # bucket reports how many cohorts stand behind it.
-    print("5. STABILITY VERSUS COHORT SIZE  the curve behind the confidence "
-          "readout")
+    print("5. STABILITY VERSUS COHORT SIZE  the curve behind LOW_N_THRESHOLD")
     buckets = [(2, 2), (3, 3), (4, 4), (5, 6), (7, 9), (10, 14), (15, 10**6)]
 
     def bucket_label(lo: int, hi: int) -> str:
@@ -416,16 +391,47 @@ def main() -> int:
             print(f"   {bucket_label(lo, hi):>7}  {len(vals):>8}  "
                   f"{float(np.mean(vals)):>10.3f}  {float(np.std(vals)):>11.3f}")
 
+    # This curve no longer gets pasted anywhere. It used to populate
+    # `cohorts.STABILITY_BY_K`, which the rail's cohort card quoted by size -
+    # and quoting a population average beside one cohort's name is what got it
+    # deleted on 2026-08-06, because the spread inside a bucket is most of the
+    # range (a cohort of 7 measuring 0.316 sat in the same bucket as one of 6
+    # measuring 0.849). The app measures this statistic live now, on the query
+    # that just ran; see docs/live_stability.md.
+    #
+    # What the curve still settles is the one question it can answer honestly:
+    # how large does a cohort have to be before its results usually hold up.
+    # That is `LOW_N_THRESHOLD`, and the picker uses it to mark a small cohort
+    # before a search has run, which is the only moment when size is all that
+    # is known. So the check now reports the knee and compares it, rather than
+    # printing a dict to copy.
     curve = {lo: float(np.mean(vals)) for lo, _hi, vals in merged}
-    print("\n   paste into bridge_rna/cohorts.py STABILITY_BY_K "
-          "(keys are bucket floors):")
-    print("   STABILITY_BY_K = {")
-    for size in sorted(curve):
-        print(f"       {size}: {curve[size]:.2f},")
-    print("   }")
-    knee = next((s for s in sorted(curve) if curve[s] >= 0.70), None)
-    print(f"\n   first bucket reaching 0.70 stability: k >= {knee}  "
-          f"(LOW_N_THRESHOLD is currently {C.LOW_N_THRESHOLD})\n")
+    knee = next((s for s in sorted(curve) if curve[s] >= C.STABILITY_FLOOR), None)
+    print(f"\n   first bucket reaching {C.STABILITY_FLOOR:.2f} stability: "
+          f"k >= {knee}")
+
+    # The comparison is only a gate on a **full** sweep, and that restriction is
+    # the same correction the bucketing above exists for. A --cohorts sample
+    # draws one or two cohorts per size, which is exactly the regime that
+    # produced 0.38 at k=5 beside 0.90 at k=6 in the first run of this script.
+    # Measured here on a 22-cohort sample the knee lands at 10 rather than 5,
+    # from buckets standing on a single cohort each. Failing a build on that
+    # would be enforcing the noise the shipped number was chosen to survive.
+    full_sweep = len(picked) == len(all_cohorts)
+    if not full_sweep:
+        print(f"   cohorts.LOW_N_THRESHOLD is {C.LOW_N_THRESHOLD}  -> not "
+              f"checked: this is a {len(picked)}-cohort sample, and the knee "
+              "is only quotable from every cohort. Re-run without --cohorts.")
+    else:
+        print(f"   cohorts.LOW_N_THRESHOLD is {C.LOW_N_THRESHOLD}  "
+              f"-> {'agrees' if knee == C.LOW_N_THRESHOLD else 'DISAGREES'}")
+        if knee is not None and knee != C.LOW_N_THRESHOLD:
+            failures.append(
+                f"check 5: over all {len(all_cohorts)} cohorts the knee is "
+                f"k >= {knee}, but cohorts.LOW_N_THRESHOLD is "
+                f"{C.LOW_N_THRESHOLD}. That threshold is what marks a small "
+                "cohort in the picker before a search has run.")
+    print()
 
     if args.stability:
         return 0 if not failures else 1
