@@ -35,3 +35,9 @@ reports/
 # is ~130 MB, the ARCHS4 GEO metadata join ~33 MB, and the four coordinate
 # parquets ~9-13 MB each.
 cache/
+
+# Candidate coordinate builds held against the shipped cache by
+# `validate_artifacts.py --compare DIR`, such as the n_neighbors=15 UMAP that
+# `--compare` scored and lost. Same reasoning as cache/: reproducible from the
+# precompute scripts, and tens of MB per candidate.
+cache_compare_*/
