@@ -6,6 +6,45 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-06 (merged to main, hosted locally, and the meeting Q&A corrected)
+
+No new features. This session integrated the branch below, stood the app up, and fixed a document that had gone false.
+
+**`map-key-and-cohort-copy` merged into `main` and pushed**, as merge commit `c9b79c4`.
+The branch was exactly one commit ahead of `main` and `main` was not ahead of it, so there was nothing to reconcile.
+307 tests passed on the branch and 307 passed again on the merged tree, which is the run that counts.
+All 242 browser checks pass on the merged code as well: 50 in `e2e_check.py`, 124 in `e2e_cohort_check.py`, 68 in `e2e_upload_check.py`, with zero console errors in each.
+
+**Hosting is local and deliberately stays local.**
+Cloud hosting was scoped before being declined, and the constraint is worth recording for whoever asks again: the map alone needs about 81 MB of artifacts, but retrieval needs the 963 MB ARCHS4 memmap resident enough to be scanned per query, which puts a real deployment at roughly 1.1 GB and 2-4 GB of RAM before the upload path adds torch and a 547 MB checkpoint.
+`flyctl` is installed and authenticated and `gh` is authenticated, but there is no Docker daemon on this machine and `hf` is not logged in, so Fly with a remote builder was the only option that needed no new account.
+The decision was to run locally instead, so none of that was built.
+The app serves at `http://127.0.0.1:8050`, which is the argument parser's default and does not cross a network.
+
+**Two orphaned app processes were found still running.**
+One had held port 8050 for eight and a half hours, from the previous afternoon, which meant it was serving pre-merge code while looking exactly like a healthy server.
+It was stopped so the canonical port could serve the merged tree; a second orphan on port 8061 was left alone.
+This is worth watching for: `app.py` started in the background survives the session that started it, and a stale instance answers 200 on both routes.
+
+**The hosted process was verified directly rather than by proxy.**
+Each e2e suite boots its own server, so passing suites say the code works, not that the running instance does.
+One real query driven through the browser against the live process returned 5 hits in 0.9 seconds, which matches the documented cached-path timing, with the banner correctly naming the precomputed path, and `/map` drew all 942,563 glyphs in 1.8 seconds.
+
+**`MEETING_QA.md` was committed, but five of its answers had to be rewritten first.**
+It was written against the codebase as it stood at the meeting, and file ingestion and cohort pooling have both shipped since, so answers stating that neither existed were not stale but false.
+Committing it as found would have put "no upload feature exists yet" into a repository where that feature has a design doc, an e2e suite, and a verified cosine 1.0 round trip.
+The rewritten answers are marked as changed rather than silently corrected, so the document still reads as a record of what was asked.
+
+**One correction caught before it shipped, which is the transferable part.**
+The rewritten upload-security answer initially claimed the app does not bound upload size.
+It does: `MAX_UPLOAD_BYTES` is 200 MB, enforced both as Flask's `MAX_CONTENT_LENGTH` (`app.py:262`) and again after the base64 decode (`bridge_rna/callbacks.py:1004`).
+The claim was written from the shape of the code rather than from the code, which is exactly the failure this repository's documents are otherwise good at avoiding.
+
+**Two suspected interface defects were investigated and both were deliberate.**
+The projection readout's trailing separator on a wrapped line is a documented choice: `map.css:97-104` explains that binding the separator to the following chip instead would strand a `·` at the start of every wrapped line.
+The inspector appearing to say "Run a search" after a search had run was an artifact of screenshotting before the callback settled; it resolves to the query's own details within 1.5 seconds.
+Neither was changed, which is the right outcome for a check that finds nothing.
+
 ## 2026-08-06 (the map keys every mark it draws; both pooled queries get described)
 
 A copy pass over both views, plus one design change and two defects the audit behind it turned up.
