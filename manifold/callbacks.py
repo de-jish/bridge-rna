@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+import numpy as np
 from dash import Input, Output, State, ctx, html, no_update
 
 from . import colorby, data, layout, render
@@ -180,38 +181,32 @@ def _viewport_from_relayout(relayout: dict | None):
     return "unchanged"
 
 
-def _frame_for(hits_payload, method: str, dims: str,
-               roles: tuple[str, ...] = (ROLE_A, ROLE_B)):
-    """A viewport containing the query and every hit, with room to breathe.
+def frame_points(points, method: str, dims: str):
+    """A viewport containing every point given, with room to breathe.
+
+    The geometry behind both framing actions - the retrieval's and the find's -
+    so the two cannot drift into padding the same map differently.
 
     At full-corpus zoom a retrieval's points are a few pixels apart - the hits
     really are that close, which is the finding - so the rings overlap into one
-    illegible mark. Framing is what makes them separately readable, and it is
-    offered as an action rather than done automatically: arriving already
-    zoomed in would hide the thing worth seeing first, which is *where in the
-    whole corpus* the query landed.
-
-    It frames what is actually ticked, so a comparison with one arm hidden
-    frames the arm on screen rather than a window sized for both.
+    illegible mark. Framing is what makes them separately readable, and in both
+    callers it is offered as an action rather than done automatically: arriving
+    already zoomed in would hide the thing worth seeing first, which is *where
+    in the whole corpus* the points landed.
 
     Returns None (the whole map) if there is nothing to frame, or in 3-D, where
     the viewport store does not drive the camera.
     """
     if dims != "2d":
         return None
-    overlay = _retrieval_overlay(hits_payload, roles)
-    if overlay is None:
-        return None
-    points = list(overlay["hit_points"])
-    if overlay["query_point"] is not None:
-        points.append(overlay["query_point"])
     coords = data.coords(method, "2d")
-    if not points or coords.shape[0] == 0:
+    if coords.shape[0] == 0:
+        return None
+    inside = [int(p) for p in (points or []) if 0 <= int(p) < coords.shape[0]]
+    if not inside:
         return None
 
-    import numpy as np
-
-    xy = coords[np.asarray(points), :2]
+    xy = coords[np.asarray(inside), :2]
     x0, y0 = xy.min(axis=0)
     x1, y1 = xy.max(axis=0)
     # A tight cluster would otherwise frame to a zero-width window. The pad is
@@ -219,8 +214,47 @@ def _frame_for(hits_payload, method: str, dims: str,
     # a sensible window.
     pad_x = max((x1 - x0) * 0.6, 0.35)
     pad_y = max((y1 - y0) * 0.6, 0.35)
-    return [float(x0 - pad_x), float(x1 + pad_x),
-            float(y0 - pad_y), float(y1 + pad_y)]
+    return _clamped_to_corpus(
+        [float(x0 - pad_x), float(x1 + pad_x),
+         float(y0 - pad_y), float(y1 + pad_y)], coords)
+
+
+def _clamped_to_corpus(window, coords):
+    """Never frame wider than the corpus itself.
+
+    A pad that is a share of the span is right for a retrieval's handful of
+    neighbouring points and wrong for a set that spans the map: 60% either side
+    of a spread set asks for a window larger than everything there is, so the
+    "frame" zooms *out* and the user ends up seeing less than they started
+    with. It is reachable from both callers - an OSDR study is drawn from one
+    experiment but not from one region.
+
+    Measured on the real corpus before this guard existed: OSD-457's 192
+    samples framed to **1.22x** the corpus width and GSE228590's 8,764 to
+    **1.03x**, against 0.02x for a typical study and 0.06x for a typical
+    series. Clamping each edge to the corpus keeps a spread set framed at
+    exactly the whole map, which is the honest answer for a set that really is
+    everywhere, and leaves every compact set untouched.
+    """
+    x0, x1, y0, y1 = window
+    return [float(max(x0, coords[:, 0].min())), float(min(x1, coords[:, 0].max())),
+            float(max(y0, coords[:, 1].min())), float(min(y1, coords[:, 1].max()))]
+
+
+def _frame_for(hits_payload, method: str, dims: str,
+               roles: tuple[str, ...] = (ROLE_A, ROLE_B)):
+    """The retrieval's framing: the query and every hit that is ticked.
+
+    Frames what is actually drawn, so a comparison with one arm hidden frames
+    the arm on screen rather than a window sized for both.
+    """
+    overlay = _retrieval_overlay(hits_payload, roles)
+    if overlay is None:
+        return None
+    points = list(overlay["hit_points"])
+    if overlay["query_point"] is not None:
+        points.append(overlay["query_point"])
+    return frame_points(points, method, dims)
 
 
 def coverage_children(color_by: str):
