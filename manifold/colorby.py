@@ -104,11 +104,14 @@ def _osdr_field(name: str) -> Callable[[], np.ndarray]:
     return resolve
 
 
-_ARCHS4_META_NEEDS = (
-    data.archs4_metadata_available,
-    "ARCHS4 labels need the GEO metadata join - run "
-    "precompute/fetch_archs4_meta.py (about 35 seconds, needs network).",
-)
+#: The one sentence that says how to get the optional GEO join, so the two
+#: controls that depend on it - the color-by and the find box - cannot end up
+#: telling a user to run two different things.
+ARCHS4_META_HINT = ("ARCHS4 labels need the GEO metadata join - run "
+                    "precompute/fetch_archs4_meta.py (about 35 seconds, "
+                    "needs network).")
+
+_ARCHS4_META_NEEDS = (data.archs4_metadata_available, ARCHS4_META_HINT)
 
 REGISTRY: tuple[ColorBy, ...] = (
     # --- Whole map: every point gets a real category. -----------------------

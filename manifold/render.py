@@ -549,9 +549,15 @@ def _found_traces(coords, is_3d, found) -> tuple[list, int, int]:
     Scatter = go.Scatter3d if is_3d else go.Scattergl
     symbol = theme.FOUND_SYMBOL_3D if is_3d else theme.FOUND_SYMBOL
     label = str(found.get("label") or "found")
+    # Marks shrink when there are several, the same rule and the same 0.7 that
+    # `_retrieval_traces` applies to a pooled cohort's members, for the same
+    # reason: a study's samples are often nearly coincident - OSD-100's twelve
+    # frame into 1.08 units of x - and at full size they composite into one blot
+    # instead of reading as twelve samples sitting together.
+    size = theme.FOUND_SIZE * (0.5 if is_3d else 1.0) * (0.7 if len(shown) > 1 else 1.0)
     return [Scatter(
         **xyz, mode="markers", name="found",
-        marker=dict(size=theme.FOUND_SIZE * (0.5 if is_3d else 1.0),
+        marker=dict(size=size,
                     symbol=symbol, color=theme.FOUND_COLOR,
                     line=dict(width=theme.FOUND_LINE, color=theme.FOUND_COLOR)),
         hovertemplate=f"<b>{label}</b><extra></extra>",

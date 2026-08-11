@@ -14,6 +14,13 @@ import pytest
 from manifold import data, find
 
 
+@pytest.fixture(scope="module")
+def built_app():
+    """The whole shell, for the tests that assert on the callback graph."""
+    import app as shell
+    return shell.build_app()
+
+
 @pytest.fixture(autouse=True)
 def _clear_index():
     """The index is memoized, and the metadata fixture swaps the parquet out."""
@@ -341,3 +348,101 @@ def test_a_found_point_outside_the_corpus_is_dropped_not_drawn(corpus):
     fig, _, _ = render.build_figure(
         "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
     assert len(_found_traces_in(fig)[0].x) == 1
+
+
+def test_several_marks_are_drawn_smaller_than_a_lone_one(corpus):
+    """A study's samples are often nearly coincident - OSD-100's twelve frame
+    into 1.08 units of x on the real corpus - so at full size they composite
+    into one blot. Same rule and same 0.7 as a pooled cohort's members."""
+    from manifold import render, theme
+
+    one, _, _ = render._found_traces(
+        data.coords("pca", "2d"), False, {"points": [1], "label": "GSM1"})
+    many, _, _ = render._found_traces(
+        data.coords("pca", "2d"), False, {"points": [1, 2, 3], "label": "GSE1"})
+    assert one[0].marker.size == theme.FOUND_SIZE
+    assert many[0].marker.size == pytest.approx(theme.FOUND_SIZE * 0.7)
+
+
+def test_the_status_says_something_different_for_each_kind_of_miss(corpus):
+    """Answering "liver" and "GSM999999999" with one sentence tells the first
+    user their search is broken and the second nothing about whether this
+    machine could have looked it up."""
+    from manifold import callbacks
+
+    def text(query):
+        return str(callbacks.find_status_children(find.find(query)))
+
+    shape = text("liver")
+    absent = text("GSM123456789")
+    assert "Color by" in shape and "not on this map" not in shape
+    assert "not on this map" in absent and "Color by" not in absent
+    assert shape != absent
+    assert callbacks.find_status_children(find.find(""))  == ""
+    assert callbacks.find_status_children(None) == ""
+
+
+def test_the_no_metadata_status_names_the_command_the_color_by_names(
+        corpus, without_archs4_metadata):
+    """One sentence for the one missing artifact. Two controls depend on that
+    optional join and they must not send the user after two commands."""
+    from manifold import callbacks, colorby
+
+    text = str(callbacks.find_status_children(find.find("GSM9000005")))
+    assert colorby.ARCHS4_META_HINT in text
+
+
+def test_the_status_states_the_cap_as_well_as_the_badge(corpus, monkeypatch):
+    from manifold import callbacks, theme
+
+    monkeypatch.setattr(theme, "FIND_MAX_MARKS", 10)
+    text = str(callbacks.find_status_children(
+        {"points": list(range(200)), "label": "GSE5000", "reason": ""}))
+    assert "200" in text and "10" in text
+
+
+def test_finding_something_never_moves_the_viewport_by_itself(built_app):
+    """Framing is a button and never a consequence of typing, and there are two
+    reasons - the second stronger than the first.
+
+    A found set can span the map: an OSDR study's 192 samples framed to 1.22x
+    the corpus width before `_clamped_to_corpus` went in, so an automatic frame
+    would zoom the user *out* as the result of a search. And a 2-D neighbourhood
+    is not a similarity neighbourhood here - the map's 20 nearest points overlap
+    the true cosine top-20 by a median of 0 - so dropping someone into a zoomed
+    view of their sample's surroundings invites reading those surroundings as
+    related when they are not. `_frame_for`'s docstring already made this call
+    for the retrieval; this pins that the find did not quietly reverse it.
+
+    Structural rather than behavioural on purpose: `find-store` being an Input
+    of the viewport callback is the thing that would make framing automatic, so
+    the test looks for that rather than for a symptom.
+    """
+    app = built_app
+    viewport = [k for k in app.callback_map if "viewport-store" in k]
+    assert len(viewport) == 1
+    inputs = [i["id"] for i in app.callback_map[viewport[0]]["inputs"]]
+    assert "frame-find" in inputs, "the frame button must reach the viewport"
+    assert "find-store" not in inputs, (
+        "find-store is an Input of the viewport callback, so a search now "
+        "moves the map on its own")
+
+
+def test_the_find_store_is_declared_in_the_view_not_only_as_output():
+    """A component that exists only as callback output cannot be validated by
+    Dash at startup: a typo in its id fails silently at runtime instead."""
+    from manifold import layout
+
+    def walk(node):
+        yield node
+        children = getattr(node, "children", None)
+        if isinstance(children, (list, tuple)):
+            for c in children:
+                yield from walk(c)
+        elif children is not None:
+            yield from walk(children)
+
+    ids = {getattr(n, "id", None) for n in walk(layout.build_view())}
+    assert "find-store" in ids
+    assert "find-input" in ids
+    assert "frame-find" in ids

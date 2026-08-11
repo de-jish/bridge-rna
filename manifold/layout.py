@@ -292,6 +292,43 @@ def control_rail() -> html.Aside:
                 "budget-label", "ARCHS4 point budget",
                 _segmented("budget", budget_options("2d"), default_budget("2d")),
             ),
+            # "Where is this sample?" - the one question the map could not be
+            # asked until now. It sits here, after the controls that decide how
+            # the map is drawn and immediately above the panel that describes
+            # whatever is currently selected, because the control and its result
+            # belong together: that is the same rule that puts the coverage
+            # readout under the color-by and the parameter chips under the
+            # projection pills.
+            #
+            # A real `<label for>`, unlike every other group on this rail. Dash
+            # renders a Dropdown as a button and a Slider as a Radix thumb, and
+            # neither is a labelable element, which is why they need the
+            # `role="group"` wrapper `_group` builds. `dcc.Input` puts the id on
+            # the actual `<input>` - verified in the DOM, and it is the one
+            # place Dash's id and className land on different elements - so this
+            # control can be named the ordinary way.
+            html.Div(
+                id="find-group", className="bm-group", role="group",
+                **{"aria-labelledby": "find-label"},
+                children=[
+                    html.Label("Find a sample", id="find-label",
+                               className="bm-group-label", htmlFor="find-input"),
+                    dcc.Input(
+                        id="find-input", type="text", debounce=True,
+                        className="bm-find-input",
+                        # The placeholder carries the grammar. Without it the
+                        # box is a blank field that silently expects one of four
+                        # accession formats, and the commonest first query -
+                        # a word like "liver" - looks like a broken search
+                        # rather than the wrong control.
+                        placeholder="GSM…  GSE…  OSD-100  sample name",
+                    ),
+                    html.Div(id="find-status", className="bm-hint"),
+                    html.Button("Frame it", id="frame-find", n_clicks=0,
+                                className="bm-button",
+                                style={"display": "none"}),
+                ],
+            ),
             # Clicking an OSDR point offers a retrieval for it. Hidden until
             # something is clicked; the map is read rather than driven, so this
             # is an offer that appears in response to interest, not a control
@@ -648,4 +685,9 @@ def build_view() -> html.Div:
         ]),
         dcc.Store(id="viewport-store"),
         dcc.Store(id="legend-store"),
+        # Declared here rather than created by a callback, for the reason the
+        # legend's parts are: Dash validates its callback graph against the
+        # initial layout, so an id that only ever exists as callback output
+        # fails silently at runtime instead of loudly at startup.
+        dcc.Store(id="find-store"),
     ])

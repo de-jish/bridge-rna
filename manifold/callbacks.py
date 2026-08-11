@@ -7,7 +7,7 @@ from urllib.parse import quote
 import numpy as np
 from dash import Input, Output, State, ctx, html, no_update
 
-from . import colorby, data, layout, render
+from . import colorby, data, find, layout, render, theme
 
 # The legend search only earns its space once the list is long enough to be
 # hard to scan; below that it is chrome.
@@ -257,6 +257,50 @@ def _frame_for(hits_payload, method: str, dims: str,
     return frame_points(points, method, dims)
 
 
+def find_status_children(found: dict | None):
+    """What the find box says under itself, and it is four different sentences.
+
+    A miss is not one outcome. Answering "liver" and "GSM999999999" with the
+    same "not found" tells the first user their search is broken when the truth
+    is that they wanted a different control, and tells the second nothing about
+    whether this machine could have looked it up at all. Each reason
+    `manifold/find.py` distinguishes gets its own answer, and the two that are
+    fixable say what to do.
+
+    The no-metadata sentence is `colorby.ARCHS4_META_HINT` rather than a second
+    copy of it, so the two controls that depend on that optional join cannot
+    end up naming two different commands.
+    """
+    if not found:
+        return ""
+    reason = found.get("reason") or ""
+    label = str(found.get("label") or "")
+
+    if not reason:
+        n = len(found.get("points") or [])
+        shown = min(n, theme.FIND_MAX_MARKS)
+        head = [html.B(label), f" · {n:,} sample{'s' if n != 1 else ''}"]
+        if shown < n:
+            # The cap is stated wherever the number is, not only on the badge.
+            head.append(f", marking the first {shown:,}")
+        return head + ["."]
+
+    if reason == find.EMPTY:
+        return ""
+    if reason == find.NO_GEO_METADATA:
+        return [html.B(label), " is a GEO accession, and this machine has no "
+                "GEO metadata to look it up in. ", colorby.ARCHS4_META_HINT]
+    if reason == find.ABSENT:
+        n_archs4, n_osdr, _ = data.counts()
+        return [html.B(label), " is not on this map. It holds "
+                f"{n_archs4:,} GEO samples and the {n_osdr:,} OSDR samples "
+                "that were embedded."]
+    # find.SHAPE
+    return ["Not an identifier. Type a GEO sample (GSM…), a series (GSE…), an "
+            "OSDR study (OSD-100), or an OSDR sample name. To find a tissue or "
+            "a condition instead, use ", html.B("Color by"), " above."]
+
+
 def coverage_children(color_by: str):
     """The coverage readout under the color-by control.
 
@@ -307,6 +351,7 @@ def register(app):
         Output("legend-retrieval", "children"),
         Output("legend-color", "style"),
         Output("legend-corpus", "children"),
+        Output("legend-found", "children"),
         Output("coverage", "children"),
         Output("color-by-hint", "children"),
         Input("method", "value"),
@@ -321,15 +366,16 @@ def register(app):
         # the old one.
         Input("hits-store", "data"),
         Input("show-retrieval", "value"),
+        Input("find-store", "data"),
     )
     def update_figure(method, dims, color_by, layers, budget, viewport,
-                      hits_payload, show_retrieval):
+                      hits_payload, show_retrieval, found):
         vp = tuple(viewport) if viewport else None
         roles = _roles_from_checklist(show_retrieval)
         retrieval = _retrieval_overlay(hits_payload, roles) if roles else None
         fig, legend_data, badges = render.build_figure(
             method, dims, color_by, layers or [], budget,
-            vp if dims == "2d" else None, retrieval=retrieval)
+            vp if dims == "2d" else None, retrieval=retrieval, found=found)
         legend_data["title"] = layout.color_by_label(color_by)
         # Persist zoom in 2D by pinning axis ranges to the viewport.
         if vp and dims == "2d":
@@ -344,18 +390,20 @@ def register(app):
         key = layout.retrieval_key_children(
             _retrieval_overlay(hits_payload), roles, dims)
         corpus = layout.corpus_key_children(layers)
+        found_key = layout.found_key_children(found)
 
         # The panel is shown when any section has content. It used to hang off
         # the color items alone, so an OSDR-only field with the OSDR layer
         # unticked took the whole key off screen - and would now take a drawn
         # retrieval's key with it.
-        legend_style = {} if (items or key or corpus) else {"display": "none"}
+        legend_style = ({} if (items or key or corpus or found_key)
+                        else {"display": "none"})
         color_style = {} if items else {"display": "none"}
         search_style = ({} if len(items) >= LEGEND_SEARCH_MIN_ITEMS
                         else {"display": "none"})
         title = f"Color · {legend_data['title']}"
         return (fig, badge_children, legend_style, title, search_style,
-                legend_data, key, color_style, corpus,
+                legend_data, key, color_style, corpus, found_key,
                 coverage_children(color_by), colorby.get(color_by).hint)
 
     @app.callback(
@@ -391,6 +439,48 @@ def register(app):
         two Inputs it does take are the two that can change the answer.
         """
         return layout.projection_params_children(method, dims)
+
+    @app.callback(
+        Output("find-store", "data"),
+        Input("find-input", "value"),
+    )
+    def resolve_find(query):
+        """Turn what was typed into the points it names.
+
+        `debounce=True` on the input means this fires on Enter or on blur, not
+        per keystroke, so the 460 ms first-search index build happens once when
+        the user has finished typing rather than after every letter of
+        "GSM4256053".
+        """
+        return find.find(query)
+
+    @app.callback(
+        Output("find-status", "children"),
+        Output("frame-find", "style"),
+        Input("find-store", "data"),
+        Input("dims", "value"),
+    )
+    def describe_the_find(found, dims):
+        """The sentence under the box, and whether framing is on offer.
+
+        Framing is a button and never automatic, which is the rule
+        `frame_points` was already written to and the frame-retrieval button
+        already follows. Two reasons, and the second is the stronger. A found
+        set can span the map - an OSDR study's 192 samples framed to 1.22x the
+        corpus before the clamp went in - so "framing" it would zoom the user
+        *out*, silently, as the result of typing. And a 2-D neighbourhood is not
+        a similarity neighbourhood on this map: its 20 nearest points overlap
+        the true cosine top-20 by a median of 0, so dropping someone into a
+        zoomed view of their sample's surroundings invites reading those
+        surroundings as related when they are not. Marking answers "where is
+        it"; zooming asserts something further, so it waits to be asked for.
+
+        Hidden in 3-D for the reason the retrieval's frame button is: framing
+        pins the 2-D axis ranges and the 3-D camera ignores them, so the button
+        would be a click with no visible effect.
+        """
+        offer = bool(found and found.get("points")) and dims == "2d"
+        return find_status_children(found), ({} if offer else {"display": "none"})
 
     @app.callback(
         Output("picked-group", "style"),
@@ -546,7 +636,12 @@ def register(app):
         # Two callbacks writing one Output is a race Dash only sometimes
         # rejects, and `test_every_output_has_exactly_one_writer` pins it.
         Input("frame-retrieval", "n_clicks"),
+        # Framing a find is the same kind of event as framing a retrieval, so it
+        # arrives at the callback that already owns the viewport rather than
+        # becoming a second writer to it.
+        Input("frame-find", "n_clicks"),
         State("hits-store", "data"),
+        State("find-store", "data"),
         State("method", "value"),
         State("dims", "value"),
         # Frame what is actually on screen: with one arm of a comparison
@@ -554,14 +649,23 @@ def register(app):
         State("show-retrieval", "value"),
         prevent_initial_call=True,
     )
-    def update_viewport(relayout, method, dims, _frame_clicks, hits_payload,
-                        method_state, dims_state, show_retrieval):
+    def update_viewport(relayout, method, dims, _frame_clicks, _find_clicks,
+                        hits_payload, found, method_state, dims_state,
+                        show_retrieval):
         from dash import ctx
         if ctx.triggered_id in ("method", "dims"):
             return None  # reset zoom when the projection changes
         if ctx.triggered_id == "frame-retrieval":
             roles = _roles_from_checklist(show_retrieval) or (ROLE_A, ROLE_B)
             return _frame_for(hits_payload, method_state, dims_state, roles)
+        if ctx.triggered_id == "frame-find":
+            # `no_update`, never None. None is this callback's "reset to the
+            # whole corpus", so a frame click with nothing found - or in 3-D,
+            # where frame_points declines - would zoom the user out instead of
+            # doing nothing.
+            window = frame_points((found or {}).get("points"),
+                                  method_state, dims_state)
+            return window if window else no_update
         vp = _viewport_from_relayout(relayout)
         if vp == "unchanged":
             return no_update

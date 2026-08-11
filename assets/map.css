@@ -150,6 +150,48 @@
 /* Dropdown (Dash 4 dcc.Dropdown: a radix popover, not react-select).
    The menu is portaled to the end of <body>, so its rules cannot be scoped
    under .bm-rail and are written globally. */
+/* The find box. The class lands on Dash's wrapper div and the id lands on the
+   inner `<input>`, so the box is drawn on the wrapper and the ring is
+   `:focus-within` on that same wrapper - the two must be on one element, or a
+   ring is drawn inside a ring. Same arrangement as .bm-legend-search, which is
+   the other dcc.Input on this view; the difference is only that this one sits
+   on the light rail rather than on the dark canvas. */
+.bm-find-input {
+  width: 100%;
+  font-size: 13px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+.bm-find-input:hover { border-color: #c3cfdf; }
+.bm-find-input:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+/* The wrapper carries the box, so the input inside it must not draw a second
+   one. Scoped to this control rather than to `.dash-input-element` at large,
+   which would also reach the legend filter on the dark canvas - the exact
+   over-reach `test_the_retrieval_input_rules_cannot_reach_the_map` exists for,
+   arriving from the other direction. */
+.bm-find-input input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  padding: 0;
+}
+.bm-find-input input::placeholder { color: var(--text-muted); }
+/* The status and the button hang off the control they qualify, at the rail's
+   standing 9 px offset - the same one .bm-coverage and .bm-params use. */
+#find-status { margin-top: 9px; }
+#find-status:empty { display: none; }
+
 .bm-dropdown {
   font-size: 13px;
   min-height: 38px;
