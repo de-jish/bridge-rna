@@ -10,9 +10,11 @@ space back.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from dash import dcc, html
 
-from . import colorby, data, render, theme
+from . import colorby, data, find, render, theme
 
 
 def color_by_label(value: str) -> str:
@@ -333,13 +335,13 @@ def control_rail() -> html.Aside:
             # something is clicked; the map is read rather than driven, so this
             # is an offer that appears in response to interest, not a control
             # sitting on the rail waiting to be understood.
+            # Its children are callback output because they differ by corpus:
+            # an OSDR sample offers a retrieval and a GEO sample offers its NCBI
+            # record, and those are a `dcc.Link` and an `<a>` respectively - not
+            # one component with a swapped href. The group itself stays declared
+            # so Dash can still validate the callback graph against it.
             html.Div(id="picked-group", className="bm-group",
-                     style={"display": "none"}, children=[
-                html.Div("Selected sample", className="bm-group-label"),
-                html.Div(id="picked-label", className="bm-picked"),
-                dcc.Link(id="picked-link", href="/", className="bm-button",
-                         children="Retrieve its Earth analogs →"),
-            ]),
+                     style={"display": "none"}),
             # Shown only when there is a retrieval to show. Declared here
             # rather than created by a callback so Dash can validate the
             # callback graph against it at startup: a component that exists
@@ -514,6 +516,46 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
         rows.append(_key_row("hit-both", "retrieved by both",
                              len(overlay.get("shared_points") or [])))
     return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
+
+
+def selected_panel_children(record: dict | None) -> list:
+    """The rail panel describing whatever is currently selected.
+
+    One panel for both ways of selecting: clicking an OSDR diamond, and finding
+    anything. They are the same question - what is this sample - so two panels
+    answering it would be the clutter this feature exists to avoid.
+
+    The action at the bottom differs by corpus, and the difference is not
+    cosmetic. An OSDR sample offers a retrieval, which is an in-app navigation
+    and therefore a `dcc.Link`. A GEO sample offers its NCBI record, which is
+    an external URL and therefore an `<a>`: a `dcc.Link` pointing off-site hands
+    the href to Dash's client-side router, which tries to resolve it as an
+    application route instead of leaving the page.
+    """
+    if not record:
+        return []
+    rows = [
+        html.Div(className="bm-picked-row", children=[
+            html.Span(k, className="bm-picked-key"),
+            html.Span(v, className="bm-picked-value"),
+        ])
+        for k, v in record.get("rows") or []
+    ]
+    children = [
+        html.Div("Selected sample", className="bm-group-label"),
+        html.Div(str(record.get("title") or ""), className="bm-picked"),
+        *rows,
+    ]
+    if record.get("sample_key"):
+        children.append(dcc.Link(
+            "Retrieve its Earth analogs →", className="bm-button",
+            href=f"/?q={quote(str(record['sample_key']))}"))
+    elif record.get("geo"):
+        children.append(html.A(
+            "Open the GEO record →", className="bm-button",
+            href=f"{find.GEO_ACC_URL}{quote(str(record['geo']))}",
+            target="_blank", rel="noopener noreferrer"))
+    return children
 
 
 def found_key_children(found: dict | None) -> list:

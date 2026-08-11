@@ -8,9 +8,7 @@ without a translation table, and it is pinned by a test.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 

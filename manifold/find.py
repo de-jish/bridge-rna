@@ -243,6 +243,74 @@ def _shape_or_absent(raw: str) -> str:
     return ABSENT if ("_" in raw and not any(c.isspace() for c in raw)) else SHAPE
 
 
+#: The canonical GEO record page. One accession, one URL, built in one place.
+GEO_ACC_URL = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc="
+
+
+def describe(found: dict | None) -> dict | None:
+    """A display record for what was found: a heading, a few rows, and a link.
+
+    Kept here rather than in `layout` because it is a metadata lookup and not a
+    rendering decision, so it can be tested without Dash - and because the click
+    path and the find path both want it, and the alternative was two functions
+    reading the same two parquets.
+
+    Returns None when there is nothing to show. A set gets its count rather than
+    its members: the map is already drawing every one of them, and a list of
+    8,764 accessions on a 268 px rail is not a panel.
+    """
+    points = (found or {}).get("points") or []
+    if not points:
+        return None
+    n_archs4, _, _ = data.counts()
+    label = str(found.get("label") or "")
+
+    if len(points) > 1:
+        # The identifier is the heading, so it is not also a row. A panel
+        # reading "GSE143281 / Series: GSE143281" says it twice and buys
+        # nothing; the count is the only thing here the heading does not carry.
+        return {"kind": "set", "title": label,
+                "rows": [("Samples on the map", f"{len(points):,}")],
+                # An OSDR study has no GEO record, so it gets no link rather
+                # than a link to a page that does not exist.
+                "geo": label if found.get("kind") == "gse" else "",
+                "sample_key": ""}
+
+    point = int(points[0])
+    if point >= n_archs4:
+        return _osdr_record(point - n_archs4, label)
+    return _archs4_record(point, label)
+
+
+def _archs4_record(row: int, label: str) -> dict:
+    meta = data.archs4_metadata()
+    if meta is None or row >= len(meta):
+        return {"kind": "archs4", "title": label, "rows": [], "geo": label,
+                "sample_key": ""}
+    r = meta.iloc[row]
+    rows = [("Series", str(r.get("series_id") or "")),
+            ("Tissue", str(r.get("tissue") or "")),
+            ("Title", str(r.get("title") or ""))]
+    return {"kind": "archs4", "title": str(r.get("geo_accession") or label),
+            "rows": [(k, v) for k, v in rows if v],
+            "geo": str(r.get("geo_accession") or label), "sample_key": ""}
+
+
+def _osdr_record(row: int, label: str) -> dict:
+    meta = data.osdr_metadata()
+    if row >= len(meta):
+        return {"kind": "osdr", "title": label, "rows": [], "geo": "",
+                "sample_key": ""}
+    r = meta.iloc[row]
+    key = str(r.get("sample_key") or label)
+    rows = [("Study", str(r.get("study") or "")),
+            ("Tissue", str(r.get("tissue") or "")),
+            ("Spaceflight", str(r.get("spaceflight") or ""))]
+    return {"kind": "osdr", "title": key.split("|", 1)[-1],
+            "rows": [(k, v) for k, v in rows if v],
+            "geo": "", "sample_key": key}
+
+
 def _geo_lookup(digits: str, kind: str, label: str, query: str) -> dict:
     index = _archs4_index()
     if index is None:

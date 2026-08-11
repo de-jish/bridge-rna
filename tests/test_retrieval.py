@@ -294,10 +294,6 @@ def test_on_demand_enrichment_keeps_columns_the_cached_schema_lacks():
     """
     import pandas as pd
 
-    from bridge_rna import retrieval
-
-    hits = retrieval.run_cached_query_retrieval.__wrapped__ if hasattr(
-        retrieval.run_cached_query_retrieval, "__wrapped__") else None
     base = pd.DataFrame({"gsm": ["GSM1", "GSM2"], "score": [0.9, 0.8],
                          "geo_summary": ["", ""]})
     gsm = "GSM1"

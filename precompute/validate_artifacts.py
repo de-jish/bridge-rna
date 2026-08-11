@@ -269,7 +269,7 @@ def validate_mixing(total: int) -> None:
     exp_dsdt = n_dsdt / n / (total - 1)
     obs_dsdt = cnt[("diff", "diff")] / tot
     ratio = obs_dsdt / exp_dsdt
-    print(f"\n  different study AND different tissue:")
+    print("\n  different study AND different tissue:")
     print(f"    observed {obs_dsdt*100:.3f}%  expected {exp_dsdt*100:.5f}%  ->  {ratio:.0f}x")
 
     print("\n  cosine geometry:")

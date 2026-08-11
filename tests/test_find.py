@@ -167,7 +167,6 @@ def test_a_blank_series_id_never_becomes_a_findable_series(corpus):
 def test_every_returned_index_is_a_real_point(corpus):
     total = corpus["total"]
     n_archs4 = corpus["n_archs4"]
-    meta = data.archs4_metadata()
     queries = ["GSM9000000", _a_real_series(),
                str(data.osdr_metadata()["study"].iloc[0]),
                str(data.osdr_metadata()["sample_key"].iloc[0])]
@@ -446,3 +445,68 @@ def test_the_find_store_is_declared_in_the_view_not_only_as_output():
     assert "find-store" in ids
     assert "find-input" in ids
     assert "frame-find" in ids
+
+
+# --- The shared record panel -------------------------------------------------
+
+def test_an_archs4_sample_is_described_with_its_geo_record(corpus):
+    record = find.describe(find.find("GSM9000005"))
+    assert record["kind"] == "archs4"
+    assert record["title"] == "GSM9000005"
+    assert record["geo"] == "GSM9000005"
+    assert not record["sample_key"], "a GEO sample offers no OSDR retrieval"
+    assert dict(record["rows"])["Series"].startswith("GSE")
+
+
+def test_an_osdr_sample_is_described_with_its_retrieval_key(corpus):
+    key = str(data.osdr_metadata()["sample_key"].iloc[7])
+    record = find.describe(find.find(key))
+    assert record["kind"] == "osdr"
+    assert record["title"] == key.split("|", 1)[1]
+    assert record["sample_key"] == key
+    assert not record["geo"], "an OSDR sample has no GEO record to open"
+    assert "Study" in dict(record["rows"])
+
+
+def test_a_set_reports_its_count_and_does_not_repeat_its_own_name(corpus):
+    """"GSE5000 / Series: GSE5000" says it twice. The heading is the
+    identifier, so the rows carry only what the heading does not."""
+    record = find.describe(find.find(_a_real_series()))
+    assert record["kind"] == "set"
+    assert list(dict(record["rows"])) == ["Samples on the map"]
+    assert record["title"] not in dict(record["rows"]).values()
+
+
+def test_an_osdr_study_offers_no_geo_link(corpus):
+    """A study is an OSDR concept and has no NCBI record; a link to one would
+    404."""
+    record = find.describe(find.find(str(data.osdr_metadata()["study"].iloc[0])))
+    assert record["geo"] == ""
+    assert record["sample_key"] == ""
+
+
+def test_nothing_found_describes_nothing(corpus):
+    assert find.describe(None) is None
+    assert find.describe(find.find("liver")) is None
+
+
+def test_an_external_record_is_an_anchor_and_a_retrieval_is_a_dash_link(corpus):
+    """A dcc.Link pointing off-site hands its href to Dash's client-side
+    router, which tries to resolve an NCBI URL as an application route instead
+    of leaving the page."""
+    from dash import dcc, html
+    from manifold import layout
+
+    external = layout.selected_panel_children(find.describe(find.find("GSM9000005")))
+    anchors = [c for c in external if isinstance(c, html.A)]
+    assert len(anchors) == 1
+    assert anchors[0].href.startswith(find.GEO_ACC_URL)
+    assert anchors[0].target == "_blank"
+    assert not [c for c in external if isinstance(c, dcc.Link)]
+
+    key = str(data.osdr_metadata()["sample_key"].iloc[0])
+    internal = layout.selected_panel_children(find.describe(find.find(key)))
+    links = [c for c in internal if isinstance(c, dcc.Link)]
+    assert len(links) == 1
+    assert links[0].href.startswith("/?q=")
+    assert not [c for c in internal if isinstance(c, html.A)]

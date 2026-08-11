@@ -546,7 +546,24 @@ a, a:visited { color: var(--accent-text); }
   word-break: break-word;
   line-height: 1.35;
 }
-.bm-picked-study { color: var(--text-muted); }
+/* The record rows under the selected sample's name. Key left, value right, the
+   value taking the slack - the same shape as the retrieval view's detail rows,
+   and the reason for `min-width: 0` is the same too: a 39-character sample key
+   or a GEO title is one unbreakable run that would otherwise push the row wider
+   than the 268 px rail.
+
+   `.bm-picked-study` used to live here, for a "· OSD-100" suffix on the sample
+   name. The study is one of these rows now, so the suffix and its rule are
+   gone rather than left to rot. */
+.bm-picked-row {
+  display: flex; gap: 8px; align-items: baseline;
+  font-size: 11.5px; line-height: 1.45; margin-top: 5px;
+}
+.bm-picked-key { flex: none; color: var(--text-muted); }
+.bm-picked-value {
+  flex: 1 1 auto; min-width: 0;
+  color: var(--text-secondary); text-align: right; word-break: break-word;
+}
 
 /* dcc.Link renders an <a>; .bm-button is written for a <button>. */
 a.bm-button { display: block; text-align: center; text-decoration: none; }

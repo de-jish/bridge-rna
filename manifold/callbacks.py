@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from urllib.parse import quote
-
 import numpy as np
 from dash import Input, Output, State, ctx, html, no_update
 
@@ -484,36 +482,44 @@ def register(app):
 
     @app.callback(
         Output("picked-group", "style"),
-        Output("picked-label", "children"),
-        Output("picked-link", "href"),
+        Output("picked-group", "children"),
         Input("manifold-graph", "clickData"),
+        Input("find-store", "data"),
     )
-    def pick_osdr_point(click_data):
-        """Offer a retrieval for a clicked OSDR point.
+    def select_point(click_data, found):
+        """Describe whatever is selected, however it was selected.
+
+        One writer, two entry points. Clicking an OSDR diamond and finding a
+        sample are the same question - what is this - so they share a panel
+        rather than growing a second one beside it.
+
+        A click is turned into a find rather than handled separately: the
+        overlay's customdata already carries the sample key, and
+        `find.find(key)` resolves exactly that to exactly that point. So the
+        click path is a special case of the find path and there is one lookup,
+        one record builder and one panel, instead of two of each drifting apart.
 
         Only the OSDR overlay carries customdata - the ARCHS4 cloud has none,
         deliberately, because 940,455 rows of it cost about 600 KB of dead
-        payload per figure. So a click that returns no customdata is a click on
-        the cloud, and nothing is offered rather than something being guessed.
-
-        The link goes to `/?q=<sample_id>` rather than mutating a store,
-        because it is a navigation: it should be a real link that middle-clicks
-        into a new tab and shows its destination on hover.
+        payload per figure. A click returning none is a click on the cloud, and
+        the *find* result stays on screen rather than being cleared by it: a
+        stray click on empty space should not wipe the panel describing what the
+        user just searched for.
         """
-        points = (click_data or {}).get("points") or []
-        custom = points[0].get("customdata") if points else None
-        if not custom:
-            return {"display": "none"}, "", "/"
-        sample_key = str(custom[0])
-        # An OSDR key is "<accession>|<sample name>". Anything else is not one.
-        if "|" not in sample_key:
-            return {"display": "none"}, "", "/"
-        study, name = sample_key.split("|", 1)
-        return (
-            {},
-            [html.B(name), html.Span(f"  ·  {study}", className="bm-picked-study")],
-            f"/?q={quote(sample_key)}",
-        )
+        if ctx.triggered_id == "manifold-graph":
+            points = (click_data or {}).get("points") or []
+            custom = points[0].get("customdata") if points else None
+            key = str(custom[0]) if custom else ""
+            # An OSDR key is "<accession>|<sample name>". Anything else is not
+            # one, and a click on the cloud is not a selection at all.
+            found = find.find(key) if "|" in key else None
+            if found is None:
+                return no_update, no_update
+
+        record = find.describe(found)
+        if not record:
+            return {"display": "none"}, []
+        return {}, layout.selected_panel_children(record)
 
     @app.callback(
         Output("retrieval-group", "style"),

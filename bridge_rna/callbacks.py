@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
-import numpy as np
 import pandas as pd
 from dash import ALL, Input, Output, State, ctx, html, no_update
 

@@ -21,7 +21,7 @@ from .figures import _empty_network_figure
 from .osdr import _eligible_osdr_count, load_osdr_samples
 from .panels import build_gene_list_banner, build_setup_banner, build_status_banner
 from .retrieval import _archs4_sample_count
-from .util import _format_count, _safe_str
+from .util import _safe_str
 
 
 def _labelled(label_id: str, label: Any, *children: Any) -> Any:
