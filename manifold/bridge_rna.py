@@ -1,6 +1,6 @@
-"""The single seam between Bridge Manifold and Bridge RNA.
+"""The single seam between the map half and the retrieval half.
 
-Bridge Manifold reuses Bridge RNA's model, preprocessing, and digest gate rather
+The map reuses the retrieval half's model, preprocessing, and digest gate rather
 than reimplementing them, because a subtle preprocessing drift produces
 embeddings that look valid but are scientifically wrong. All imports from the
 sibling repository are funnelled through this one module so the coupling is

@@ -193,6 +193,24 @@ def resolve_budget(dims: str, current: str | None) -> str:
     return current if current in valid else default_budget(dims)
 
 
+def _group(label_id: str, label: str, *children):
+    """A rail group and the heading that names its controls, tied together.
+
+    The headings here are styled divs rather than `<label>`s, and the controls
+    under them are a Radix radio group, a Dash dropdown named by its own value,
+    and a checklist - none of which a `for` attribute can reach. So the group
+    carries the name: a screen reader announces "Projection" on entry and
+    "UMAP, selected, 1 of 3" after it, where before it announced only the
+    second half. Same pattern as `bridge_rna.layout._labelled`, and it changes
+    nothing visually.
+    """
+    return html.Div(
+        className="bm-group", role="group",
+        **{"aria-labelledby": label_id},
+        children=[html.Div(label, id=label_id, className="bm-group-label"), *children],
+    )
+
+
 def _segmented(id_: str, options: list[dict], value: str):
     """A radio group styled as a segmented pill control.
 
@@ -204,35 +222,45 @@ def _segmented(id_: str, options: list[dict], value: str):
     return dcc.RadioItems(id=id_, options=options, value=value, className="bm-seg")
 
 
-def control_rail() -> html.Div:
+def control_rail() -> html.Aside:
     n_archs4, n_osdr, _ = data.counts()
 
-    return html.Div(
+    return html.Aside(
         className="bm-rail",
+        **{"aria-labelledby": "map-controls-heading"},
         children=[
+            # The map view had one heading (the shell's H1) and no landmark
+            # below the header, so a screen reader arriving here found a page
+            # with a title and no structure - where the retrieval view already
+            # offered a nav, a controls aside, a main and an inspector aside.
+            # The heading is hidden because the rail's own group labels already
+            # say what each control is and a visible "Map controls" would only
+            # repeat the page.
+            html.H2("Map controls", id="map-controls-heading",
+                    className="visually-hidden"),
             # The parameter readout sits directly under the control it
             # describes, which is the same rule the color-by coverage readout
             # below follows: the fact that qualifies a control belongs against
             # that control, not in a tooltip and not in the plot badges, which
             # report what is drawn right now and change on every zoom.
-            html.Div(className="bm-group", children=[
-                html.Div("Projection", className="bm-group-label"),
+            _group(
+                "projection-label", "Projection",
                 _segmented("method", method_options(), default_method()),
                 html.Div(id="method-params", className="bm-params"),
-            ]),
-            html.Div(className="bm-group", children=[
-                html.Div("Dimensions", className="bm-group-label"),
+            ),
+            _group(
+                "dims-label", "Dimensions",
                 _segmented("dims", [
                     {"label": "2D", "value": "2d"},
                     {"label": "3D", "value": "3d"},
                 ], "2d"),
-            ]),
+            ),
             # The color-by group carries its own coverage readout, so the answer
             # to "how much of this map is this field actually coloring?" sits
             # next to the control that decides it rather than being inferred
             # from how grey the plot looks.
-            html.Div(className="bm-group", children=[
-                html.Div("Color by", className="bm-group-label"),
+            _group(
+                "color-by-label", "Color by",
                 dcc.Dropdown(
                     id="color-by",
                     options=colorby.menu_options(),
@@ -242,9 +270,9 @@ def control_rail() -> html.Div:
                 ),
                 html.Div(id="coverage", className="bm-coverage"),
                 html.Div(id="color-by-hint", className="bm-hint"),
-            ]),
-            html.Div(className="bm-group", children=[
-                html.Div("Layers", className="bm-group-label"),
+            ),
+            _group(
+                "layers-label", "Layers",
                 dcc.Checklist(
                     id="layers",
                     options=[
@@ -254,16 +282,16 @@ def control_rail() -> html.Div:
                     value=["archs4", "osdr"],
                     className="bm-checklist",
                 ),
-            ]),
+            ),
             # In 2-D the glyph sample can carry the whole corpus (the density
             # raster it used to sit above is gone, so the sample is the only
             # thing drawing those points). In 3-D the tiers stop at the rotation
             # cap; budget_options() decides, and callbacks.sync_budget_to_dims
             # swaps the tiers when the dimensionality changes.
-            html.Div(className="bm-group", children=[
-                html.Div("ARCHS4 point budget", className="bm-group-label"),
+            _group(
+                "budget-label", "ARCHS4 point budget",
                 _segmented("budget", budget_options("2d"), default_budget("2d")),
-            ]),
+            ),
             # Clicking an OSDR point offers a retrieval for it. Hidden until
             # something is clicked; the map is read rather than driven, so this
             # is an offer that appears in response to interest, not a control
@@ -499,9 +527,21 @@ def legend_panel() -> html.Div:
             html.Div(id="legend-retrieval"),
             html.Div(id="legend-color", className="bm-legend-section", children=[
                 html.Div(id="legend-title", className="bm-legend-title"),
-                dcc.Input(id="legend-search", className="bm-legend-search",
-                          placeholder="filter categories…", type="text",
-                          debounce=False, style={"display": "none"}),
+                # The label and the field are hidden and shown as one unit, so
+                # a screen reader never meets an orphan label describing a
+                # field that is not there. dcc.Input puts the id on the input
+                # element, so this is a real label association rather than the
+                # group wrapper the dropdowns need; it is hidden from the eye
+                # because the heading above already says what the list is, and
+                # the placeholder that was doing this job stops being a name
+                # the moment anything is typed into it.
+                html.Div(id="legend-search-group", style={"display": "none"}, children=[
+                    html.Label("Filter the color categories", htmlFor="legend-search",
+                               className="visually-hidden"),
+                    dcc.Input(id="legend-search", className="bm-legend-search",
+                              placeholder="filter categories…", type="text",
+                              debounce=False),
+                ]),
                 html.Div(id="legend-list", className="bm-legend-list"),
             ]),
             html.Div(id="legend-corpus"),
@@ -521,7 +561,7 @@ def build_view() -> html.Div:
     return html.Div(className="bm-app", children=[
         html.Div(className="bm-body", children=[
             control_rail(),
-            html.Div(className="bm-plot-wrap", children=[
+            html.Main(className="bm-plot-wrap", **{"aria-label": "Embedding map"}, children=[
                 html.Div(id="plot-badges", className="bm-plot-badges"),
                 legend_panel(),
                 # dcc.Loading wraps its children in two nested divs of its own.
@@ -548,6 +588,16 @@ def build_view() -> html.Div:
                             "displaylogo": False,
                             "scrollZoom": True,
                             "displayModeBar": True,
+                            # Plotly sizes its canvas once and keeps it unless
+                            # told otherwise. The plot's container changes size
+                            # for reasons that have nothing to do with a
+                            # callback - the stacked breakpoint below 900 px, a
+                            # phone rotating, a window being dragged - and
+                            # without this the scatter kept the geometry it was
+                            # first laid out with and drew a quadrant of the
+                            # corpus into the whole canvas. The retrieval
+                            # view's graph has always set it.
+                            "responsive": True,
                             # No selection feature exists, so neither selection
                             # tool is offered. Leaving lasso2d on the modebar
                             # would let a user draw a marquee that does nothing.

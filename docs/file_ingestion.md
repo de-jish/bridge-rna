@@ -40,6 +40,12 @@ This is byte-for-byte the same gate `embed_osdr.py` runs, so an uploaded sample 
 - Species: mouse. OSDR spaceflight data is Mus musculus (the shipped metadata is 100% mouse), and the preprocessing maps mouse Ensembl -> human ortholog space. A human-indexed matrix is out of scope for this pass and rejected with a clear message rather than silently mis-mapped.
 - Sample column: if the matrix has one sample column it is used; if several, the user picks which column, defaulting to the first.
 - A file that maps zero genes through the ortholog table (e.g. human Ensembl IDs, or symbols) is rejected with the reason, never embedded into a meaningless vector.
+- Size: capped at `MAX_UPLOAD_BYTES`, 200 MB, which is generous headroom over the few MB a whole-transcriptome counts file actually costs.
+  The cap is enforced twice, because one of the two places is too late on its own: as Flask's `MAX_CONTENT_LENGTH` (`app.py`), so an oversized body fails at the request layer with a 413 rather than arriving truncated and being parsed into a malformed matrix; and again in the callback after the base64 decode, where the user is told the actual size and the limit.
+
+**No metadata is required or accepted alongside the counts, so this path collects nothing about the sample or about whoever uploaded it.**
+That is a consequence of the design rather than a policy bolted on: the query vector is a pure function of one counts column, so tissue, flight-vs-ground and accession could only fill the inspector and the summary prompt, never a hit or a score.
+Combined with the default loopback bind, an upload in the normal local setup does not cross a network at all.
 
 ## Failure handling
 

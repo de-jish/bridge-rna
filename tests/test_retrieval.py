@@ -493,3 +493,63 @@ def test_a_pooled_query_still_costs_one_pass_over_the_index(corpus, monkeypatch)
     monkeypatch.setattr(retrieval, "_topk_cosine_matrix", counted)
     retrieval.run_cohort_retrieval(_cohort_keys(corpus, 6), topk=5)
     assert calls["n"] == 1, f"{calls['n']} passes over the memmap, expected 1"
+
+
+def test_a_geo_accession_keeps_its_prefix():
+    """NCBI returns these bare, and a bare number is not an accession.
+
+    esummary gives `gse: "210492"` and `gpl: "21103"`. The GSE half was already
+    being prefixed and the platform was not, so the inspector printed
+    "Platform 21103" - a value that matches no GEO record and cannot be pasted
+    into a search. The helper is idempotent because the same fields sometimes
+    arrive already prefixed, and it refuses to decorate anything that is not a
+    bare accession rather than inventing one.
+    """
+    from bridge_rna.geo import _accession
+
+    assert _accession("21103", "GPL") == "GPL21103"
+    assert _accession("210492", "GSE") == "GSE210492"
+    assert _accession("GPL21103", "GPL") == "GPL21103"
+    assert _accession("gpl21103", "GPL") == "GPL21103"
+    assert _accession("21103;13112", "GPL") == "GPL21103; GPL13112"
+    assert _accession("", "GPL") == ""
+    assert _accession(None, "GPL") == ""
+    # Not a bare accession: passed through rather than turned into a false one.
+    assert _accession("Illumina HiSeq 2500", "GPL") == "Illumina HiSeq 2500"
+
+
+def test_the_ai_summary_reports_a_missing_backend_before_it_fetches_anything(monkeypatch):
+    """The precondition is knowable in milliseconds; the prompt is not.
+
+    Assembling the prompt fetches a study abstract per accession over the
+    network. Doing that first and only then discovering there is no model to
+    send it to made "install Ollama" a message that arrived up to a minute
+    after the click - in exactly the state a fresh clone starts in.
+    """
+    import requests
+
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "AI_SUMMARY_PROVIDER", "ollama")
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    def refuse(*_args, **_kwargs):
+        raise requests.exceptions.ConnectionError("connection refused")
+
+    monkeypatch.setattr(ai.requests, "get", refuse)
+    reason = ai.unavailable_reason()
+    assert reason and "Could not reach Ollama" in reason
+    # It says what to do, not what went wrong.
+    assert "ollama pull" in reason and "optional" in reason
+
+    # A reachable server has nothing to report, and the normal path takes over.
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: None)
+    assert ai.unavailable_reason() is None
+
+    # Bedrock has no cheap probe, so a configured endpoint is taken at its word
+    # and an unconfigured one is named.
+    monkeypatch.setattr(ai, "AI_SUMMARY_PROVIDER", "bedrock")
+    monkeypatch.setattr(ai, "BEDROCK_API_URL", "")
+    assert "BEDROCK_API_URL" in (ai.unavailable_reason() or "")
+    monkeypatch.setattr(ai, "BEDROCK_API_URL", "https://example.invalid/q")
+    assert ai.unavailable_reason() is None

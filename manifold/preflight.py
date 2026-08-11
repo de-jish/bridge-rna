@@ -76,5 +76,5 @@ def require(required: list[tuple[str, Path]], context: str) -> None:
     if problems:
         bullet = "\n  - ".join(problems)
         raise SystemExit(
-            f"Bridge Manifold preflight failed for {context}:\n  - {bullet}"
+            f"Bridge RNA map preflight failed for {context}:\n  - {bullet}"
         )

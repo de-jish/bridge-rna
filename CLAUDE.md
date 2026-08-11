@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `app.py` is the single entry point and owns the header and the router.
 **The router must decline to repaint a route that is already on screen.** `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` alone let the router rebuild the view on every load. Rebuilding the retrieval view reads the OSDR catalog, so its response landed a few hundred milliseconds later, on top of whatever the user had done meanwhile - clicking Cohort on arrival opened the cohort panel and then closed it again, 6 times out of 6, while the click's own callback had returned the right answer. `route-store` records what was painted and `app.navigation_for` is the decision, split out so it is testable without Dash plumbing. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 335 tests pass in about twenty-five seconds, plus 276 browser checks: 50 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 156 in `tests/e2e_cohort_check.py`.
+**Current state: built, run on the real corpus, and tested.** 346 tests pass in about twenty-five seconds, plus 277 browser checks: 51 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 156 in `tests/e2e_cohort_check.py`.
 Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
@@ -342,10 +342,11 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/build_projections.py  # full-corpus PCA + UMAP + t-SNE. See the timing note below.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
+/Users/josh/Bridge-RNA/.venv/bin/python tests/check_join.py              # the join, on the real corpus
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 335 tests, about twenty-five seconds
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 50 browser checks, about three minutes
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 346 tests, about twenty-five seconds
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 51 browser checks, about three minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 156 cohort checks, about four minutes
 ```
@@ -384,3 +385,39 @@ Neither belongs in `.bm-plot-badges`, which reports what is drawn *right now* an
 Within `.bm-params` only the measured payload is set apart, in mono tabular figures at a half-step down, because "cosine" in a numeral font is noise while `30` and `942,563` want to sit on one grid.
 
 `.bm-hint` was moved from `--text-muted` to `--text-secondary` at the same time: `#8a99ac` on the white panel measures 2.90:1, which fails WCAG AA at the 11.5 px every hint on the rail uses, and `--text-secondary` is 5.47:1 while still receding behind the controls.
+
+### Contrast, keyboard, and the two breakpoints (2026-08-11)
+
+**Every text token clears WCAG AA 4.5:1 on every surface the stylesheet defines, and a test enforces it.**
+Both tiers below `--text-primary` used to fail. `--text-muted` was `#8a99ac`, 2.90:1 on white, and it carried every rail label, kicker, hint, slider mark and dropdown placeholder - the smallest type in the app was also the least legible - while `--accent` at 3.76:1 carried the primary button's white label and every blue link and tab.
+The paragraph above records that finding for `.bm-hint` and fixed exactly that one class.
+`--text-muted` is now `#616e80`, chosen so its *worst* ground clears the bar rather than only white, and there is a second blue: **`--accent-text` `#1663dd` runs wherever the accent carries text or is the ground white text sits on** - the primary button, the mode tabs, the facet chips, links, section titles, the selected segmented pill.
+**`--accent` `#2b7fff` is untouched and is still the identity hue** for every border, fill, focus ring, panel dot and Plotly mark, because 3.76:1 clears the 3:1 a non-text mark needs.
+The one exception is the brand tile, under WCAG 1.4.3's logotype clause, and `01-shell.css` says so where someone would otherwise "fix" it.
+`test_every_text_token_clears_wcag_aa_on_every_surface` computes the ratios from the stylesheet, so a palette edit that reintroduces the failure fails there rather than in a browser; `test_theme_matches_the_bridge_rna_tokens` covers all 19 mirrored constants, because `theme.py`'s copy had already gone stale on `TEXT_MUTED`.
+
+**A control hidden with `display: none` is a control nobody can reach.**
+`.bm-seg` hid the radio input that carries the segmented control's state, which took Projection, Dimensions and the ARCHS4 point budget out of the tab order and out of the accessibility tree - three of the map's six controls, mouse-only.
+It is clipped now, not removed. The `:focus-within` rule on the option label had been sitting in that file unable to fire the whole time, which is the tell to look for.
+
+**Dash names a Dropdown by its own value and a Slider not at all**, so "OSDR study: OSD-100" reached a screen reader as "OSD-100, button".
+`for` cannot fix either, because neither renders a labelable element.
+Both views wrap each control in `role="group"` with `aria-labelledby` on the heading that already names it - `bridge_rna.layout._labelled` and `manifold.layout._group` - and `test_every_dropdown_and_slider_is_named_by_something` pins that the groups exist and that no `aria-labelledby` dangles.
+`.visually-hidden` in `00-tokens.css` is the hook for the two places a name has to exist without being seen; it clips rather than using `display: none`, for the reason above.
+The map's rail is an `<aside>` with a hidden `<h2>` and the plot is a `<main>`: before this the map was a `div` inside a `div` with one heading on the whole page, while the retrieval view already had nav, aside, main, aside.
+
+**Class names in Dash 4 land on a wrapper, not on the control.**
+`dcc.Input` renders `<div class="dash-input-container YOURCLASS"><input class="dash-input-element"></div>`, so `input.dash-input` matched nothing and never had; the field looked right only because the `.control input[type="email"]` selector beside it does reach the inner input.
+Check which element a class actually lands on before writing a rule against it, and note that the box and the focus ring must go on the *same* element - putting the box on the wrapper while Dash still styles the input draws a ring inside a ring.
+
+**Two breakpoints, one per view, and they answer the same question.**
+The retrieval view stacks at 1180 px; the map stacks at 900 px and narrows its key at 620 px.
+The map had none at all until 2026-08-11, and its two fixed widths are why that was broken rather than merely tight: a 268 px rail plus a 228 px key is 496 px of furniture, so at 393 px the plot was a 125 px strip with the key sitting on top of the rail.
+Stacked, the plot takes `68vh` with a 420 px floor and the document scrolls, which is what the retrieval view already did.
+**The stacked rail is CSS columns, not a grid**, because a grid row is as tall as its tallest cell and these groups are wildly unequal - that cost about 250 px of empty rail on an iPad.
+**Rows inside a height-capped panel need `flex: none`**: a column flex item shrinks below its content height by default, so `.bm-legend-item` and `.bm-key-row` compressed into each other instead of the list scrolling, and `overflow-y: auto` had nothing to act on.
+**A `dcc.Graph` whose container can change size needs `responsive: True`** - the map's did not have it, so Plotly kept the geometry it was first laid out with and drew a quadrant of the corpus into the whole canvas after any resize or breakpoint crossing.
+
+**One quantity gets one channel, and that channel is in the key.**
+The retrieval network sized each hit node by `16 + (score - min(score)) * 20`: a second encoding of what the edge width already carries, on a different scale, keyed nowhere, and the exact min-max rescale `_edge_width` exists to avoid. Over the 0.0016 spread these scores have it moved the diameter three hundredths of a pixel, so it looked constant while claiming to measure. It is constant.
+The comparison network, by contrast, was missing a label it should have had: it named none of its hits, so the accessions existed only in a tooltip and the figure carried no identities on paper. They are drawn up to `COMPARISON_MAX_LABELS` (20) nodes and dropped above it, the same rule as the map's `RETRIEVAL_MAX_NUMERALS`.

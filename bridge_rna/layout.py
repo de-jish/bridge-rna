@@ -23,6 +23,32 @@ from .panels import build_gene_list_banner, build_setup_banner, build_status_ban
 from .retrieval import _archs4_sample_count
 from .util import _format_count, _safe_str
 
+
+def _labelled(label_id: str, label: Any, *children: Any) -> Any:
+    """A control and the label that names it, tied together for a screen reader.
+
+    Dash 4 renders a Dropdown as a button named by its own *value*
+    (`aria-labelledby` pointing at the value span) and a Slider as a Radix
+    thumb with no name at all, so "OSDR study: OSD-100" was announced as
+    "OSD-100, button" and the top-k slider as "5, slider". A visible `<label>`
+    next to them changes nothing, because neither renders a labelable element
+    to point `for` at.
+
+    Wrapping the pair in a named group is what does work: the group's name is
+    announced on entry and the control's value follows it. It costs one id and
+    two attributes per control, and nothing visual.
+    """
+    return html.Div(
+        className="control",
+        role="group",
+        **{"aria-labelledby": label_id},
+        children=[
+            html.Label(label, id=label_id, className="control-label"),
+            *children,
+        ],
+    )
+
+
 samples_df = load_osdr_samples(OSDR_METADATA_PATH)
 study_options = sorted(samples_df["study_id"].dropna().astype(str).unique().tolist())
 default_study = study_options[0] if study_options else ""
@@ -151,30 +177,21 @@ def build_cohort_panel() -> Any:
         role="tabpanel",
         style={"display": "none"},
         children=[
-            html.Div(
-                className="control",
-                children=[
-                    html.Label(
-                        ["Group by ",
-                         html.Span("what makes these one cohort",
-                                   className="control-hint")],
-                        className="control-label",
-                    ),
-                    build_cohort_facet_chips(),
-                    # The rail's rule: the fact that qualifies a control sits
-                    # directly under that control. This says what the current
-                    # definition produced, so it belongs here and not in a
-                    # summary elsewhere.
-                    html.Div(id="cohort-facet-summary", className="facet-summary"),
-                ],
+            _labelled(
+                "cohort-facets-label",
+                ["Group by ",
+                 html.Span("what makes these one cohort", className="control-hint")],
+                build_cohort_facet_chips(),
+                # The rail's rule: the fact that qualifies a control sits
+                # directly under that control. This says what the current
+                # definition produced, so it belongs here and not in a
+                # summary elsewhere.
+                html.Div(id="cohort-facet-summary", className="facet-summary"),
             ),
-            html.Div(
-                className="control",
-                children=[
-                    html.Label("Cohort", className="control-label"),
-                    dcc.Dropdown(id="cohort-dropdown", clearable=False,
-                                 placeholder="Select a cohort"),
-                ],
+            _labelled(
+                "cohort-dropdown-label", "Cohort",
+                dcc.Dropdown(id="cohort-dropdown", clearable=False,
+                             placeholder="Select a cohort"),
             ),
             html.Div(id="cohort-card", className="cohort-card-slot"),
             html.Details(
@@ -196,18 +213,13 @@ def build_cohort_panel() -> Any:
                     ),
                 ],
             ),
-            html.Div(
-                className="control",
-                children=[
-                    html.Label(
-                        ["Compare against ",
-                         html.Span("optional", className="control-hint")],
-                        className="control-label",
-                    ),
-                    dcc.Dropdown(id="cohort-compare-dropdown", clearable=True,
-                                 placeholder="Nothing - search this cohort alone"),
-                    html.Div(id="cohort-compare-hint", className="control-hint"),
-                ],
+            _labelled(
+                "cohort-compare-label",
+                ["Compare against ",
+                 html.Span("optional", className="control-hint")],
+                dcc.Dropdown(id="cohort-compare-dropdown", clearable=True,
+                             placeholder="Nothing - search this cohort alone"),
+                html.Div(id="cohort-compare-hint", className="control-hint"),
             ),
             # The second pooled query gets its own card, under its own picker,
             # for the same reason the first one sits under the cohort dropdown:
@@ -308,8 +320,11 @@ def build_view() -> html.Div:
                                     html.Div(
                                         id="study-group",
                                         className="control",
+                                        role="group",
+                                        **{"aria-labelledby": "study-dropdown-label"},
                                         children=[
-                                            html.Label("OSDR study", className="control-label"),
+                                            html.Label("OSDR study", id="study-dropdown-label",
+                                                       className="control-label"),
                                             dcc.Dropdown(
                                                 id="study-dropdown",
                                                 options=[{"label": s, "value": s} for s in study_options],
@@ -323,12 +338,9 @@ def build_view() -> html.Div:
                                         className="mode-panel",
                                         role="tabpanel",
                                         children=[
-                                            html.Div(
-                                                className="control",
-                                                children=[
-                                                    html.Label("OSDR sample", className="control-label"),
-                                                    dcc.Dropdown(id="sample-dropdown", clearable=False),
-                                                ],
+                                            _labelled(
+                                                "sample-dropdown-label", "OSDR sample",
+                                                dcc.Dropdown(id="sample-dropdown", clearable=False),
                                             ),
                                             html.Div(id="sample-preview", className="sample-preview"),
                                         ],
@@ -358,8 +370,11 @@ def build_view() -> html.Div:
                                                 id="upload-column-control",
                                                 className="control",
                                                 style={"display": "none"},
+                                                role="group",
+                                                **{"aria-labelledby": "upload-column-label"},
                                                 children=[
-                                                    html.Label("Sample column", className="control-label"),
+                                                    html.Label("Sample column", id="upload-column-label",
+                                                               className="control-label"),
                                                     dcc.Dropdown(id="upload-sample-column", clearable=False),
                                                 ],
                                             ),
@@ -373,21 +388,18 @@ def build_view() -> html.Div:
                                 className="control-group",
                                 children=[
                                     html.Div("Retrieval", className="control-group-title"),
-                                    html.Div(
-                                        className="control",
-                                        children=[
-                                            html.Label("Top-k neighbors", className="control-label"),
-                                            html.Div(
-                                                className="control-slider",
-                                                children=[
-                                                    dcc.Slider(
-                                                        id="topk-slider",
-                                                        min=3, max=30, step=1, value=5,
-                                                        marks={3: "3", 5: "5", 10: "10", 20: "20", 30: "30"},
-                                                    ),
-                                                ],
-                                            ),
-                                        ],
+                                    _labelled(
+                                        "topk-slider-label", "Top-k neighbors",
+                                        html.Div(
+                                            className="control-slider",
+                                            children=[
+                                                dcc.Slider(
+                                                    id="topk-slider",
+                                                    min=3, max=30, step=1, value=5,
+                                                    marks={3: "3", 5: "5", 10: "10", 20: "20", 30: "30"},
+                                                ),
+                                            ],
+                                        ),
                                     ),
                                 ],
                             ),
@@ -407,11 +419,19 @@ def build_view() -> html.Div:
                                             html.Div(
                                                 className="control",
                                                 children=[
+                                                    # `htmlFor` rather than the
+                                                    # group wrapper the
+                                                    # dropdowns need: dcc.Input
+                                                    # puts the id on the input
+                                                    # itself, so a real label
+                                                    # association is available
+                                                    # here and is stronger.
                                                     html.Label(
                                                         [
                                                             "Entrez email ",
                                                             html.Span("(GEO / PubMed lookups)", className="control-hint"),
                                                         ],
+                                                        htmlFor="entrez-email-input",
                                                         className="control-label",
                                                     ),
                                                     dcc.Input(

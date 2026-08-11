@@ -11,6 +11,9 @@
 # Without the HDF5 files this package is installed but unused.
 archs4py>=1.0.4
 
-# biopython is already in requirements.txt because the Entrez GEO/PubMed lookups
-# behind --biopython-metadata need no extra downloads, only a network
-# connection and ENTREZ_EMAIL.
+# biopython is only reached by `demo_osdr_top5.py --biopython-metadata`, the
+# standalone CLI. The app itself never imports it: `bridge_rna/geo.py` calls the
+# same NCBI E-utilities over plain `requests`, which is why the Metadata
+# enrichment tick in the interface works without this installed. It needs no
+# extra downloads, only a network connection and ENTREZ_EMAIL.
+biopython>=1.85,<2

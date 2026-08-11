@@ -1,0 +1,14 @@
+# Test tooling. Not needed to run Bridge RNA, only to check it.
+#
+#     .venv/bin/python -m pip install -r requirements-dev.txt
+#     .venv/bin/python -m playwright install chromium
+#
+# The second line is not optional for the browser suites: pip installs the
+# Playwright library, and Playwright downloads its own browser separately.
+#
+# The pytest suite builds a synthetic corpus in a temp directory, so it needs
+# neither the model checkpoint nor the 963 MB embedding index. The three
+# browser suites drive the real app against the real `cache/` and do.
+
+pytest>=9.0.0
+playwright>=1.61.0

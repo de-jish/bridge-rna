@@ -1,8 +1,8 @@
-"""Visual language for Bridge Manifold.
+"""Visual language for the map.
 
-Bridge RNA is a light scientific-instrument theme; Bridge Manifold matches its
-chrome exactly and departs in one deliberate place: a dark navy *plot canvas*
-so the WebGL glyphs have contrast.
+Bridge RNA is a light scientific-instrument theme; the map matches that chrome
+exactly and departs in one deliberate place: a dark navy *plot canvas* so the
+WebGL glyphs have contrast.
 
 The categorical palette was validated with the dataviz skill's checker against
 the navy plot surface (`#0e1d34`): all eleven hues sit in the OKLCH L 0.48-0.67
@@ -22,9 +22,12 @@ BG_PANEL_RAISED = "#f4f7fb"
 BG_INSET = "#f5f8fc"
 TEXT_PRIMARY = "#1a2432"
 TEXT_SECONDARY = "#5a6b7e"
-TEXT_MUTED = "#8a99ac"
+TEXT_MUTED = "#616e80"
 ACCENT = "#2b7fff"
-ACCENT_HOVER = "#1f6ff0"
+#: The same blue where it carries or grounds text; #2b7fff is 3.76:1, which
+#: clears the 3:1 a mark needs and misses the 4.5:1 text needs.
+ACCENT_TEXT = "#1663dd"
+ACCENT_HOVER = "#1259d0"
 ACCENT_TEAL = "#0bab9f"
 ACCENT_WARM = "#d9791b"
 HEADER_BG = "#14294a"

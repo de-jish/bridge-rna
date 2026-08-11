@@ -27,6 +27,7 @@ from .ai import (
     _format_hits_table_text,
     _format_osdr_query_text,
     _load_ai_prompt_template,
+    unavailable_reason,
 )
 from . import cohorts as C
 from .config import GENERIC_ENTREZ_EMAIL, MAX_UPLOAD_BYTES
@@ -1160,6 +1161,15 @@ def register(app) -> None:
         query_row = _query_series(hits_payload)
         if query_row is None:
             return "", "Selected query sample is missing from local metadata."
+
+        # Before the expensive part, not after it. Assembling the prompt fetches
+        # a study abstract per accession over the network, so a machine with no
+        # model installed - which is what a fresh clone is - used to spend up to
+        # a minute gathering text for a request that could never be sent, and
+        # only then say "install Ollama". That answer is knowable immediately.
+        blocked = unavailable_reason()
+        if blocked:
+            return blocked, ""
 
         hits_df = pd.DataFrame(hits_payload.get("hits", []))
         email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL

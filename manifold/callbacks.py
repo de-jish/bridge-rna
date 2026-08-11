@@ -268,7 +268,7 @@ def register(app):
         Output("plot-badges", "children"),
         Output("legend", "style"),
         Output("legend-title", "children"),
-        Output("legend-search", "style"),
+        Output("legend-search-group", "style"),
         Output("legend-store", "data"),
         Output("legend-retrieval", "children"),
         Output("legend-color", "style"),

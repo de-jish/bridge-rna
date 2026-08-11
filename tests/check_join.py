@@ -24,6 +24,7 @@ loud.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -96,5 +97,25 @@ def main() -> int:
     return 1
 
 
+def _exit(status: int) -> None:
+    """Leave without running interpreter finalization.
+
+    `sys.exit` here can hang forever *after* the check has finished and printed
+    its verdict. Sampled at the point of the hang, the main thread is inside
+    `__cxa_finalize_ranges` -> `arrow::internal::ThreadPool::~ThreadPool` ->
+    `Shutdown` -> `condition_variable::wait`: PyArrow's static thread pool
+    deadlocking against its own workers as the process tears down. It is
+    intermittent, which is worse than reliable - a gate that usually returns
+    and occasionally wedges is a gate nobody can put in a pipeline.
+
+    There is nothing to finalize here: this script writes no files, holds no
+    locks, and its whole output has already been printed. So the buffers are
+    flushed by hand and the process leaves immediately.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(status)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _exit(main())

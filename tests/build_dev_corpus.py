@@ -29,7 +29,7 @@ import fixture_corpus  # noqa: E402
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build a synthetic Bridge Manifold corpus.")
+    ap = argparse.ArgumentParser(description="Build a synthetic Bridge RNA corpus.")
     ap.add_argument("--out", type=Path, required=True, help="Directory to build into.")
     ap.add_argument("--archs4", type=int, default=60000)
     ap.add_argument("--osdr", type=int, default=2000)

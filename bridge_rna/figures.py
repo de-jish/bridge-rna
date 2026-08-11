@@ -25,6 +25,10 @@ GRAPH_THEME = {
     "edge_gse": "rgba(217, 121, 27, 0.35)",
     "marker_line": "#ffffff",
     "font_sans": "Inter, 'Segoe UI', -apple-system, sans-serif",
+    # Accessions are set in mono for the same reason the rail's measured values
+    # are: GSM6431262 and GSM6431263 differ in one glyph, and a proportional
+    # font is where that difference goes to hide.
+    "font_mono": "JetBrains Mono, 'SF Mono', Consolas, monospace",
     # The comparison view's own three roles, named. They used to borrow `gsm`,
     # `gse` and `query`, which mean a hit node, a study node and the query in
     # the single-query network - so the same key meant two things depending on
@@ -81,6 +85,11 @@ def _empty_network_figure(message: str = "Run a search to build the retrieval ne
 # picture, and the same reason the map draws every hit ring identically.
 EDGE_WIDTH_DOMAIN = (0.90, 1.0)
 EDGE_WIDTH_RANGE = (1.5, 8.0)
+
+#: Above this many hit nodes the comparison network stops writing accessions on
+#: the figure. Its two arms share one vertical rhythm, so the node count is
+#: `2 * k` in the worst case and the labels would collide long before k = 30.
+COMPARISON_MAX_LABELS = 20
 
 
 def _edge_width(scores: pd.Series) -> list[float]:
@@ -150,7 +159,18 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 "kind": "gsm",
                 "x": 1.0,
                 "y": y,
-                "size": 16 + max(0.0, (score - float(hits_df["score"].min())) * 20.0),
+                # Constant, and that is the fix. It used to be
+                # `16 + (score - min(score)) * 20`, which is a second encoding
+                # of the quantity the edge width already carries, on a
+                # different scale, keyed nowhere - the legend names the edge
+                # and says nothing about node size. It was also the min-max
+                # rescale `_edge_width` exists to avoid, and it inherited that
+                # rescale's dishonesty in reverse: over the 0.0016 spread these
+                # scores actually have, it varied the diameter by three
+                # hundredths of a pixel, so it looked like a constant while
+                # claiming to be a measurement. One quantity, one channel, and
+                # that channel is in the key.
+                "size": 16,
                 "color": GRAPH_THEME["gsm"],
                 "symbol": "circle",
                 "hover": hover,
@@ -385,17 +405,30 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
         (b_only, _safe_str(query_b.get("cohort_label")) or "Second cohort only",
          GRAPH_THEME["cohort_b"], 15),
     ]
+    # The single-query network names every hit on the face of the figure. This
+    # one named none of them, so the accessions existed only in a tooltip and a
+    # comparison could not be read on paper or in a screenshot at all - and it
+    # is the figure most likely to end up in both. They come back, up to the
+    # point where they would stop being readable: the bands share one vertical
+    # rhythm at `step`, so 60 nodes at k=30 would overlap where 10 at the
+    # default k=5 sit clear. Same rule, and the same reason, as the map's
+    # `RETRIEVAL_MAX_NUMERALS`.
+    label_hits = total <= COMPARISON_MAX_LABELS
     for ids, name, color, size in bands:
         if not ids:
             continue
         fig.add_trace(go.Scatter(
             x=[1.0] * len(ids), y=[positions[g] for g in ids],
-            mode="markers", name=name,
+            mode="markers+text" if label_hits else "markers", name=name,
+            text=list(ids) if label_hits else None,
+            textposition="middle right",
+            textfont={"family": GRAPH_THEME["font_mono"], "size": 10,
+                      "color": GRAPH_THEME["text_secondary"]},
             marker={"size": size, "color": color, "symbol": "circle",
                     "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]}},
             customdata=[["gsm", g, _hover(g)] for g in ids],
             hovertemplate="%{customdata[2]}<extra></extra>",
-            showlegend=True))
+            cliponaxis=False, showlegend=True))
 
     for query, qy, color, kind in (
         (query_a, qa_y, GRAPH_THEME["cohort_a"], "query"),
@@ -440,41 +473,5 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
         },
         autosize=True,
         height=None,
-    )
-    return fig
-
-
-def build_bar_figure(hits_df: pd.DataFrame) -> go.Figure:
-    display = hits_df.sort_values("score", ascending=True)
-    labels = [f"{g} ({s})" for g, s in zip(display["gsm"], display["gse"].replace("", "no GSE"))]
-    fig = go.Figure(
-        go.Bar(
-            x=display["score"],
-            y=labels,
-            orientation="h",
-            marker={
-                "color": display["score"],
-                "colorscale": "Blues",
-                "line": {"color": "#1f3d7a", "width": 0.8},
-            },
-            hovertemplate="%{y}<br>Score: %{x:.4f}<extra></extra>",
-        )
-    )
-    fig.update_layout(
-        title={"text": "Top retrieved analogs by cosine similarity", "font": {"family": GRAPH_THEME["font_sans"], "size": 15, "color": GRAPH_THEME["text_primary"]}},
-        margin={"l": 20, "r": 20, "t": 56, "b": 30},
-        paper_bgcolor=GRAPH_THEME["paper_bg"],
-        plot_bgcolor=GRAPH_THEME["plot_bg"],
-        font={"family": GRAPH_THEME["font_sans"], "color": GRAPH_THEME["text_secondary"]},
-        xaxis={"title": "Similarity", "gridcolor": GRAPH_THEME["grid"], "zerolinecolor": GRAPH_THEME["grid"]},
-        yaxis_title="",
-        height=420,
-        # Pinned for the same reason as the network graph: never leave hover
-        # text color to Plotly's fallback once a background is specified.
-        hoverlabel={
-            "font": {"family": GRAPH_THEME["font_sans"], "size": 12, "color": GRAPH_THEME["text_primary"]},
-            "bgcolor": "#ffffff",
-            "bordercolor": GRAPH_THEME["grid"],
-        },
     )
     return fig

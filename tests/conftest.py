@@ -1,4 +1,4 @@
-"""Pytest bootstrap: point Bridge Manifold at a synthetic corpus before import.
+"""Pytest bootstrap: point the map at a synthetic corpus before import.
 
 ``manifold.paths`` resolves its constants at import time from ``BRIDGE_RNA_ROOT``
 and ``MANIFOLD_CACHE_DIR``. Both are therefore set here, at conftest import,

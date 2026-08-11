@@ -1,10 +1,11 @@
-# Bridge Manifold - Verified Reference
+# Bridge RNA - verified reference
 
-> **This document predates the 2026-07-22 merge.**
-> Bridge Manifold and Bridge RNA are now one repository and one application, served by `app.py`: the retrieval view at `/` and this map at `/map`.
-> There is no `app_manifold.py` and no separate repository at `/Users/josh/Bridge Manifold`.
-> The design decisions recorded below are still the ones the map is built on; the commands and the file layout have been updated where they would otherwise fail if followed.
-> See `README.md` for the current product and `progress.md` for what changed.
+> **Every number here was measured, not inferred.**
+> This is the ground-truth appendix to `IMPLEMENTATION.md`: model config read out of the checkpoint, embedding statistics measured on the memmap, timings taken from real runs, interface signatures with line numbers.
+> Trust it over anything derived.
+>
+> It was written while the map was a separate application called **Bridge Manifold**, which is a name the product no longer uses: the two repositories became one on 2026-07-22 and `app.py` now serves the retrieval view at `/` and the map at `/map`.
+> There is no `app_manifold.py`; where the old name still appears below it is recording history, not naming a thing that exists.
 
 
 
@@ -348,9 +349,9 @@ The versions recorded during design had drifted by the time the build ran; these
 | requests | 2.34.2 | precompute only (ARCHS4 GEO metadata fetch) |
 | pytest | 9.1.1 | dev |
 | playwright | 1.61.0 | dev, browser checks against the running app |
-| scipy | 1.16.0 | present in the shared venv, pulled in by umap-learn; not imported by Bridge Manifold |
+| scipy | 1.16.0 | present in the shared venv, pulled in by umap-learn; not imported by the map |
 | pillow | 12.2.0 | present in the shared venv, **no longer used** - it existed for the density raster PNGs |
-| hnswlib | 0.8.0 | present in the shared venv, **no longer used** by Bridge Manifold |
+| hnswlib | 0.8.0 | present in the shared venv, **no longer used** by the map |
 | h5py | 3.16.0 | installed for the ARCHS4 HDF5 experiment in section 8; not imported by any shipped code |
 
 `requirements.txt` splits the surface deliberately.

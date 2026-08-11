@@ -428,21 +428,43 @@ def main() -> int:
                     "() => { const d = document.querySelector('#details-panel');"
                     " return d && d.innerText.includes('GSM'); }", timeout=90_000)
                 rp.wait_for_timeout(3000)
+                # The overflow is forced rather than hoped for. This used to
+                # rely on the opened hit's GEO record being long enough to
+                # overspill the panel by itself - but that record is fetched
+                # live from NCBI inside the callback and the fetch fails
+                # closed, so a rate-limited run produced a short record, no
+                # overflow, and a red "the inspector scrolls its own overflow"
+                # that was really a network hiccup. A tall filler makes the
+                # condition the invariant is about, so the invariant is what
+                # gets measured. Removed again straight after.
                 geom = rp.evaluate(
                     """() => {
                       const d = document.querySelector('.details-panel');
                       const ai = document.querySelector('.ai-panel');
-                      return {sh: document.scrollingElement.scrollHeight,
-                              ch: document.scrollingElement.clientHeight,
-                              scrolls: d.scrollHeight > d.clientHeight,
-                              aiBottom: Math.round(ai.getBoundingClientRect().bottom)};
+                      const read = () => ({
+                        sh: document.scrollingElement.scrollHeight,
+                        ch: document.scrollingElement.clientHeight,
+                        scrolls: d.scrollHeight > d.clientHeight,
+                        aiBottom: Math.round(ai.getBoundingClientRect().bottom)});
+                      const asFound = read();
+                      const filler = document.createElement('div');
+                      filler.style.height = '2000px';
+                      d.appendChild(filler);
+                      const forced = read();
+                      filler.remove();
+                      return {...asFound, overflowY: getComputedStyle(d).overflowY,
+                              forced};
                     }""")
                 print(f"     {geom}")
                 c.ok(geom["sh"] <= geom["ch"],
                      f"an open inspector does not grow the page ({geom['sh']} "
                      f"vs {geom['ch']})")
-                c.ok(geom["scrolls"],
+                c.ok(geom["overflowY"] in ("auto", "scroll")
+                     and geom["forced"]["scrolls"],
                      "the inspector scrolls its own overflow instead")
+                c.ok(geom["forced"]["sh"] <= geom["forced"]["ch"],
+                     "and 2000 px more of it still does not grow the page "
+                     f"({geom['forced']['sh']} vs {geom['forced']['ch']})")
                 c.ok(geom["aiBottom"] <= geom["ch"],
                      f"the AI panel stays on screen (bottom at {geom['aiBottom']})")
             else:

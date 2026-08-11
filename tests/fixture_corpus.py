@@ -1,4 +1,4 @@
-"""Build a tiny, fully synthetic Bridge Manifold corpus on disk.
+"""Build a tiny, fully synthetic Bridge RNA corpus on disk.
 
 The real corpus is a 963 MB memmap plus a multi-hour embedding job, so nothing
 in the test suite may depend on it. This module manufactures a miniature but
@@ -279,7 +279,7 @@ def build_all(root: Path, n_archs4: int = 4000, n_osdr: int = 300,
     """Build both halves of the fixture under ``root`` and return a descriptor.
 
     ``root/bridge_rna`` stands in for the Bridge RNA repository and
-    ``root/cache`` for Bridge Manifold's cache. Point the two environment
+    ``root/cache`` for the map's cache. Point the two environment
     variables ``BRIDGE_RNA_ROOT`` and ``MANIFOLD_CACHE_DIR`` at them before
     importing ``manifold.paths``.
     """

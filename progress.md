@@ -6,6 +6,73 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-11 (production-readiness pass: the map becomes responsive, and the app becomes operable by keyboard)
+
+A whole-repository pass ahead of integration into a NASA-managed site.
+Baseline first: 335 pytest and 276 browser checks all passed before anything changed, so everything below is a defect found by looking rather than by a failing test.
+The suites end at **346 pytest** (11 new, all pinning something that was broken) and **277 browser checks** (one more than the 276 it started with).
+
+**The map had no responsive behaviour at all, and at phone width it was not usable.**
+`map.css` carried zero media queries, and the two fixed widths in it are what turned that from tight into broken: a 268 px rail plus a 228 px floating key is 496 px of furniture, so on a 393 px iPhone the plot was a 125 px strip and the key sat *on top of* the rail, covering the projection pills and half the Layers group.
+Measured on the running app, both views.
+Below 900 px the columns now stack and the document scrolls, which is the answer the retrieval view already had at 1180 px; the plot takes `68vh` with a 420 px floor, and below 620 px the key narrows to 184 px and caps its height.
+The stacked rail lays its groups out in CSS **columns**, not a grid: the groups are wildly unequal in height ("Your retrieval" is three paragraphs and a button, "Dimensions" is two pills) and a grid row is as tall as its tallest cell, which left about 250 px of empty rail under the short ones on an iPad. Columns balance; `break-inside: avoid` keeps a group whole.
+
+**Three defects fell out of doing that, and two of them were not about width.**
+
+*The key's rows compressed instead of the list scrolling.* A column flex item shrinks below its content height by default, so once `.bm-legend` hit its own max-height the rows crushed into each other and the counts lost their descenders - `overflow-y: auto` had nothing to act on because there was never any overflow. Fixed with `flex: none` on `.bm-legend-item` and `.bm-key-row`. Reproduced at 393 px; the same would happen on a desktop with enough categories drawn.
+
+*The map's graph never re-laid-out when its container changed size.* `dcc.Graph` for the map set no `responsive: True` - the retrieval view's always had - so Plotly kept the geometry it was first laid out with and drew a quadrant of the corpus into the whole canvas after any resize, breakpoint crossing or phone rotation.
+
+*`.panel-header` centred its dot against the whole title block*, so the dot drifted downward as the subtitle wrapped; on a phone the canvas subtitle wraps to three lines and the dot sat beside the second one. `flex-start` plus a 7 px offset puts it on the title's first line where it belongs.
+
+**Three of the map's six controls could not be reached by keyboard at all.**
+`.bm-seg .dash-options-list-option-wrapper { display: none }` hid the radio input that carries the state - and `display: none` takes an element out of the tab order and out of the accessibility tree as well as out of the picture, so Projection, Dimensions and the ARCHS4 point budget were mouse-only.
+The giveaway was already in the file: a `:focus-within` rule on the option label that could never fire.
+The input is now clipped rather than removed, and arrowing through Projection changes the projection - verified end to end.
+The legend's filter field was the one element in either view a keyboard walk could land on with nothing to show for it (`outline: none` with no replacement); it has a ring drawn for the dark canvas now.
+
+**Every control was announced by its own value and not by its name.**
+Dash 4 renders a Dropdown as a button whose `aria-labelledby` points at the span holding its value, and a Slider as a Radix thumb with no name at all, so "OSDR study: OSD-100" reached a screen reader as "OSD-100, button".
+Neither is fixable with `for`, because neither renders a labelable element.
+Both views wrap each control in `role="group"` with `aria-labelledby` on the heading that already names it - `bridge_rna.layout._labelled` and `manifold.layout._group`, twelve controls between them, no visual change.
+The map also gained the landmarks it never had: the rail is an `<aside>` with a hidden `<h2>`, the plot is a `<main>`. Before this the map was a `div` inside a `div` with one heading on the whole page.
+
+**Both text tiers below `--text-primary` failed WCAG AA, and one of them was already documented as failing.**
+`--text-muted` measured **2.90:1** on white and carried every rail label, kicker, hint, slider mark and dropdown placeholder - so the smallest type in the app was also the least legible - while `--accent` at **3.76:1** carried the primary button's white label and every blue link and tab.
+`map.css` had recorded that exact finding and fixed it for one class.
+`--text-muted` is now `#616e80`, chosen so its *worst* ground clears the bar (4.53:1 on the error tint, 5.18:1 on white), and a second blue `--accent-text: #1663dd` runs wherever the accent carries or grounds text, set by the tightest ground it lands on - the accent tint the mode tabs and facet chips sit in, 4.83:1.
+`--accent` itself is untouched, so every border, fill, focus ring and Plotly mark keeps the identity hue; `--accent-hover` moved a step darker to keep the ramp monotonic.
+Measured before and after on the running app: **20-25 failing text runs per screen, down to zero.**
+The brand tile is the one deliberate exception, under WCAG 1.4.3's logotype clause, and the stylesheet says so.
+`test_every_text_token_clears_wcag_aa_on_every_surface` pins all of it, and `test_theme_matches_the_bridge_rna_tokens` was widened from 6 tokens to 19 because `theme.py`'s mirror had already gone stale on `TEXT_MUTED`.
+
+**Two encodings said things the data does not support.**
+The retrieval network sized each hit node by `16 + (score - min(score)) * 20` - a second encoding of the quantity the edge width already carries, on a different scale, keyed nowhere, and the exact min-max rescale `_edge_width` exists to avoid. Over the 0.0016 spread these scores actually have it varied the diameter by three hundredths of a pixel, so it looked like a constant while claiming to be a measurement. Constant now: one quantity, one channel, and that channel is in the key.
+The hit inspector printed NCBI's `gpl` field raw, so "Platform 21103" - a number that matches no GEO record. `geo._accession` normalizes it the way the `gse` field beside it was already being normalized, and refuses to decorate anything that is not a bare accession.
+
+**The comparison network named none of its hits.** The single-query network labels every one; a comparison put the accessions in a tooltip only, so on paper or in a screenshot - which is where that figure ends up - it carried no identities at all. They are drawn up to 20 nodes and dropped above it, because the two arms share one vertical rhythm and 2*k labels collide at k=30. Same rule, and the same reason, as the map's `RETRIEVAL_MAX_NUMERALS`.
+
+**Cleanup, all of it traced first.**
+`build_bar_figure` was defined, never called, never imported, never tested and named in no document - and it drew similarity on a Plotly-autoranged axis, so it was a truncated-axis chart waiting to be revived. Deleted.
+`biopython` moved out of `requirements.txt`, where it was described as pinned to what the app was verified against: the app never imports it, it is reached only by `demo_osdr_top5.py --biopython-metadata`, and it was not installed in the venv every measurement in this repository was taken on.
+`requirements-dev.txt` is new because the README told you to run pytest and Playwright and nothing in the repository would install either.
+`MEETING_QA.md` is deleted; the upload cap and the "no metadata is collected" fact were the only things in it that lived nowhere else, and both are now in `docs/file_ingestion.md`.
+`tests/check_join.py` was the one file that *looked* dead and is not - it is the honesty gate on the arithmetic the whole merged app rests on - so it is now named in the README beside the other two science gates.
+`IMPLEMENTATION.md` and `REFERENCE.md` are retitled off "Bridge Manifold", a name the product has not used since the merge and which was still in their titles, in module docstrings, and in a user-visible `SystemExit` message.
+
+**Two defects the verification pass itself turned up, both in the gates rather than in the product.**
+
+*`tests/check_join.py` did its work, printed "EVERY POINT ADDRESSES THE CORRECT SAMPLE", and then never exited.* Sampled at the hang, the main thread sits in `__cxa_finalize_ranges` -> `arrow::internal::ThreadPool::~ThreadPool` -> `Shutdown` -> `condition_variable::wait`: PyArrow's static thread pool deadlocking against its own workers during interpreter teardown. It is intermittent - the same script had exited cleanly twice earlier the same day - which is worse than reliable, because a gate that usually returns and occasionally wedges is one nobody can put in a pipeline. It flushes and `os._exit`s now; three consecutive runs return in about a second. This was found only because the gate was promoted into the README and therefore actually run in sequence with everything else.
+
+*One of the 50 browser checks was measuring the network and reporting it as a layout defect.* "the inspector scrolls its own overflow instead" depended on the opened hit's GEO record being long enough to overspill the panel by itself - but that record is fetched live from NCBI inside the callback and the fetch fails closed, so a rate-limited run produced a short record, no overflow, and a red line about a layout invariant that was never at risk. The check now appends a 2,000 px filler to force the condition the invariant is about, asserts the panel scrolls *and* that the page still does not grow, then removes it. Deterministic, and it tests one more thing than it did before, so the suite is 51 rather than 50.
+
+*And a third that only became reachable because of the keyboard fix.* Dash spends its `--Dash-Fill-Interactive-Strong` token on *text* as well as on fills: it paints an option's label with it on `:hover` and `:focus-within`, at a specificity of (0,3,1) - `:not(:has(input[disabled]))` is worth more than it looks - so it outranks whatever either view writes for its own controls. That token pointed at `--accent`, so the moment a keyboard user put focus inside the Projection pill its label went back to 3.76:1. The `:focus-within` half had been unreachable for as long as the radio was `display: none`, which is why the fix and the defect arrived together. One line now points the token at `--accent-text` and every Dash control is covered at once. It took a pixel read of the screenshot to find: three audit runs reported it, the browser agreed with them, and a direct probe of a freshly loaded page did not - because the state depends on where focus happens to be.
+
+*And one the pass introduced and the screenshots caught.* Scoping the retrieval view's text-input rule to the inner `<input>` also, briefly, styled the map's legend filter: `dash-input` is Dash's class and it is on every `dcc.Input` container, so a rule written for the sidebar reached a field sitting on the navy canvas and turned it into a white box with dark text. No assertion saw it; the iPhone screenshot did. It is scoped to `.sidebar` now and `test_the_retrieval_input_rules_cannot_reach_the_map` keeps it there.
+
+**Not changed, deliberately.** An unknown path still renders the retrieval view with a 200; that is standard for a single-page app and no workflow is broken by it. The Google Fonts CDN stays, per the call made at the start of this pass - worth knowing that it is the *only* source of console errors in the whole audit, two 404s from `fonts.gstatic.com` for an Inter woff2, with the fallback stack rendering fine. The categorical palette was not touched: it is CVD-validated and its slot order is the mechanism.
+
 ## 2026-08-06 (the two arms of a comparison get an even split, and the clipping under it is fixed)
 
 **The two cohort sections of the stability panel are now even columns with their rows aligned.**

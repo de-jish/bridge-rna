@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Phase 1: generate OSDR sample embeddings, gated on the canonical gene digest.
 
-This is the highest-risk piece of Bridge Manifold: a subtle preprocessing
+This is the highest-risk piece of the map build: a subtle preprocessing
 mismatch produces embeddings that look fine but are scientifically wrong. The
 mitigation is to reproduce Bridge RNA's exact preprocessing (imported, not
 reinvented) and to abort unless the canonical gene ordering hashes to the same

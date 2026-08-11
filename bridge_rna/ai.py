@@ -192,6 +192,48 @@ def _call_bedrock_summary(prompt: str) -> str:
     return _extract_text_response(resp)
 
 
+def _ollama_unreachable_message() -> str:
+    return (
+        f"Could not reach Ollama at {OLLAMA_BASE_URL}.\n\n"
+        "AI summaries are optional. Retrieval, the network graph, and all metadata "
+        "on this page work without them.\n\n"
+        "To enable them, install Ollama from https://ollama.com and then run:\n"
+        "    ollama serve\n"
+        f"    ollama pull {OLLAMA_MODEL}\n\n"
+        "To use AWS Bedrock instead, set AI_SUMMARY_PROVIDER=bedrock and BEDROCK_API_URL."
+    )
+
+
+def unavailable_reason() -> str | None:
+    """Why a summary cannot be produced at all, before any work is done for it.
+
+    The caller assembles the prompt from study abstracts fetched over the
+    network - one round trip per accession, and a gzip download per series -
+    which is the slow part of the whole feature. Doing that first and *then*
+    discovering there is no model to send it to made "install Ollama" a message
+    that arrived up to a minute after the click, in the state a fresh clone
+    starts in. The precondition is knowable in a few milliseconds, so it is
+    checked first.
+
+    Returns None when there is nothing to report, which includes the case where
+    the answer is not cheaply knowable: Bedrock has no probe short of a real
+    request, so a configured endpoint is taken at its word and any failure
+    surfaces through the normal path.
+    """
+    if AI_SUMMARY_PROVIDER == "ollama":
+        if not OLLAMA_BASE_URL:
+            return "AI Summary call failed: OLLAMA_BASE_URL is not configured."
+        try:
+            requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+        except requests.exceptions.RequestException:
+            return _ollama_unreachable_message()
+        return None
+    if AI_SUMMARY_PROVIDER == "bedrock" and not BEDROCK_API_URL:
+        return ("AI Summary call failed: AI_SUMMARY_PROVIDER is 'bedrock' but "
+                "BEDROCK_API_URL is not set.")
+    return None
+
+
 def _call_ollama_summary(prompt: str) -> str:
     if not OLLAMA_BASE_URL:
         return "AI Summary call failed: OLLAMA_BASE_URL is not configured."
@@ -241,15 +283,7 @@ def _call_ollama_summary(prompt: str) -> str:
     try:
         resp = _generate(_pick_model())
     except requests.exceptions.ConnectionError:
-        return (
-            f"Could not reach Ollama at {OLLAMA_BASE_URL}.\n\n"
-            "AI summaries are optional. Retrieval, the network graph, and all metadata "
-            "on this page work without them.\n\n"
-            "To enable them, install Ollama from https://ollama.com and then run:\n"
-            "    ollama serve\n"
-            f"    ollama pull {OLLAMA_MODEL}\n\n"
-            "To use AWS Bedrock instead, set AI_SUMMARY_PROVIDER=bedrock and BEDROCK_API_URL."
-        )
+        return _ollama_unreachable_message()
     except requests.exceptions.Timeout:
         return (
             f"Ollama did not respond within {OLLAMA_TIMEOUT_SECONDS} seconds.\n\n"

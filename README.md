@@ -232,22 +232,34 @@ The numbers are meaningless biologically; the corpus exists to exercise the inte
 
 ## Tests
 
+The test tooling is a separate install, because running Bridge RNA does not need it:
+
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 335 tests, about twenty-five seconds
-.venv/bin/python tests/e2e_check.py              # 50 browser checks; needs the built cache
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium   # only for the browser suites
+```
+
+```bash
+.venv/bin/python -m pytest tests/ -q             # 346 tests, about twenty-five seconds
+.venv/bin/python tests/e2e_check.py              # 51 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 146 checks of cohort retrieval
+.venv/bin/python tests/e2e_cohort_check.py       # 156 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.
 The three browser suites boot the real app against the real `cache/` and assert on what the page reports about itself, down to each budget tier drawing exactly the point count it advertises.
+Each of them counts and prints the checks it actually ran, so the numbers above cannot quietly drift from the suites.
 
-Two scripts check the science rather than the software, against the real corpus:
+Three scripts check the science rather than the software, against the real corpus:
 
 ```bash
 .venv/bin/python precompute/validate_artifacts.py --mixing --quality
 .venv/bin/python precompute/validate_cohorts.py   # 6 checks over all 212 cohorts
+.venv/bin/python tests/check_join.py              # the two halves address the same samples
 ```
+
+`check_join.py` is the cheapest and the one worth running after any change to either half.
+The whole merged application rests on two unenforced pieces of arithmetic - an Earth hit's row in the embedding index *is* its point on the map, and a NASA sample is the same key on both sides - and if either drifts the map keeps drawing rings, just around the wrong samples.
 
 `validate_cohorts.py` is the honesty gate behind Cohort mode.
 It measures how much a pooled result survives dropping one animal, and holds that against two nulls: a pooled query over random samples, and a pooled query over random samples from the same study.
@@ -265,8 +277,12 @@ The second one is the demanding test, and its result is reported in the docs rat
 | `checkpoints_performer/` | Trained model checkpoint (Git LFS). |
 | `archs4_sample_embeddings_full/` | Precomputed Earth embedding index (Git LFS). |
 | `cache/` | The map's precomputed artifacts (built locally). |
+| `docs/` | One design record per feature: what was built, what was measured, what was rejected. |
 
-For the design and the verified facts in depth, see [`IMPLEMENTATION.md`](IMPLEMENTATION.md) and [`REFERENCE.md`](REFERENCE.md).
+Beyond this file there are three kinds of document, and it is worth knowing which one answers your question.
+[`IMPLEMENTATION.md`](IMPLEMENTATION.md) is the map's design record and the longest one: the offline/online split, the three projections, the color-by system, and every candidate that was measured and cut.
+[`REFERENCE.md`](REFERENCE.md) is the numbers - model config read out of the checkpoint, embedding statistics, measured timings, interface signatures with line numbers - and it is the one to trust when two documents disagree.
+`docs/` is one file per feature built since: [cohort retrieval](docs/cohort_retrieval.md) and the [pooling measurement](docs/cohort_pooling.md) behind it, [live stability](docs/live_stability.md), [file ingestion](docs/file_ingestion.md), the [map's key](docs/map_key.md), and the [even split](docs/stability_panel_even_split.md) of a comparison's two arms.
 
 ## Licensing
 

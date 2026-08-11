@@ -228,7 +228,8 @@ def test_the_selection_readout_is_gone(map_view):
 
 def test_legend_parts_are_static_so_dash_can_validate_them(map_view):
     ids = {getattr(c, "id", None) for c in _walk(map_view)}
-    for required in ("legend-title", "legend-search", "legend-list", "legend-store"):
+    for required in ("legend-title", "legend-search", "legend-search-group",
+                     "legend-list", "legend-store"):
         assert required in ids, f"{required} is only created at runtime"
 
 
@@ -575,15 +576,221 @@ def test_the_stylesheets_define_each_token_exactly_once():
     assert counts, "no design tokens found at all"
 
 
+def test_the_dash_tokens_that_carry_text_use_the_accessible_blue():
+    """Dash spends its "interactive strong" token on text, not only on fills.
+
+    It paints an option's label with it on `:hover` and `:focus-within`, at a
+    specificity of (0,3,1) - `:not(:has(input[disabled]))` is worth more than
+    it looks - so it outranks what either view writes for its own controls.
+    Pointing it at --accent put 3.76:1 text on screen from a rule neither
+    stylesheet owns; pointing it at --accent-text fixes every Dash control at
+    once. The `:focus-within` half only became reachable when the radio inside
+    a segmented pill stopped being `display: none`, which is why this was
+    invisible until the keyboard fix landed.
+    """
+    css = _all_css()
+    match = re.search(r"--Dash-Fill-Interactive-Strong:\s*var\((--[\w-]+)\)", css)
+    assert match, "Dash's interactive-strong token is no longer mapped"
+    assert match.group(1) == "--accent-text", (
+        "Dash paints text with this token, so it must be the AA-safe blue")
+
+
+def test_the_retrieval_input_rules_cannot_reach_the_map():
+    """`dash-input` is Dash's class, not ours, and it is on every dcc.Input.
+
+    Styling `.dash-input .dash-input-element` from retrieve.css therefore
+    reached the map's legend filter as well, which sits on the navy canvas -
+    and turned it into a white box with dark text. Caught in a screenshot, not
+    by any assertion, which is why there is one now. The retrieval view's own
+    rules stay inside the retrieval view's own container.
+    """
+    retrieve = (paths.ASSETS_DIR / "retrieve.css").read_text()
+    unscoped = re.findall(r"^\s*\.dash-input\s", retrieve, re.M)
+    assert not unscoped, (
+        "retrieve.css styles .dash-input without scoping it; Dash puts that "
+        "class on the map's legend filter too")
+    assert ".sidebar .dash-input .dash-input-element" in retrieve
+
+
+def test_the_map_view_has_a_landmark_and_a_heading(map_view):
+    """The map had a page title and no structure under it.
+
+    The retrieval view already offered a nav, a controls aside, a main and an
+    inspector aside; the map was a `div` inside a `div`, so the only heading
+    below the shell's H1 was nothing at all and there was no way to jump to
+    either region.
+    """
+    tags = [type(c).__name__ for c in _walk(map_view)]
+    assert "Main" in tags, "the plot is not a main landmark"
+    assert "Aside" in tags, "the control rail is not a complementary landmark"
+    headings = [c for c in _walk(map_view) if type(c).__name__ == "H2"]
+    assert headings, "the map offers no heading below the shell's H1"
+
+
+def test_the_map_graph_relayouts_when_its_container_resizes(map_view):
+    """Plotly keeps the geometry it was first laid out with unless told not to.
+
+    The map's container changes size for reasons no callback fires on - the
+    stacked breakpoint below 900 px, a phone rotating, a window being dragged -
+    and without this the scatter drew a quadrant of the corpus into the whole
+    canvas. The retrieval view's graph has always set it.
+    """
+    graphs = [c for c in _walk(map_view) if getattr(c, "id", None) == "manifold-graph"]
+    assert graphs, "the map graph is gone"
+    assert graphs[0].config.get("responsive") is True
+
+
+def test_the_map_stylesheet_stacks_below_a_breakpoint():
+    """A fixed 268 px rail beside a fixed 228 px key is 496 px of furniture.
+
+    On a 393 px phone that left the plot a 125 px strip with the key sitting on
+    top of the rail. The map carried no media query at all until 2026-08-11, so
+    this pins the two things that fix it: the columns stack, and the plot stops
+    taking its height from a column it no longer has.
+    """
+    css = _all_css()
+    assert "@media (max-width: 900px)" in css
+    stacked = css.split("@media (max-width: 900px)", 1)[1]
+    assert ".bm-body { flex-direction: column; }" in stacked
+    assert "height: 68vh" in stacked
+
+
+def test_key_and_legend_rows_overflow_rather_than_compress():
+    """A column flex item shrinks below its content height by default.
+
+    Both panels sit inside a height-capped box, so without `flex: none` the
+    rows compressed into each other and lost their descenders instead of the
+    list scrolling - there was never any overflow for `overflow-y: auto` to
+    act on. Reproduced at 393 px, where the panel is capped at 46% of the
+    canvas.
+    """
+    css = _all_css()
+    assert ".bm-legend-list > .bm-legend-item { flex: none; }" in css
+    key_rule = css.split(".bm-key-row {", 1)[1].split("}", 1)[0]
+    assert "flex: none" in key_rule
+
+
+def test_every_dropdown_and_slider_is_named_by_something(mounted_ids, app):
+    """A control announced only by its own value is an unnamed control.
+
+    Dash 4 renders a Dropdown as a button whose `aria-labelledby` points at the
+    span holding its *value*, and a Slider as a Radix thumb with no name at
+    all - so "OSDR study: OSD-100" reached a screen reader as "OSD-100,
+    button", and the top-k slider as "5, slider". Neither can be fixed with a
+    `for` attribute, because neither renders a labelable element.
+
+    Both views therefore wrap each control in `role="group"` with
+    `aria-labelledby` on the heading that already names it. This asserts every
+    one of those groups exists, and that each points at an id that is really on
+    the page - a dangling `aria-labelledby` is worse than none, because it
+    silently resolves to the empty string.
+    """
+    from bridge_rna import layout as rna_layout
+
+    trees = [rna_layout.build_view(), layout.build_view()]
+    ids: set = set()
+    named: dict = {}
+    for tree in trees:
+        for component in _walk(tree):
+            cid = getattr(component, "id", None)
+            if isinstance(cid, str):
+                ids.add(cid)
+            labelled_by = getattr(component, "aria-labelledby", None)
+            if labelled_by:
+                named[labelled_by] = component
+
+    # Every control that Dash renders without a usable name of its own.
+    for control in ("study-dropdown", "sample-dropdown", "cohort-dropdown",
+                    "cohort-compare-dropdown", "upload-sample-column",
+                    "topk-slider", "color-by", "layers", "method", "dims",
+                    "budget"):
+        assert control in ids, f"{control} is no longer on any view"
+
+    for label_id in ("study-dropdown-label", "sample-dropdown-label",
+                     "cohort-dropdown-label", "cohort-compare-label",
+                     "upload-column-label", "topk-slider-label",
+                     "cohort-facets-label", "color-by-label", "layers-label",
+                     "projection-label", "dims-label", "budget-label"):
+        assert label_id in named, f"no group is labelled by {label_id}"
+        assert label_id in ids, f"{label_id} is referenced but never rendered"
+
+
 def test_theme_matches_the_bridge_rna_tokens():
-    """The chrome must stay pixel-identical to Bridge RNA; only the plot is dark."""
+    """The chrome must stay pixel-identical to Bridge RNA; only the plot is dark.
+
+    `theme.py` is a mirror of the stylesheet, not a second source of truth, and
+    a mirror that is never checked is just a stale copy: TEXT_MUTED sat at
+    #8a99ac for a while after the token was darkened for contrast. Every
+    constant this module claims to reuse verbatim is asserted here.
+    """
     css = _all_css()
     for token, value in [
         ("--bg-canvas", theme.BG_CANVAS), ("--bg-panel", theme.BG_PANEL),
-        ("--accent", theme.ACCENT), ("--header-bg", theme.HEADER_BG),
+        ("--bg-panel-raised", theme.BG_PANEL_RAISED), ("--bg-inset", theme.BG_INSET),
+        ("--text-primary", theme.TEXT_PRIMARY),
+        ("--text-secondary", theme.TEXT_SECONDARY),
+        ("--text-muted", theme.TEXT_MUTED),
+        ("--accent", theme.ACCENT), ("--accent-text", theme.ACCENT_TEXT),
+        ("--accent-hover", theme.ACCENT_HOVER),
+        ("--accent-teal", theme.ACCENT_TEAL), ("--accent-warm", theme.ACCENT_WARM),
+        ("--header-bg", theme.HEADER_BG), ("--header-fg", theme.HEADER_FG),
         ("--header-line", theme.HEADER_LINE), ("--plot-bg", theme.PLOT_BG),
+        ("--status-good", theme.STATUS_GOOD), ("--status-error", theme.STATUS_ERROR),
+        ("--status-warn", theme.STATUS_WARN),
     ]:
         assert f"{token}: {value}" in css, f"{token} drifted from {value}"
+
+
+def test_every_text_token_clears_wcag_aa_on_every_surface():
+    """Text contrast is a correctness gate here, not a preference.
+
+    Both text tiers below --text-primary failed AA before 2026-08-10 -
+    --text-muted at 2.90:1 carried every rail label, kicker and hint, and
+    --accent at 3.76:1 carried the primary button's white label and every blue
+    link. This pins the fix against every ground the stylesheet defines, so a
+    future palette edit that reintroduces the failure fails here instead of in
+    a browser.
+    """
+    css = _all_css()
+
+    def token(name: str) -> str:
+        match = re.search(rf"{re.escape(name)}:\s*(#[0-9a-fA-F]{{6}})\s*;", css)
+        assert match, f"{name} is not defined as a hex literal"
+        return match.group(1)
+
+    def relative_luminance(hex_color: str) -> float:
+        raw = hex_color.lstrip("#")
+        channels = [int(raw[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                  for c in channels]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    def ratio(a: str, b: str) -> float:
+        la, lb = relative_luminance(a), relative_luminance(b)
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+    # Every light surface text can land on, including the tinted ones: a chip
+    # in --accent-soft and a banner body in --status-error-soft are exactly
+    # where a grey chosen against plain white quietly stops clearing the bar.
+    grounds = ["--bg-panel", "--bg-canvas", "--bg-panel-raised", "--bg-inset",
+               "--accent-soft", "--accent-teal-soft", "--accent-warm-soft",
+               "--status-good-soft", "--status-error-soft", "--status-warn-soft",
+               "--status-info-soft"]
+    foregrounds = ["--text-primary", "--text-secondary", "--text-muted",
+                   "--accent-text"]
+
+    failures = []
+    for fg in foregrounds:
+        for bg in grounds:
+            r = ratio(token(fg), token(bg))
+            if r < 4.5:
+                failures.append(f"{fg} on {bg}: {r:.2f}:1")
+    # White type on the primary button's ground is the other direction.
+    for bg in ("--accent-text", "--accent-hover"):
+        r = ratio("#ffffff", token(bg))
+        if r < 4.5:
+            failures.append(f"white on {bg}: {r:.2f}:1")
+    assert not failures, "text below WCAG AA 4.5:1 -> " + "; ".join(failures)
 
 
 def test_categorical_palette_has_no_duplicate_hues():

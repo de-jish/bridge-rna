@@ -18,6 +18,31 @@ from .config import NCBI_API_KEY
 from .util import _safe_str
 
 
+def _accession(value: Any, prefix: str) -> str:
+    """A GEO accession with its prefix, whichever way esummary returned it.
+
+    E-utilities gives these fields as bare numbers - `gse: "210492"`,
+    `gpl: "21103"` - and a bare number is not an accession: it matches nothing
+    in GEO and cannot be pasted into a search. Idempotent, because the same
+    fields sometimes arrive already prefixed depending on the record.
+
+    A value that is not a bare accession is passed through untouched rather
+    than being decorated into something false; `gpl` occasionally carries
+    several platforms as "21103;13112".
+    """
+    raw = _safe_str(value)
+    if not raw:
+        return ""
+    if raw.upper().startswith(prefix):
+        return raw.upper()
+    if raw.isdigit():
+        return f"{prefix}{raw}"
+    parts = [p.strip() for p in raw.split(";") if p.strip()]
+    if len(parts) > 1 and all(p.isdigit() for p in parts):
+        return "; ".join(f"{prefix}{p}" for p in parts)
+    return raw
+
+
 def _enrich_hits_from_ncbi_eutils(hits_df: pd.DataFrame, entrez_email: str) -> pd.DataFrame:
     """Enrich hit rows with GEO metadata via NCBI E-utilities.
 
@@ -178,11 +203,14 @@ def _enrich_hits_from_ncbi_eutils(hits_df: pd.DataFrame, entrez_email: str) -> p
             uid = (j2.get("result", {}).get("uids") or [None])[0]
             doc = j2.get("result", {}).get(uid, {}) if uid else {}
 
-            gse_raw = _safe_str(doc.get("gse", ""))
-            rec["gse_ncbi"] = f"GSE{gse_raw}" if gse_raw and not gse_raw.upper().startswith("GSE") else gse_raw.upper()
+            rec["gse_ncbi"] = _accession(doc.get("gse"), "GSE")
             rec["title_ncbi"] = _safe_str(doc.get("title", ""))
             rec["summary_ncbi"] = _safe_str(doc.get("summary", ""))
-            rec["platform_ncbi"] = _safe_str(doc.get("gpl", ""))
+            # esummary returns `gpl` bare, the same way it returns `gse` bare.
+            # The GSE half was already being prefixed here and the platform was
+            # not, so the inspector printed "Platform 21103" - a number that
+            # matches no GEO record and cannot be pasted into a search.
+            rec["platform_ncbi"] = _accession(doc.get("gpl"), "GPL")
             rec["taxon_ncbi"] = _safe_str(doc.get("taxon", ""))
             rec["entry_type_ncbi"] = _safe_str(doc.get("entrytype", ""))
             rec["gds_type_ncbi"] = _safe_str(doc.get("gdstype", ""))

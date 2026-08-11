@@ -19,7 +19,6 @@ requests==2.34.2       # OSDR study summaries, Ollama / Bedrock calls
 
 # --- Retrieval ---------------------------------------------------------------
 torch==2.12.1          # ExpressionPerformer inference for an OSDR query
-biopython>=1.85,<2     # optional GEO / PubMed enrichment of retrieved hits
 
 # --- Manifold precompute (precompute/, not needed to serve the map) ----------
 # The map is drawn from precomputed coordinate parquets, so none of these are
@@ -33,6 +32,8 @@ openTSNE>=1.0.4        # full-corpus t-SNE. Not sklearn's: only openTSNE has the
                        # neighbour graph, which is what lets t-SNE reuse the
                        # same NN-descent call UMAP uses.
 
-# --- Development -------------------------------------------------------------
-# pytest>=9.0.0
-# playwright>=1.61.0   # browser-driven checks of the running app
+# --- Not here ----------------------------------------------------------------
+# Test tooling is in requirements-dev.txt; hit-metadata enrichment that the app
+# never imports is in requirements-optional.txt. Neither belongs in a serving
+# install, and both used to sit here commented out, which meant the README told
+# you to run pytest and nothing in the repository would install it.

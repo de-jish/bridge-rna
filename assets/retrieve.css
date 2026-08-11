@@ -90,9 +90,34 @@
 }
 
 .control-slider { padding: 2px 4px 0; }
+/* Dash's slider thumb draws at 17px, which is under the 24px WCAG 2.2 SC 2.5.8
+   asks of a pointer target. The hit area is widened rather than the thumb,
+   because a 24px dot on a 4px track reads as a different control - the target
+   is what the criterion is about, and it is the part nobody can see. */
+.control-slider .dash-slider-thumb { position: relative; }
+.control-slider .dash-slider-thumb::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+}
 
-/* Text input */
-input.dash-input,
+/* Text input.
+   `input.dash-input` matched nothing and never has: Dash 4 puts `className` on
+   a wrapping `div.dash-input-container` and gives the `<input>` inside it
+   `dash-input-element`. The field looked right anyway, because the attribute
+   selectors beside it do reach that inner input - so the class hook was simply
+   dead weight. It is corrected to point at the element the other two already
+   style rather than deleted, because it is the only hook a `dcc.Input` outside
+   a `.control` would have.
+
+   Two things about it are load-bearing, and both were learned the hard way.
+   It is scoped to `.sidebar`, because Dash puts `dash-input` on *every*
+   `dcc.Input` container - including the map's legend filter, which sits on the
+   navy canvas and came out as a white box the moment this rule was unscoped.
+   And it styles the inner input rather than the wrapper, because Dash styles
+   that inner input too, so a focused field drew a ring inside a ring. */
+.sidebar .dash-input .dash-input-element,
 .control input[type="email"],
 .control input[type="text"] {
   width: 100%;
@@ -106,14 +131,18 @@ input.dash-input,
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-input.dash-input:focus,
+.sidebar .dash-input .dash-input-element:focus,
 .control input[type="email"]:focus,
 .control input[type="text"]:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* Primary action button */
+/* Primary action button.
+   The ground is --accent-text rather than --accent: this is the one place the
+   accent has to hold white 14 px type, and at 3.76:1 the identity blue does
+   not clear AA for it. --accent-hover is a step darker again, so the hover
+   still reads as pressing further in. */
 .btn-primary {
   width: 100%;
   padding: 11px 14px;
@@ -121,12 +150,13 @@ input.dash-input:focus,
   font-weight: 600;
   font-family: var(--font-sans);
   color: #fff;
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  background: var(--accent-text);
+  border: 1px solid var(--accent-text);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
-  box-shadow: 0 1px 2px rgba(43, 127, 255, 0.25);
+  /* The button's own blue, not the identity one it no longer wears. */
+  box-shadow: 0 1px 2px rgba(22, 99, 221, 0.25);
 }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-primary:active:not(:disabled) { transform: translateY(1px); }
@@ -138,7 +168,7 @@ input.dash-input:focus,
   padding: 10px 14px;
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -153,7 +183,7 @@ input.dash-input:focus,
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-sm);
-  color: var(--accent);
+  color: var(--accent-text);
   min-height: 18px;
 }
 .running-indicator:not(:empty)::before {
@@ -210,9 +240,13 @@ input.dash-input:focus,
   padding-top: calc(var(--space-4) - 3px);
 }
 
+/* `flex-start`, not `center`. The dot marks the panel, so it belongs against
+   the panel's *title*; centering it against the whole block meant it drifted
+   downward as the subtitle wrapped, and on a phone the canvas subtitle wraps
+   to three lines, which put the dot beside the second one. */
 .panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
 }
@@ -220,6 +254,8 @@ input.dash-input:focus,
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--accent);
   flex: none;
+  /* Optical centre of the 18px title's first line, not the top of it. */
+  margin-top: 7px;
 }
 .panel-dot--warm { background: var(--accent-warm); }
 /* Teal, because GRAPH_THEME's `cohort_a` is teal and this panel is about a
@@ -414,7 +450,7 @@ input.dash-input:focus,
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-soft);
   border: 1px solid var(--accent-dim);
   white-space: nowrap;
@@ -427,7 +463,7 @@ input.dash-input:focus,
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-bottom: var(--space-1);
 }
 
@@ -453,7 +489,7 @@ input.dash-input:focus,
   word-break: break-word;
   min-width: 0;
 }
-.detail-row .value a { color: var(--accent); text-decoration: none; }
+.detail-row .value a { color: var(--accent-text); text-decoration: none; }
 .detail-row .value a:hover { text-decoration: underline; }
 .detail-row .value.mono { font-family: var(--font-mono); font-size: var(--text-sm); }
 .detail-row .value.empty { color: var(--text-muted); font-style: italic; }
@@ -484,7 +520,7 @@ input.dash-input:focus,
   list-style: none;
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   padding: var(--space-2) 0;
   user-select: none;
 }
@@ -766,7 +802,7 @@ summary:focus-visible,
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--text-base);
   font-weight: 600;
   text-align: center;
@@ -868,7 +904,7 @@ summary:focus-visible,
 }
 .mode-tab:hover:not(.is-active) { color: var(--text-primary); background: rgba(255, 255, 255, 0.6); }
 .mode-tab.is-active {
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--bg-panel);
   border-color: var(--border-subtle);
   box-shadow: 0 1px 2px rgba(26, 36, 50, 0.06), 0 1px 1px rgba(26, 36, 50, 0.04);
@@ -891,8 +927,12 @@ summary:focus-visible,
 /* --- Group by: the facet chips -------------------------------------------- */
 
 .facet-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+/* `min-height`, because WCAG 2.2 SC 2.5.8 puts the floor for a pointer target
+   at 24x24 CSS px and 4px of padding on 11.5px type measured 23. One pixel is
+   not a judgement call when the criterion is a number. */
 .facet-chip {
   padding: 4px 9px;
+  min-height: 24px;
   font-family: inherit;
   font-size: 11.5px;
   font-weight: 600;
@@ -905,7 +945,7 @@ summary:focus-visible,
 }
 .facet-chip:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--text-primary); }
 .facet-chip.is-on {
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-soft);
   border-color: var(--accent-dim);
 }
@@ -915,7 +955,7 @@ summary:focus-visible,
    pointer and the hover response. The reason is on the title attribute. */
 .facet-chip.is-pinned {
   cursor: default;
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-soft);
   border-color: var(--accent-dim);
   opacity: 1;

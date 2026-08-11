@@ -59,6 +59,12 @@
 }
 .app-brand:hover .app-title { color: #ffffff; }
 
+/* The one place white type stays on the identity blue at 3.76:1. WCAG 1.4.3
+   exempts text that is part of a logo or brand name, and this tile is the
+   brand mark - it is not read as content and it carries no information the
+   wordmark beside it does not. Every other white-on-blue surface in the app
+   moved to --accent-text; this one is deliberately not that, so please do not
+   "fix" it to match. */
 .app-brand-mark {
   display: grid;
   place-items: center;

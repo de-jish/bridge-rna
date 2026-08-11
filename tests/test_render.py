@@ -737,3 +737,47 @@ def test_the_hover_says_pooled_member_only_when_something_was_pooled():
     pooled = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
               if t.name == "retrieved hit"]
     assert all("map rank" in row[1] for t in pooled for row in t.customdata)
+
+
+def test_the_comparison_network_names_its_hits_until_they_would_collide():
+    """The single-query network labels every hit; this one labelled none.
+
+    A comparison is the figure most likely to end up in a slide or a paper, and
+    without labels its accessions lived only in a tooltip - so on paper it
+    carried no identities at all. They are drawn up to the point where they
+    would stop being readable: the two arms share one vertical rhythm, so the
+    node count is 2*k in the worst case, and at k=30 sixty labels on one column
+    would overlap. Same rule as the map's RETRIEVAL_MAX_NUMERALS.
+    """
+    import pandas as pd
+
+    from bridge_rna.figures import COMPARISON_MAX_LABELS, build_comparison_figure
+
+    def arm(prefix: str, n: int) -> pd.DataFrame:
+        return pd.DataFrame({
+            "gsm": [f"{prefix}{i:07d}" for i in range(n)],
+            "gse": ["GSE1"] * n,
+            "score": [0.99 - i * 0.001 for i in range(n)],
+            "source_name": [""] * n,
+            "tissue": [""] * n,
+        })
+
+    def query(label: str) -> pd.Series:
+        return pd.Series({"cohort_label": label, "sample_name": label,
+                          "sample_id": label, "members": "a\nb"})
+
+    small = build_comparison_figure(query("A"), arm("GSM", 4),
+                                    query("B"), arm("GSN", 4))
+    labelled = [t for t in small.data
+                if t.mode and "text" in t.mode and t.text and len(t.text) > 1]
+    assert labelled, "a small comparison writes no accessions on the figure"
+    written = {s for t in labelled for s in t.text}
+    assert "GSM0000000" in written and "GSN0000000" in written
+
+    n = COMPARISON_MAX_LABELS  # 2n nodes, comfortably over the threshold
+    big = build_comparison_figure(query("A"), arm("GSM", n),
+                                  query("B"), arm("GSN", n))
+    hit_traces = [t for t in big.data if t.showlegend]
+    assert hit_traces, "the hit bands are gone"
+    assert all(t.mode == "markers" for t in hit_traces), \
+        "a crowded comparison still writes overlapping accessions"

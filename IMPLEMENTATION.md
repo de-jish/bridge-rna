@@ -1,15 +1,17 @@
-# Bridge Manifold - Implementation Plan
+# Bridge RNA: the map - implementation plan
 
-> **This document predates the 2026-07-22 merge.**
-> Bridge Manifold and Bridge RNA are now one repository and one application, served by `app.py`: the retrieval view at `/` and this map at `/map`.
-> There is no `app_manifold.py` and no separate repository at `/Users/josh/Bridge Manifold`.
-> The design decisions recorded below are still the ones the map is built on; the commands and the file layout have been updated where they would otherwise fail if followed.
-> See `README.md` for the current product and `progress.md` for what changed.
+> **Scope: the map view (`/map`) only.**
+> This is the design record for one half of the application, and it is the deepest one - the offline/online split, the three projections, the colour-by system and every candidate that was measured and cut.
+> The retrieval half's features have their own design docs under `docs/`, and `README.md` is the product.
+> Ground-truth numbers live in `REFERENCE.md`.
+>
+> It was written while the map was a separate application called **Bridge Manifold**, which is a name the product no longer uses: the two repositories became one on 2026-07-22 and `app.py` now serves the retrieval view at `/` and the map at `/map`.
+> There is no `app_manifold.py`; where the old name still appears below it is recording history, not naming a thing that exists.
 
 
 
-Bridge Manifold is the exploratory companion to Bridge RNA.
-Where Bridge RNA answers "what are the closest Earth analogs for one spaceflight sample," Bridge Manifold answers "what is the global shape of the whole embedding space, and where does spaceflight sit inside it."
+The map is the exploratory half of Bridge RNA.
+Where the retrieval view answers "what are the closest Earth analogs for one spaceflight sample," the map answers "what is the global shape of the whole embedding space, and where does spaceflight sit inside it."
 It dimensionally reduces the 512-dimensional ExpressionPerformer embeddings of both corpora, ARCHS4 (940,455 human and mouse GEO samples) and OSDR (2,108 NASA GeneLab spaceflight samples), draws them together in one interactive WebGL scatter, and colors them by biology that is defined for both corpora rather than for one.
 
 This document is the master plan.
@@ -35,7 +37,7 @@ It must make batch structure visible and disclose the measured cross-corpus tech
 
 ### Non-goals
 
-Bridge Manifold does not retrain or fine-tune the ExpressionPerformer model.
+The map does not retrain or fine-tune the ExpressionPerformer model.
 It does not re-embed ARCHS4; those 940,455 embeddings already exist and are consumed as-is.
 It does not replace the Bridge RNA retrieval app; the map is a distinct view served alongside retrieval by the one merged app, reusing Bridge RNA's code and visual language.
 It does not perform batch-effect correction by default; instead it makes batch structure visible as a color-by and discloses the measured effect on the control rail.
@@ -64,9 +66,9 @@ The checkpoint is `checkpoints_performer/r7hnr92k/best_model.pt` (547 MB), and i
 
 The ARCHS4 index is a memory-mapped `940455 x 512` float16 array at `archs4_sample_embeddings_full/sample_embeddings.float16.mmap`, with a sidecar `sample_locations.parquet` carrying `global_index`, `geo_accession`, and `species_id` (0 = human, 510,709 samples; 1 = mouse, 429,746 samples).
 The stored embeddings are NOT L2-normalized; measured L2 norms range from 6.7 to 25.5 (mean 10.6).
-Retrieval normalizes at query time, so Bridge Manifold must L2-normalize before any reduction, or the dominant axis of variation will simply be vector magnitude.
+Retrieval normalizes at query time, so the map must L2-normalize before any reduction, or the dominant axis of variation will simply be vector magnitude.
 
-OSDR embeddings did not exist on disk; Bridge Manifold generates them.
+OSDR embeddings did not exist on disk; the map build generates them.
 There is a hook in the Bridge RNA app for a precomputed OSDR query embedding file (`PRECOMPUTED_QUERY_EMBEDDING_CANDIDATES`), but no such file is present.
 
 The memmap is read **only by the precompute scripts**.
@@ -74,7 +76,7 @@ The map view draws precomputed coordinates and never needs a 512-d vector, so it
 
 ## 3. Architecture overview
 
-Bridge Manifold splits cleanly into an offline precompute stage and an online serving stage.
+The map splits cleanly into an offline precompute stage and an online serving stage.
 This split is the single most important architectural decision, and it is forced by measured cost.
 
 ```
@@ -679,14 +681,14 @@ The result is worth stating plainly: **the map view shares no runtime code path 
 Its serving code imports no model or embedding module, opens neither the checkpoint nor the memmap, and needs no torch to run; the retrieval view is the half that opens the memmap, on every cached search.
 The map's coupling to that stack is entirely at build time.
 
-Dependencies: Bridge Manifold shares the Bridge RNA venv and adds `dash` on top of the existing stack, plus `requests` for the metadata fetch.
+Dependencies: the map shares the one venv and adds `dash` on top of the existing stack, plus `requests` for the metadata fetch.
 `hnswlib` and `scipy` were dropped from `requirements.txt` with the selection feature (both are still installed in the shared venv and neither is imported), `archs4py` was never installed at all, and `h5py` is present only from the range-request experiment in section 4.5 and is imported by no shipped code.
 
 ## 11. Visual language
 
 Bridge RNA is a light scientific-instrument theme, not a dark one.
 Its tokens: canvas `#eef2f7`, panels `#ffffff`, primary text `#1a2432`, accent blue `#2b7fff`, teal `#0bab9f`, warm `#d9791b`, and a dark navy header `#14294a` with a teal rule `#22c7bd`.
-Bridge Manifold matches this light chrome exactly, and uses a dark navy plot canvas (`#0e1d34`) inside it so the WebGL glyphs have contrast, which is the one deliberate departure.
+The map matches this light chrome exactly, and uses a dark navy plot canvas (`#0e1d34`) inside it so the WebGL glyphs have contrast, which is the one deliberate departure.
 
 The categorical palette was validated with the dataviz skill's checker against that navy plot surface: all eleven hues sit in the OKLCH L 0.48-0.67 band, clear the chroma floor, pass the adjacent-pair CVD floor (worst delta-E 8.4) and the normal-vision floor (worst delta-E 15.4), and hold at least 3:1 contrast against the surface.
 Perfect all-pairs CVD separation is impossible past a few categories on a scatter, so high-cardinality color-bys lean on secondary encoding: a searchable legend, hover that names the exact category, and a distinct OSDR symbol.
