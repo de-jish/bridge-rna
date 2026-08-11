@@ -262,10 +262,19 @@ def _write_archs4_metadata(cache_dir: Path, cluster_id: np.ndarray) -> None:
     # A slice with no usable label at all, so the Unknown path is always covered.
     for i in range(0, n, 37):
         raw[i] = ""
+    # And a slice with no *series* either. 839 rows of the real join carry an
+    # empty series_id - the samples present in the release-matched v2.5
+    # metadata and absent from the v2.latest the API serves. They are the rows
+    # that crash an index build which assumes "GSE" plus digits, so the fixture
+    # has to contain them or manifold/find.py is only ever tested against the
+    # easy half of its own input.
+    series = [f"GSE{5000 + int(c)}" for c in cluster_id]
+    for i in range(0, n, 53):
+        series[i] = ""
     pd.DataFrame({
         "global_index": np.arange(n, dtype=np.int32),
         "geo_accession": [f"GSM{9000000 + i}" for i in range(n)],
-        "series_id": [f"GSE{5000 + int(c)}" for c in cluster_id],
+        "series_id": series,
         "title": [f"sample {i}" for i in range(n)],
         "source_name": raw,
         "characteristics": [f"tissue: {r}" if r else "" for r in raw],
