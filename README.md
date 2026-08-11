@@ -13,7 +13,7 @@ Bridge RNA is one app with two pages.
 Pick a sample from NASA's Open Science Data Repository (OSDR).
 Bridge RNA returns its nearest Earth neighbours, drawn as a network of matches and the studies they came from, with an inspector and an optional AI summary.
 
-![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, matched against its nearest neighbours, with the top hit open in the inspector](docs/bridge-rna-interface.png)
+![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours and the three GEO studies they came from drawn as a network, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)
 
 The screenshot above is a real retrieval.
 The query is a mouse left-eye sample, and the studies it pulls back are all mouse retina studies.
@@ -25,7 +25,7 @@ The same space, seen all at once.
 Both collections - 2,108 NASA samples and 940,455 Earth samples - are placed in one shared projection and drawn as live points, colored by tissue.
 You can rotate it, switch between 2-D and 3-D, recolor it, and overlay a retrieval to see where a query and its matches sit.
 
-![The Bridge RNA map: the joint corpus as a 3-D projection, colored by tissue](docs/bridge-rna-map.png)
+![The Bridge RNA map: all 942,563 samples from both collections in one 3-D UMAP projection, colored by tissue, with the 2,108 NASA samples drawn as diamonds over the Earth cloud](docs/bridge-rna-map.png)
 
 ## How it works
 
@@ -249,6 +249,16 @@ The test tooling is a separate install, because running Bridge RNA does not need
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.
 The three browser suites boot the real app against the real `cache/` and assert on what the page reports about itself, down to each budget tier drawing exactly the point count it advertises.
 Each of them counts and prints the checks it actually ran, so the numbers above cannot quietly drift from the suites.
+
+The two screenshots at the top of this file are produced by the same harness, driving the same real app:
+
+```bash
+.venv/bin/python tests/screenshot_readme.py      # rewrites both images in docs/
+```
+
+It sizes the window to the content rather than assuming a viewport, and it exits non-zero if a panel ends up clipped or a figure runs off its canvas.
+Both views scroll internally, so a window that is too short does not produce a scrollbar, it silently crops the frame - which is how the previous retrieval screenshot lost 410 px of the inspector.
+The reasoning and the measurements are in `docs/readme_screenshots.md`.
 
 Three scripts check the science rather than the software, against the real corpus:
 

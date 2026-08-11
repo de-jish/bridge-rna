@@ -349,7 +349,13 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 51 browser checks, about three minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 156 cohort checks, about four minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/screenshot_readme.py       # rewrites README's two images, about three minutes
 ```
+
+**A screenshot of either view must be sized to the content, never to a fixed viewport.**
+Both views are fixed-height instruments that scroll internally, so a window shorter than the content does not produce a scrollable page - it produces a silently clipped one, which is how the shipped retrieval screenshot hid 410 px of the inspector from 2026-07-22 until it was recaptured.
+`tests/screenshot_readme.py` grows the window until no scroll container overflows, and separately measures the *figure*, because a Plotly canvas is exactly as big as its container whether or not the drawing inside it fits: it re-renders through `Plotly.toImage` and fails if the outer 3 px of the image carries ink. The 3-D camera is set outright and its distance searched for the largest framing that leaves the band clean, rather than dollied with wheel events, which is what let the first recapture run the point cloud off the canvas while every DOM check passed.
+Design, measurements and rejected alternatives: `docs/readme_screenshots.md`. `tests/screenshots.py` is the separate fourteen-frame gallery walkthrough and is unaffected.
 
 **The build is no longer a ten-minute job.** PCA is seconds and UMAP is about fourteen minutes, but t-SNE dominates everything, and almost all of that is the 3-D fit: openTSNE's FIt-SNE interpolation refuses more than two output dimensions, so 3-D falls back to Barnes-Hut, which is `n log n` with a much larger constant.
 `--skip-tsne` exists for exactly this reason, and skipping it is not a broken build: the t-SNE pill is shown disabled, the validator prints `SKIP` rather than failing, and everything else works.

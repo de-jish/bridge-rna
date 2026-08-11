@@ -6,6 +6,35 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-11 (the README screenshots, recaptured and measured instead of framed)
+
+Both images in `README.md` were replaced, and the harness that produces them is now committed as `tests/screenshot_readme.py`. Design doc, measurements and rejected alternatives: `docs/readme_screenshots.md`.
+
+**The retrieval screenshot was cut off, and it had been since 2026-07-22.**
+The inspector ended mid-record, so the top hit's publication, journal and DOI were not in the frame, and the network's lowest node was sliced by the bottom edge.
+Measured on the real app at the viewport that capture used, 1680x1010: `#details-panel` was hiding **410 px** and `.sidebar` **26 px**.
+That 410 px is the same number in the comment at `assets/retrieve.css:21-28` and in the 2026-07-26 entry below. The CSS was fixed then and is still correct; the image simply predated the fix and was never retaken.
+
+**A fixed viewport cannot be right for either view, which is the transferable part.**
+Both are fixed-height instruments that scroll internally, so a window shorter than the content does not produce a scrollable page, it produces a silently clipped one, and nothing in the capture output says so.
+`fit_viewport` now grows the window until no scroll container reports overflow, re-measuring after each step because a taller window changes what the panels lay out. Retrieval settles at **1680x1444**, the map at **1680x1010**.
+The check has to ignore anything under 40 px: `.visually-hidden` and Dash's checkbox wrappers are 1x1 clipped boxes by design and would otherwise report overflow forever.
+
+**A figure running off its canvas is a second failure mode, and the DOM cannot see it.**
+A Plotly canvas is exactly as big as its container whether or not the drawing fits. The first map recapture proved it: a 3-D camera dollied in with two wheel events reported no overflow anywhere while the cloud and the bottom row of tick numerals ran off the edge.
+So the figure is measured as pixels - re-rendered through `Plotly.toImage`, which excludes the floating key and badges, with the paper colour read from the image's own corner so it works on navy and on white. Ink in the outer 3 px is the hard failure; the outer 14 px is the margin the framing aims for.
+
+**The 3-D camera is now searched, not gestured.** A wheel step is a fixed fraction of the current distance, so a loop of wheel events cannot ask for a specific framing or be repeated after a resize. `eye` is set outright, and the distance chosen is the one with the most ink on the canvas among those leaving the band clean: **2.20**, at 5.44% fill, against 5.94% at 2.05 which touches the edge.
+The *direction* is deliberately not searched. Three candidates at three canvas heights scored within 0.01% of each other, which is noise, and noise picking the camera angle means the frame changes shape between runs. It is fixed at `(0.68, 0.68, 0.28)` as a stated compositional choice.
+Canvas height was searched too and does not earn its cost: 1010 px to 1450 px moves fill 5.44% to 5.83%, because what limits the frame is the sprawl of the x and y tick numerals along the bottom.
+
+**Only what a user could do.** The camera is a user action; `scene.domain`, axis visibility and marker sizes are not, so none were touched. Cropping and CSS `zoom` were rejected for the same reason - a screenshot that reframes the app by editing the figure is no longer a screenshot of the app.
+
+Both frames now report 0.000% ink in the outer band and no clipped panel, and the script exits non-zero if that stops being true, so a layout change that breaks the images fails the capture instead of shipping a cut one.
+The new frames also show a year of UI the old ones predated: the t-SNE pill and the projection-parameter readout, the Sample/Cohort/Upload mode tabs, the map key's corpus-shape footer, and the OSDR diamonds in 3-D that `render.py` used to discard.
+
+One incidental find, left alone deliberately: clicking the option a Dash 4 dropdown already holds leaves the Radix popover open rather than closing it, so the next click lands on the overlay. `choose()` skips the interaction when the trigger already reads right and presses Escape if the popover survives. Worth knowing in the browser suites.
+
 ## 2026-08-11 (production-readiness pass: the map becomes responsive, and the app becomes operable by keyboard)
 
 A whole-repository pass ahead of integration into a NASA-managed site.
