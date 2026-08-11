@@ -471,6 +471,106 @@ def main() -> int:
                 c.ok(False, "no GSM node to open in the inspector")
             rp.close()
 
+            print("\n=== 7b. finding a sample on the map ===")
+            page.goto(f"http://127.0.0.1:{args.port}/map", wait_until="networkidle")
+            wait_for_points(page)
+
+            def find_it(term):
+                page.fill("#find-input", "")
+                page.fill("#find-input", term)
+                page.press("#find-input", "Enter")
+                page.wait_for_timeout(3500)
+                return page.evaluate("""() => {
+                    const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+                    const t = (gd._fullData || []).find(t => t.name === 'found');
+                    return {
+                      marks: t ? (t._length !== undefined ? t._length : t.x.length) : 0,
+                      type: t ? t.type : null,
+                      status: (document.querySelector('#find-status') || {}).innerText || '',
+                      key: (document.querySelector('#legend-found') || {}).innerText || '',
+                      badges: (document.querySelector('#plot-badges') || {}).innerText || '',
+                      panel: (document.querySelector('#picked-group') || {}).innerText || '',
+                      frame: !!document.querySelector('#frame-find[style*="display: none"]')
+                             ? false : !!document.querySelector('#frame-find'),
+                    };
+                }""")
+
+            one = find_it("GSM4256053")
+            print(f"     GSM4256053 -> {one['marks']} mark(s), {one['type']}")
+            c.ok(one["marks"] == 1, f"a GSM marks exactly one point ({one['marks']})")
+            c.ok(one["type"] == "scattergl",
+                 f"the found layer is WebGL in 2-D, not the non-gl Scatter ({one['type']})")
+            c.ok("GSM4256053" in one["key"], "the found mark is named in the key")
+            c.ok("GSM4256053" in one["badges"], "the plot badge names what was found")
+            c.ok("GSE143281" in one["panel"],
+                 "the record panel carries the sample's series")
+            c.ok(one["frame"], "framing is offered for a found sample")
+
+            series = find_it("GSE228590")
+            print(f"     GSE228590 -> {series['marks']} marks, status: "
+                  f"{' '.join(series['status'].split())[:70]}")
+            c.ok(series["marks"] == 500,
+                 f"a huge series is capped at 500 marks ({series['marks']})")
+            c.ok("8,764" in series["status"] and "500" in series["status"],
+                 "the cap states what it dropped rather than being silent")
+            c.ok("8,764" in series["badges"] or "500" in series["badges"],
+                 "the badge reports the cap too")
+            c.ok("500" in series["key"] and "8,764" not in series["key"],
+                 "the key counts what is drawn, not what exists")
+
+            # A refusal must not read as a breakage: "liver" is the color-by's
+            # question and the message has to say so.
+            word = find_it("liver")
+            c.ok(word["marks"] == 0, "free text marks nothing")
+            c.ok("Color by" in word["status"],
+                 f"free text is pointed at the color-by: {word['status'][:80]}")
+            c.ok(not word["frame"], "no framing is offered when nothing was found")
+
+            missing = find_it("GSM99999999")
+            c.ok("not on this map" in missing["status"],
+                 f"an absent accession says so: {missing['status'][:80]}")
+            c.ok("Color by" not in missing["status"],
+                 "an absent accession is not confused with free text")
+
+            # Framing is a button, never automatic.
+            before = page.evaluate("() => document.querySelector"
+                                   "('#manifold-graph .js-plotly-plot')"
+                                   "._fullLayout.xaxis.range.slice()")
+            find_it("OSD-100")
+            after_find = page.evaluate("() => document.querySelector"
+                                       "('#manifold-graph .js-plotly-plot')"
+                                       "._fullLayout.xaxis.range.slice()")
+            c.ok(abs(after_find[1] - after_find[0]) > 20,
+                 f"a search does not move the viewport on its own ({after_find})")
+            page.click("#frame-find")
+            page.wait_for_timeout(3000)
+            framed = page.evaluate("() => document.querySelector"
+                                   "('#manifold-graph .js-plotly-plot')"
+                                   "._fullLayout.xaxis.range.slice()")
+            print(f"     x range {[round(v, 2) for v in before]} -> "
+                  f"{[round(v, 2) for v in framed]}")
+            c.ok(abs(framed[1] - framed[0]) < abs(after_find[1] - after_find[0]),
+                 f"the frame button zooms in ({framed})")
+            page.screenshot(path=str(SHOTS / "07-find.png"))
+
+            # Find works in 3-D; framing does not, and does not pretend to.
+            set_segment(page, "Dimensions", "3D")
+            page.wait_for_timeout(6000)
+            three = page.evaluate("""() => {
+                const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+                const t = (gd._fullData || []).find(t => t.name === 'found');
+                return {marks: t ? t.x.length : 0, type: t ? t.type : null,
+                        frame: !!document.querySelector('#frame-find[style*="display: none"]')
+                               ? false : !!document.querySelector('#frame-find')};
+            }""")
+            c.ok(three["marks"] == 12,
+                 f"the found set is still marked in 3-D ({three['marks']})")
+            c.ok(three["type"] == "scatter3d", "the 3-D found layer is scatter3d")
+            c.ok(not three["frame"],
+                 "3-D hides the frame button, which its camera would ignore")
+            set_segment(page, "Dimensions", "2D")
+            page.wait_for_timeout(3000)
+
             print("\n=== 8. console ===")
             real = [e for e in console_errors
                     if "favicon" not in e.lower() and "_dash-component-suites" not in e]
