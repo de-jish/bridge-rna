@@ -520,6 +520,44 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     return traces
 
 
+def _found_traces(coords, is_3d, found) -> tuple[list, int, int]:
+    """The marks for a found identifier, and how many of them there are.
+
+    Returns `(traces, drawn, total)` so the caller can badge what is on screen
+    and the rail can say what the cap dropped.
+
+    `Scattergl` in 2-D, deliberately, where `_retrieval_traces` uses plain
+    `Scatter`: that overlay is at most k+2 points and needs `markers+text` to
+    centre reliably, while a series can be 8,764 marks and the non-gl path would
+    crawl on them. Nothing here draws text, so there is no reason to pay for it.
+
+    No line is drawn between the marks, for the same reason `_retrieval_traces`
+    draws none between a query and its hits: the samples of one series are
+    related by provenance, not by position, and joining them would invite
+    reading the distances between them as a measurement.
+    """
+    points = [int(p) for p in (found.get("points") or []) if 0 <= int(p) < len(coords)]
+    if not points:
+        return [], 0, 0
+    total = len(points)
+    shown = points[:theme.FIND_MAX_MARKS]
+    arr = np.asarray(shown)
+
+    xyz = dict(x=coords[arr, 0], y=coords[arr, 1])
+    if is_3d:
+        xyz["z"] = coords[arr, 2]
+    Scatter = go.Scatter3d if is_3d else go.Scattergl
+    symbol = theme.FOUND_SYMBOL_3D if is_3d else theme.FOUND_SYMBOL
+    label = str(found.get("label") or "found")
+    return [Scatter(
+        **xyz, mode="markers", name="found",
+        marker=dict(size=theme.FOUND_SIZE * (0.5 if is_3d else 1.0),
+                    symbol=symbol, color=theme.FOUND_COLOR,
+                    line=dict(width=theme.FOUND_LINE, color=theme.FOUND_COLOR)),
+        hovertemplate=f"<b>{label}</b><extra></extra>",
+        showlegend=False)], len(shown), total
+
+
 def _map_ranks(coords, hits: list[int], members: list[int]) -> list:
     """Where each hit sits in the map's *own* ordering, per hit.
 
@@ -561,7 +599,7 @@ def _map_ranks(coords, hits: list[int], members: list[int]) -> list:
 
 
 def build_figure(method, dims, color_by, layers, budget, viewport,
-                 retrieval=None):
+                 retrieval=None, found=None):
     is_3d = dims == "3d"
     coords = data.coords(method, dims)
     n_archs4, n_osdr, total = data.counts()
@@ -674,6 +712,27 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
         else:
             badges.append(
                 f"Showing retrieval: <b>{n_hits}</b> hit{'s' if n_hits != 1 else ''}")
+
+    # --- Layer 4: a found identifier, above everything ----------------------
+    #
+    # Last because it is the thing the user asked for most recently. It is not
+    # dimmed by a retrieval and does not dim one: the two answer different
+    # questions and either can be on screen alone.
+    if found:
+        traces, drawn_marks, total_marks = _found_traces(coords, is_3d, found)
+        for trace in traces:
+            fig.add_trace(trace)
+        if total_marks:
+            label = str(found.get("label") or "found")
+            if drawn_marks < total_marks:
+                # Never a silent cap: the badge reports what is drawn and what
+                # exists, so a series bigger than the cap says so on the plot as
+                # well as on the rail.
+                badges.append(f"Found <b>{label}</b>: marking "
+                              f"<b>{drawn_marks:,}</b> of {total_marks:,}")
+            else:
+                badges.append(f"Found <b>{label}</b>: <b>{total_marks:,}</b> "
+                              f"sample{'s' if total_marks != 1 else ''}")
 
     fig.update_layout(**theme.base_figure_layout(is_3d))
     return fig, legend_data, badges

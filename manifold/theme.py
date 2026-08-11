@@ -195,6 +195,41 @@ RETRIEVAL_DIM_OSDR = 0.30
 RETRIEVAL_MAX_NUMERALS = 25
 
 
+# --- A found sample ----------------------------------------------------------
+#
+# What the find box marks. It is white for the reason the hit ring is white and
+# by the same measurement: no hue clears 3:1 against the worst categorical
+# tissue bucket on this background, so a found sample carrying a hue of its own
+# would be invisible wherever it happened to land. Shape is the free channel,
+# and an X collides with nothing already drawn - the corpus is circles and
+# diamonds, the query is a star, and a hit is an open circle or an open square.
+#
+# Two symbols because Scatter3d takes eight and `x-open` is not among them,
+# which is the same trap that took the whole figure callback down with a 500 the
+# first time a retrieval was opened in 3-D. Both spellings are the same mark.
+FOUND_SYMBOL = "x-open"
+FOUND_SYMBOL_3D = "x"
+FOUND_COLOR = "#ffffff"
+FOUND_SIZE = 15.0
+FOUND_LINE = 2.0
+
+# Marks stop here, and the status line says what was dropped.
+#
+# A GEO series can be enormous - GSE228590 is 8,764 samples, and 305 series
+# carry more than 200 - and past a few hundred X's the marks stop locating
+# individual samples and start painting a region, which is a color-by's job and
+# not this one's. It is also the channel GSE was refused as a color-by for: a
+# pure batch label with 333x lift, which must not become a second way to paint
+# the map by batch.
+#
+# The cap is stated rather than silent, the same rule RETRIEVAL_MAX_NUMERALS and
+# COMPARISON_MAX_LABELS follow. Marking the first 500 in point order is
+# deliberately not a sample: point order is the corpus's own order, so the
+# marked subset is reproducible between identical searches rather than shifting
+# under the user on every redraw.
+FIND_MAX_MARKS = 500
+
+
 def color_for_index(i: int) -> str:
     """Categorical color for the i-th distinct category (wraps into Other-grey)."""
     if i < len(CATEGORICAL):

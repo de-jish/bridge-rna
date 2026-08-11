@@ -243,3 +243,101 @@ def test_a_well_formed_sample_key_the_map_lacks_is_absent_not_a_bad_shape(corpus
         got = find.find(query)
         assert got["points"] == [], query
         assert got["reason"] == "absent", query
+
+
+# --- The mark on the plot, and its key row -----------------------------------
+
+def test_the_found_symbol_is_valid_in_three_dimensions():
+    """Scatter3d takes eight symbols and rejects the rest outright rather than
+    degrading - the failure that took the whole figure callback down with a 500
+    the first time 3-D was opened with a retrieval showing. `x-open` is one of
+    the ones it refuses, which is exactly why there are two spellings."""
+    import plotly.graph_objects as go
+    from manifold import theme
+
+    go.Scatter3d(marker=dict(symbol=theme.FOUND_SYMBOL_3D))   # must not raise
+    go.Scattergl(marker=dict(symbol=theme.FOUND_SYMBOL))
+    with pytest.raises(ValueError):
+        go.Scatter3d(marker=dict(symbol=theme.FOUND_SYMBOL))
+
+
+def _found_traces_in(fig):
+    return [t for t in fig.data if getattr(t, "name", None) == "found"]
+
+
+def test_a_found_set_is_drawn_and_badged(corpus):
+    from manifold import render
+    found = find.find("GSM9000005")
+    fig, _, badges = render.build_figure(
+        "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
+    traces = _found_traces_in(fig)
+    assert len(traces) == 1
+    assert len(traces[0].x) == 1
+    assert any("GSM9000005" in b for b in badges)
+
+
+def test_nothing_is_drawn_or_badged_without_a_find(corpus):
+    from manifold import render
+    for found in (None, {"points": [], "label": "GSE999"}):
+        fig, _, badges = render.build_figure(
+            "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
+        assert _found_traces_in(fig) == []
+        assert not any("Found" in b for b in badges)
+
+
+def test_the_marks_are_capped_and_the_cap_says_what_it_dropped(corpus,
+                                                               monkeypatch):
+    """A silent cap reads as "this is all of them". GSE228590 is 8,764 samples
+    on the real corpus, and 305 series carry more than 200."""
+    from manifold import render, theme
+
+    monkeypatch.setattr(theme, "FIND_MAX_MARKS", 10)
+    found = {"points": list(range(200)), "label": "GSE5000"}
+    fig, _, badges = render.build_figure(
+        "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
+    assert len(_found_traces_in(fig)[0].x) == 10
+    badge = next(b for b in badges if "GSE5000" in b)
+    assert "10" in badge and "200" in badge, badge
+
+
+def test_the_key_row_counts_what_is_drawn_not_what_exists(corpus, monkeypatch):
+    """The key's standing rule: a count is read as "how many am I looking at"."""
+    from manifold import layout, theme
+
+    monkeypatch.setattr(theme, "FIND_MAX_MARKS", 10)
+    rows = layout.found_key_children({"points": list(range(200)),
+                                      "label": "GSE5000"})
+    text = str(rows)
+    assert "GSE5000" in text
+    assert "10" in text and "200" not in text
+
+
+def test_a_find_with_no_points_gets_no_key_row(corpus):
+    from manifold import layout
+    assert layout.found_key_children(None) == []
+    assert layout.found_key_children({"points": [], "label": "x"}) == []
+
+
+def test_the_found_layer_is_webgl_in_two_dimensions(corpus):
+    """`_retrieval_traces` uses the non-gl Scatter deliberately, for at most
+    k+2 points that need markers+text centred. A series is up to 8,764 marks
+    and draws no text, so it must not inherit that choice."""
+    import plotly.graph_objects as go
+    from manifold import render
+
+    found = {"points": list(range(300)), "label": "GSE5000"}
+    fig, _, _ = render.build_figure(
+        "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
+    assert isinstance(_found_traces_in(fig)[0], go.Scattergl)
+
+    fig3, _, _ = render.build_figure(
+        "pca", "3d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
+    assert isinstance(_found_traces_in(fig3)[0], go.Scatter3d)
+
+
+def test_a_found_point_outside_the_corpus_is_dropped_not_drawn(corpus):
+    from manifold import render
+    found = {"points": [0, corpus["total"] + 5, -1], "label": "GSE5000"}
+    fig, _, _ = render.build_figure(
+        "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
+    assert len(_found_traces_in(fig)[0].x) == 1

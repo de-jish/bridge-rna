@@ -479,6 +479,40 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
 
 
+def found_key_children(found: dict | None) -> list:
+    """The key row for a found identifier.
+
+    A mark with no row is a glyph a reader can only decode by hovering it, which
+    is the whole finding `docs/map_key.md` records - and this one is the fifth
+    encoding the map can carry at once, so it earns a row rather than being the
+    exception.
+
+    The count is what is *drawn*, following the same rule as every other row
+    here, so a series past `FIND_MAX_MARKS` reports the cap rather than the
+    total. The plot badge carries "500 of 8,764"; a key row saying 8,764 beside
+    500 visible marks would be the count rule broken in the one place it is most
+    obviously checkable.
+
+    Unlike the member mark, this one needs no dimensionality argument. A star
+    becomes a diamond in 3-D because `Scatter3d` has no star and a diamond is a
+    genuinely different shape; here both spellings - `x-open` in 2-D and `x` in
+    3-D, since `Scatter3d` rejects the first - draw the same X, so the key is
+    the same row in both views and says so with one class.
+
+    White comes from the stylesheet rather than from `theme` through an inline
+    style, which is the hit rings' arrangement and for the hit rings' reason:
+    white here is the shape channel's ink, not a hue identifying anything, so
+    there is no per-cohort value that could drift out of step with the plot.
+    """
+    points = (found or {}).get("points") or []
+    if not points:
+        return []
+    drawn = min(len(points), theme.FIND_MAX_MARKS)
+    return [html.Div(className="bm-key bm-key--found", children=[
+        _key_row("found", str(found.get("label") or "found"), drawn),
+    ])]
+
+
 def corpus_key_children(layers: list | None) -> list:
     """The shape key for the two corpora, under the color list.
 
@@ -515,15 +549,18 @@ def legend_panel() -> html.Div:
     callback output cannot be checked - a typo in one of their ids fails
     silently at runtime instead of loudly at startup.
 
-    The three sections are ordered by how transient each is. The retrieval sits
-    at the top because it is the thing the reader just asked for and the thing
-    that will be gone next search; the color list is the standing state of the
-    map and is the only part that scrolls; the corpus shapes are a footnote and
-    never change. Only the middle one can grow, so only the middle one scrolls.
+    The four sections are ordered by how transient each is. A found sample sits
+    above even the retrieval, because it is the most fleeting mark on the map -
+    it is replaced by the next thing typed into the box, where a retrieval
+    survives until the next search on the other view; the color list is the
+    standing state of the map and is the only part that scrolls; the corpus
+    shapes are a footnote and never change. Only the color list can grow, so
+    only the color list scrolls.
     """
     return html.Div(
         id="legend", className="bm-legend", style={"display": "none"},
         children=[
+            html.Div(id="legend-found"),
             html.Div(id="legend-retrieval"),
             html.Div(id="legend-color", className="bm-legend-section", children=[
                 html.Div(id="legend-title", className="bm-legend-title"),

@@ -1206,7 +1206,7 @@ def test_the_key_glyph_shapes_all_have_a_stylesheet_rule():
     from the shape name, so it never appears in a className literal."""
     css = _all_css()
     shapes = ["star", "diamond", "hit-a", "hit-b", "hit-both",
-              "corpus-archs4", "corpus-osdr"]
+              "found", "corpus-archs4", "corpus-osdr"]
     missing = [s for s in shapes if f".bm-key-glyph.is-{s}" not in css]
     assert not missing, f"key glyph shapes with no CSS rule: {missing}"
 

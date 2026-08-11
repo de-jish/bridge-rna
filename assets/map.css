@@ -321,6 +321,7 @@
 /* The rule is on the modifier, not on `:not(:last-child)`: each key is the only
    child of its own slot div, so it is always a last child and the sibling
    selector could never fire. */
+.bm-key--found,
 .bm-key--retrieval {
   margin-bottom: 9px; padding-bottom: 9px;
   border-bottom: 1px solid rgba(90, 130, 185, 0.28);
@@ -412,6 +413,22 @@
 .bm-key-glyph.is-hit-both::after {
   content: ""; position: absolute; inset: 4px;
   border: 2px solid #ffffff; border-radius: 50%;
+}
+
+/* A found sample: an X, white for the same measured reason the hit rings are
+   white - no hue clears 3:1 against the worst categorical tissue bucket on this
+   background, so shape is the channel and white is its ink.
+
+   One rule for both dimensionalities. The plot draws `x-open` in 2-D and `x` in
+   3-D only because Scatter3d's eight-symbol vocabulary has no `x-open`; they
+   are the same mark, and at 14 px an outlined X and a filled one are the same
+   handful of pixels, so keying them apart would invent a distinction the plot
+   is not making. */
+.bm-key-glyph.is-found {
+  background: #ffffff;
+  clip-path: polygon(20% 0%, 50% 30%, 80% 0%, 100% 20%, 70% 50%,
+                     100% 80%, 80% 100%, 50% 70%, 20% 100%, 0% 80%,
+                     30% 50%, 0% 20%);
 }
 
 /* The corpus shapes. Neutral-filled: these marks take their color from the
