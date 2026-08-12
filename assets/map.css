@@ -70,8 +70,8 @@
 /* The radio itself carries the state but adds nothing visually - so it is
    hidden from the eye and *kept on the page*. It used to be `display: none`,
    which takes an element out of the tab order and out of the accessibility
-   tree as well as out of the picture: Projection, Dimensions and the ARCHS4
-   point budget - three of the map's six controls - could not be reached or
+   tree as well as out of the picture: Projection, Dimensions and the number of
+   ARCHS4 points - three of the map's six controls - could not be reached or
    operated by keyboard at all. The `:focus-within` rule below has been sitting
    here the whole time and could never fire, which is what gave it away.
 
@@ -187,6 +187,93 @@
   padding: 0;
 }
 .bm-find-input input::placeholder { color: var(--text-muted); }
+
+/* ---- The suggestion list ------------------------------------------------
+   Inline under the box, not floating. The rail is a scroll container, so an
+   absolutely-positioned popup would be clipped by it or would scroll away from
+   the field it belongs to; inline it is always attached and always in flow.
+
+   `max-height` is what keeps "compact" true. Ten suggestions in a window about
+   five and a half rows tall means the sixth row is visibly cut, which is the
+   affordance that says the list scrolls - a window sized to a whole number of
+   rows looks complete when it is not. The rail never grows past this no matter
+   what is typed.
+
+   Two independent facts decide whether this is on screen, and each has exactly
+   one owner. `:empty` is the server's: no rows, nothing to show. `.is-closed`
+   is the browser's: Escape, a click outside, a row chosen. Neither writes an
+   inline style, so they compose instead of racing - which is the whole reason
+   the open/closed state lives in a class rather than in a callback. */
+.bm-suggest {
+  margin-top: 6px;
+  max-height: 196px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 6px 20px rgba(20, 41, 74, 0.14), 0 2px 6px rgba(20, 41, 74, 0.08);
+  padding: 3px;
+}
+.bm-suggest:empty { display: none; }
+#find-group.is-closed .bm-suggest { display: none; }
+.bm-suggest::-webkit-scrollbar { width: 6px; }
+.bm-suggest::-webkit-scrollbar-thumb {
+  background: rgba(120, 150, 195, 0.4); border-radius: 3px;
+}
+
+/* Identifier above, what distinguishes it below.
+
+   Two lines rather than one, and this was measured rather than preferred. Side
+   by side on a 268 px rail the two compete for about 220 px, and the row that
+   loses is decided by CSS rather than by which half matters: with both at the
+   default shrink, "GSM5028824" beside "GSE165242 · Embryo / stem cell" ellipsed
+   to "GSM502…" - the accession, the one string in the row that cannot be
+   inferred from the rest of it. Weighting the shrink towards the detail helped
+   and did not fix it, because any shrink at all on a 78 px label truncates it;
+   only `flex-shrink: 0` keeps it whole, and that spends the detail down to
+   "OSD-100 · l…" instead. Neither half is expendable: for the OSDR samples the
+   names differ in their last characters (Rep1_M23 against Rep2_M24), which is
+   exactly what an ellipsis eats.
+
+   Stacked, both are whole at every width, at a cost of about 11 px per row -
+   which the max-height above absorbs by showing four rows and part of a fifth
+   instead of five and part of a sixth. The list still scrolls, still holds ten,
+   and no longer hides the thing a reader is scanning for. */
+.bm-suggest-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  /* WCAG 2.2 SC 2.5.8 puts the floor for a pointer target at 24x24 CSS px. */
+  min-height: 24px;
+}
+/* Hover and keyboard get the same treatment, because they mean the same thing:
+   this is the row that Enter or a click would take. */
+.bm-suggest-row:hover,
+.bm-suggest-row.is-active { background: var(--accent-soft); }
+.bm-suggest-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
+/* Both lines still ellipse rather than wrap. Nothing in the corpus is long
+   enough to need it at this width - it is the guard that keeps a row one row
+   tall whatever a future metadata join puts in it, so the list's height stays a
+   function of how many suggestions there are and not of what they say. */
+.bm-suggest-label,
+.bm-suggest-detail {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bm-suggest-label { font-size: 12px; color: var(--text-primary); }
+.bm-suggest-detail { font-size: 11px; color: var(--text-secondary); }
+/* A well-formed identifier this map does not carry. Not a row: there is
+   nothing to select, so it must not look selectable. */
+.bm-suggest-empty {
+  padding: 7px 8px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
 /* The status and the button hang off the control they qualify, at the rail's
    standing 9 px offset - the same one .bm-coverage and .bm-params use. */
 #find-status { margin-top: 9px; }
@@ -259,10 +346,43 @@
    canvas on every control change. */
 .bm-plot-wrap .dash-loading-callback, .bm-plot-wrap ._dash-loading-callback { background: transparent !important; }
 
+/* The strip across the top of the canvas. It holds two things now: the badges,
+   which report what is drawn right now, and the reset, which is the one action
+   that changes what is drawn. They share a wrapping flex row so the button
+   travels with the badges instead of being pinned to a coordinate the badges
+   can wrap into.
+
+   `pointer-events: none` on the strip is what keeps the badges from eating
+   drags meant for the plot underneath; the button turns it back on for itself
+   alone. */
 .bm-plot-badges {
   position: absolute; top: 12px; left: 14px; z-index: 6;
-  display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  pointer-events: none;
 }
+.bm-badges { display: contents; }
+/* Badge-shaped so it belongs to the strip, but outlined in the accent and
+   raised on hover so it does not read as one more thing to be read. */
+.bm-reset-view {
+  pointer-events: auto;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #dbe9ff;
+  background: rgba(14, 29, 52, 0.82);
+  border: 1px solid rgba(120, 170, 255, 0.75);
+  border-radius: 20px;
+  padding: 4px 12px;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.bm-reset-view:hover {
+  background: rgba(43, 127, 255, 0.28);
+  border-color: #7db0ff;
+  color: #fff;
+}
+.bm-reset-view:focus-visible { outline: 2px solid #7db0ff; outline-offset: 2px; }
 .bm-badge {
   background: rgba(14, 29, 52, 0.82);
   color: #cfe0f7;

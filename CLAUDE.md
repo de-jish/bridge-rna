@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `app.py` is the single entry point and owns the header and the router.
 **The router must decline to repaint a route that is already on screen.** `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` alone let the router rebuild the view on every load. Rebuilding the retrieval view reads the OSDR catalog, so its response landed a few hundred milliseconds later, on top of whatever the user had done meanwhile - clicking Cohort on arrival opened the cohort panel and then closed it again, 6 times out of 6, while the click's own callback had returned the right answer. `route-store` records what was painted and `app.navigation_for` is the decision, split out so it is testable without Dash plumbing. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 387 tests pass in about twenty-seven seconds, plus 297 browser checks: 71 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 156 in `tests/e2e_cohort_check.py`.
+**Current state: built, run on the real corpus, and tested.** 401 tests pass in about twenty-seven seconds, plus 363 browser checks: 129 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 164 in `tests/e2e_cohort_check.py`.
 Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
@@ -50,7 +50,7 @@ Design and every measurement: [`docs/design-notes.md`](docs/design-notes.md#coho
 
 Four things about it are load-bearing.
 
-**A cohort is `(study, tissue, spaceflight arm)` by default, and study is pinned.** That is OSDR's own curated ISA-Tab factor grouping: 212 cohorts with two or more members across 70 studies, median size 10, max 38, covering 2,105 of 2,108 embedded samples. Tissue or arm can be removed to merge cohorts, but **study can never be unticked**, because random samples from one study already reach 0.9805 mean pairwise cosine against 0.9933 for a real cohort - pooling across studies would average across the corpus's strongest batch boundary. Six further facets (sex, strain, genotype, habitat, duration, diet) were offered and **were removed on 2026-08-05, and must not be reintroduced without an argument that answers this**: every one of them could only *split* a cohort, and stability rises steeply with size (measured over all 212 cohorts: 0.34 at k=2 against 0.86 at k>=15), so they traded away the exact quantity the feature exists to buy in return for a contrast the two-arm comparison answers attributably. The columns remain in the parquet and remain map color-bys; re-adding one is a single line in `FACETS` and nothing else hard-codes a facet. The arm is the raw OSDR value rather than the binary Flight/Ground collapse, because a basal animal was sacrificed at experiment start and a vivarium animal never entered flight hardware.
+**A cohort is `(study, tissue, spaceflight arm)` by default, and study is pinned.** That is OSDR's own curated ISA-Tab factor grouping: 212 cohorts with two or more members across 70 studies, median size 10, max 38, covering 2,105 of 2,108 embedded samples. Tissue or arm can be removed to merge cohorts, but **study can never be unticked**, because random samples from one study already reach 0.9805 mean pairwise cosine against 0.9933 for a real cohort - pooling across studies would average across the corpus's strongest batch boundary. Six further facets (sex, strain, genotype, habitat, duration, diet) were offered and **were removed on 2026-08-05, and must not be reintroduced without an argument that answers this**: every one of them could only *split* a cohort, and stability rises steeply with size (measured over all 212 cohorts: 0.34 at k=2 against 0.86 at k>=15), so they traded away the exact quantity the feature exists to buy in return for a contrast the two-arm comparison answers attributably. The columns remain in the parquet; re-adding one is a single line in `FACETS` and nothing else hard-codes a facet. They are no longer map color-bys either - those nine went on 2026-08-12, for a different reason recorded below. The arm is the raw OSDR value rather than the binary Flight/Ground collapse, because a basal animal was sacrificed at experiment start and a vivarium animal never entered flight hardware.
 
 **Each member is L2-normalized before averaging.** This is invariant 2 applied one level up: the raw norm is a transcriptome-concentration axis spanning 3.9x, not a nuisance scale, so averaging raw vectors would let the most concentrated members cast the loudest votes. It is also the maximum-likelihood vMF mean direction, which makes ranking by the pooled vector exactly ranking by the unweighted mean of the members' own cosines - one animal, one vote. Measured, it changes almost nothing *here* (median cos 0.9999995 against the raw mean, since within-cohort norm spread is 1.09x) and it is kept because it becomes correct the moment anyone unticks Tissue.
 
@@ -99,6 +99,11 @@ So with the cache present, every sample that can be retrieved at all is retrieve
 Unavailable samples are shown **disabled with the reason** rather than hidden, and the picker never defaults to a disabled option.
 
 Three features that appear in older prose are **gone and must not be reintroduced as current behavior**: the lasso selection tool and its 512-d statistical readout (with `manifold/coherence.py` and the right-hand readout panel), the hnswlib ANN index and population-moment artifacts that existed only to serve it, and the precomputed density raster underlay (with its PNGs, its `--density-only` flag, and the Pillow dependency).
+
+**The nine OSDR-only color-bys are gone too, as of 2026-08-12** - Flight vs Ground, Spaceflight arm, Strain, Sex, Genotype, Study, Habitat, Mission duration, Diet - along with `data._flight_status`, the derived column it wrote, and the `_osdr_field` resolver factory.
+None of them separated anything: they colored 2,108 of 942,563 points, scattered through a corpus whose structure is set by the 940,455 they sit among.
+`colorby.REGISTRY` is Tissue and Species, and both color the whole map.
+**The coverage machinery is not vestigial and must not be simplified away with them.** Tissue *becomes* an OSDR-only field on a machine that never fetched `cache/archs4_metadata.parquet`, which is the state a fresh clone starts in - and on that path the scope note, the amber partial bar, `GROUP_OSDR`, and the renderer's faint context cloud are all still live. That is invariant 5, and degraded Tissue is now the only route to it, so the tests assert it there rather than through a deleted field. Measurements and the fixture consequence: [`docs/design-notes.md`](docs/design-notes.md#osdr-only-color-bys).
 Where that history is instructive it is recorded as history, clearly marked.
 
 Two approximations that appear in older prose are also gone: PCA is no longer fit on a 60,000-point subsample and UMAP is no longer a landmark fit plus `.transform()`.
@@ -161,13 +166,17 @@ manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, arc
                          tissue, and the projection_stats build record the rail reads
 manifold/tissue.py       the shared tissue vocabulary (canonical_tissue, coalesce_tissue)
 manifold/colorby.py      the coverage-aware color-by registry; the map's honesty layer
-manifold/find.py         an identifier -> the points it names. Four grammars, no
+manifold/find.py         an identifier -> the points it names, and the
+                         completions of one being typed. Four grammars, no
                          free text, no Dash, no embedding
 manifold/render.py       layered figure build (ARCHS4 cloud, OSDR overlay)
 manifold/sampling.py     stratified + viewport-aware ARCHS4 subsampling
 manifold/layout.py       two-column shell, control rail, floating legend, the
                          METHOD_LABELS registry and the projection-parameter readout
 manifold/callbacks.py    controls -> figure, zoom -> level of detail, coverage readout
+assets/find-suggest.js   the find box's combobox behaviour: keyboard, open/closed,
+                         scroll-into-view. The map's only JavaScript, because a
+                         keystroke is the one thing Dash cannot express
 manifold/theme.py        chrome tokens, dark plot canvas, validated categorical palette
 manifold/bridge_rna.py   thin import shim for the reusable Bridge RNA functions
 ```
@@ -252,6 +261,10 @@ Five things about it are load-bearing.
 **The 839 rows with an empty `series_id` are filtered before parsing.** `int(s[3:])` raises on them and takes the index build with it; coercing to 0 would file them under a series that does not exist. The fixture corpus carries the same shape of row. The index is int32 keys and rows: 15.0 MB and 460 ms once, against 96.8 MB for a `pd.Index` on an 80.8 MB working set.
 
 **Framing is a button and never automatic**, and the second reason is the stronger one. A found set can span the map - OSD-457's 192 samples framed to 1.22x the corpus before `_clamped_to_corpus` went in, so the "frame" zoomed *out* - and a 2-D neighbourhood is not a similarity neighbourhood here, its 20 nearest points overlapping the true cosine top-20 by a median of 0. Marking answers "where is it"; zooming asserts more. `test_finding_something_never_moves_the_viewport_by_itself` pins it structurally.
+
+**The box completes an identifier as it is typed, and the suggestions are prefixes of the same four grammars - never a free-text search.** That refusal is the module's central decision and a dropdown was the obvious way to reintroduce it by accident; "liver" still produces no list and still points at the Tissue color-by. Three things about the wiring are load-bearing and each fixed a defect found in the browser. `dcc.Input`'s `debounce` is **off**, so `value` publishes per keystroke and the commit is named outright - `n_submit`, `n_blur`, and a chosen row - which is what keeps a 942,563-point figure from being rebuilt on every letter. **Nothing that changes per keystroke may be an Input of the callback that writes `find-store`**, because a pattern-matching `ALL` input fires whenever its family is *re-rendered* and Dash discards the response to a superseded request: with the suggestion family on that callback, a keystroke's no-op overtook an Enter the server had already answered, and the first find of every session was silently lost. So the family's input lives on `choose_suggestion`, which publishes a `find-chosen` store, and `test_nothing_that_changes_per_keystroke_can_reach_the_search` asserts the property rather than the symptom. Finally, **whether the list is open is the browser's business and what is in it is the server's** - two facts, one owner each, composed by CSS from `:empty` and one `is-closed` class, so no callback writes a `style` and the two cannot race. `assets/find-suggest.js` is the map's only JavaScript and exists for the one thing Dash cannot express: a keystroke. Design, measurements and the two-line row: [`docs/design-notes.md`](docs/design-notes.md#find-autocomplete).
+
+**One control undoes every framing, and that is a finding rather than a convenience.** Framing a find, framing a retrieval and a plain scroll-zoom all write the same `viewport-store`, so by the time it is written they are indistinguishable and there is exactly one thing to undo. "Reset view" sits on the plot rather than the rail because it qualifies the viewport, which belongs to the plot, and it is shown only while the map is framed. **`callbacks.viewport_axes` must keep saying `autorange` outright when there is no viewport**: `uirevision="keep"` preserves the reader's zoom unless the incoming figure *changes* the attribute, and an absent range key is not a changed value, so a reset that merely omits it leaves the map where it was. Verified on the real corpus across all three projections and all four retrieval paths. Design: [`docs/design-notes.md`](docs/design-notes.md#reset-view).
 
 **Marks are capped at `theme.FIND_MAX_MARKS` (500) and the cap states what it dropped**, in the status, the badge and the key row - the rule `RETRIEVAL_MAX_NUMERALS` already follows. The key row counts what is *drawn*, so a series of 8,764 shows 500.
 
@@ -368,10 +381,10 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python tests/check_join.py              # the join, on the real corpus
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 387 tests, about twenty-seven seconds
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 71 browser checks, about four minutes
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 401 tests, about twenty-seven seconds
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 129 browser checks, about five minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 156 cohort checks, about four minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 164 cohort checks, about five minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/screenshot_readme.py       # rewrites README's two images, about three minutes
 ```
 
@@ -426,7 +439,7 @@ The one exception is the brand tile, under WCAG 1.4.3's logotype clause, and `01
 `test_every_text_token_clears_wcag_aa_on_every_surface` computes the ratios from the stylesheet, so a palette edit that reintroduces the failure fails there rather than in a browser; `test_theme_matches_the_bridge_rna_tokens` covers all 19 mirrored constants, because `theme.py`'s copy had already gone stale on `TEXT_MUTED`.
 
 **A control hidden with `display: none` is a control nobody can reach.**
-`.bm-seg` hid the radio input that carries the segmented control's state, which took Projection, Dimensions and the ARCHS4 point budget out of the tab order and out of the accessibility tree - three of the map's six controls, mouse-only.
+`.bm-seg` hid the radio input that carries the segmented control's state, which took Projection, Dimensions and the number of ARCHS4 points out of the tab order and out of the accessibility tree - three of the map's six controls, mouse-only.
 It is clipped now, not removed. The `:focus-within` rule on the option label had been sitting in that file unable to fire the whole time, which is the tell to look for.
 
 **Dash names a Dropdown by its own value and a Slider not at all**, so "OSDR study: OSD-100" reached a screen reader as "OSD-100, button".

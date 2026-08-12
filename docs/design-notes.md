@@ -23,6 +23,9 @@ The last of those is the part worth keeping: several of the features below were 
 | [The even split](#stability-panel-even-split) | laying a comparison's two arms out as equals |
 | [The map key](#map-key) | decoding every mark the map can draw |
 | [Finding a sample](#finding-a-sample-on-the-map) | locating one sample among 942,563, and the probe that was cut |
+| [Completing an identifier](#find-autocomplete) | suggesting what is being typed, without becoming a free-text search |
+| [One reset for every framing](#reset-view) | undoing a frame, whoever narrowed the view |
+| [The OSDR-only color-bys](#osdr-only-color-bys) | why nine fields were removed and what the machinery is still for |
 | [File ingestion](#file-ingestion) | embedding an uploaded counts file and retrieving against it |
 | [README screenshots](#readme-screenshots) | capturing the two images by measurement rather than by eye |
 
@@ -1414,6 +1417,151 @@ Note that the *record* half of the probe shipped anyway, through the find box: l
 35 unit tests in `tests/test_find.py`, all against the fixture corpus: the four grammars, normalization, each of the four miss reasons, the blank-`series_id` filter, index dtypes and one-time construction, the coverage degradation with the join removed, the mark's cap and its WebGL trace type, the key row's count, the panel's component types for internal versus external links, and the structural check that a search cannot move the viewport.
 
 20 browser checks in `tests/e2e_check.py` against the real corpus, taking it from 51 to 71: a GSM marking exactly one point, the 8,764-sample series capped at 500 with the cap stated in three places, free text pointed at the color-by, an absent accession distinguished from it, the viewport unmoved until the button is pressed, and 3-D marking the set while hiding a frame button its camera would ignore.
+
+---
+
+<a id="find-autocomplete"></a>
+
+## Completing an identifier, without becoming the free-text search that was refused
+
+### What this adds
+
+The find box took a whole identifier or nothing.
+That is a reasonable contract for `GSM4256053`, which a reader pastes, and a poor one for `OSD-137`, which they half-remember, and a bad one for `Mmus_BAL-TAL_LVR_FLT_Rep1_F1`, which nobody types correctly twice.
+As of 2026-08-12 the box suggests completions while it is being typed: a bounded, scrollable listbox with full combobox semantics, driven by mouse, touch and keyboard.
+
+### 1. The rule that keeps it from being a search
+
+`manifold/find.py` refuses free text, and that refusal is a decision with a measurement behind it: `archs4_metadata.parquet` carries `title`, `source_name` and `characteristics`, and a substring scan of 940,455 rows costs about 200 ms - affordable, and still wrong, because "liver" would return hundreds of rows and read as a biological query on the one map whose whole design is that a field declares what it does and does not describe.
+
+Suggestions could have quietly reintroduced exactly that, as a dropdown.
+They do not. **Every suggestion is a prefix of one of the four grammars `find()` already resolves**, so a suggestion is a completion of what is being typed and never a guess at what it might have meant.
+Typing `liver` produces no list at all, and the sentence under the box still points at the Tissue color-by.
+
+The one apparent exception is not one. An OSDR sample *name* is matched by substring rather than by prefix, because a name is itself an identifier, there are 2,108 of them rather than 940,455, and nobody remembers whether the one they want begins `Mmus_C57-6J_LVR` or ends `_FLT_Rep1_M23`.
+
+### 2. What each grammar costs
+
+| typed | how it is resolved | measured, warm |
+| --- | --- | --- |
+| `GSM4256` | numeric-prefix scan of the sorted int32 accession index | ~2 ms |
+| `GSE1652` | the same, plus `np.unique` on the slice for each series' sample count | ~2 ms |
+| `OSD-10` | scan of the 70-key study index | ~8 ms |
+| `Mmus_C57` | substring scan of 2,108 OSDR keys | <1 ms |
+
+The accession index stores numbers, not strings - 15.0 MB of int32 against 96.8 MB for a pandas string index, which is the measurement that made the find box affordable in the first place.
+A numeric prefix is therefore not a string compare but a union of decade ranges: the integers beginning "42" are `[42, 43)`, then `[420, 430)`, then `[4200, 4300)`, and so on.
+Nine `searchsorted` pairs cover every GEO accession ever issued.
+The first call of a session pays the index's one-time 460 ms build, which is the same build the first *search* has always paid for, now paid a few keystrokes earlier.
+
+### 3. Typing must not run a search, and twice it did
+
+`dcc.Input`'s `debounce=True` means "publish the value on Enter or on blur", so with it on there is no per-keystroke value to complete.
+It is off, and the commit is made explicit instead: `n_submit` and `n_blur` are exactly the two events `debounce` was firing on, and they are Inputs to `resolve_find`.
+That split is what keeps a 942,563-point figure from being rebuilt on every letter of `GSM4256053`.
+
+Two defects got round it, and both were found in the browser rather than in the suite.
+
+**A pattern-matching `ALL` input fires when its family is re-rendered, not only when a member is clicked.** The suggestion rows are re-rendered on every keystroke with every `n_clicks` back at zero, so reading that as "no identifier, use whatever is in the box" ran a real search per letter - the exact cost the split exists to avoid, smuggled in through the other input.
+
+**Worse: Dash discards the response to a request that a newer request for the same callback supersedes.** With the family's input on the callback that searches, a keystroke's no-op reliably overtook the Enter the server had *already answered correctly*. Measured on the real app: the first find of every session vanished, and the rest survived on timing alone. The fix is structural rather than defensive - the family's input moved to `choose_suggestion`, which writes `find-input.value` and a `find-chosen` store, and `find-store` is now written by a callback with **no per-keystroke input at all**. `tests/test_app.py::test_nothing_that_changes_per_keystroke_can_reach_the_search` asserts that property directly rather than asserting the symptom.
+
+A third, smaller one is recorded because it looks like a defect and is not. `page.fill` followed immediately by `page.press("Enter")` commits the *previous* text, because the two are CDP calls with no event-loop tick between them and Dash's Input publishes `value` one tick after the change. Measured: a gap of 0 ms is stale and **every gap from 5 ms up is correct**, against a fastest realistic keypress-to-keypress of tens of milliseconds. It is not reachable from a keyboard, and the harness now reproduces the ordering a real one has.
+
+### 4. Who owns whether the list is open
+
+Two independent facts, one owner each, composed by CSS into a single `display`:
+
+| fact | owner | mechanism |
+| --- | --- | --- |
+| are there any rows | the server | `offer_suggestions` renders them; `.bm-suggest:empty` hides an empty list |
+| has the reader dismissed it | the browser | one `is-closed` class on the group |
+
+No callback writes a `style` here and `assets/find-suggest.js` never removes a row, so the two cannot race over one property.
+That file is the map's only JavaScript, and it exists for the one thing Dash cannot express: a keystroke. `dcc.Input` publishes `value`, `n_submit` and `n_blur`, and none of those is Up, Down or Escape.
+
+Selection goes **through** Dash rather than around it. A row is a real component with a pattern-matching id carrying its own identifier, so a click, a tap and Enter all end in the same `n_clicks` and the same server callback - Enter is implemented as `activeRow.click()` for exactly that reason. Nothing pokes a value into the input, which React would not see and which would give a search two ways to be committed.
+
+Two smaller decisions in that file are load-bearing.
+`mousedown` inside the list is `preventDefault`ed, because without it the mousedown blurs the input, `n_blur` commits the fragment in the box, and the click commits the real identifier a moment later - two searches for one gesture, the first of them wrong. It is also what makes a tap work, since a touch synthesises that mousedown before the blur.
+And Enter is stopped in the **capture** phase when a row is active, so Dash's own Enter handler never sees it; with no row active it is deliberately left alone and Enter means what it always did.
+
+### 5. The row is two lines, and that was measured
+
+Side by side on a 268 px rail the identifier and its detail compete for about 220 px, and which one loses is decided by CSS rather than by which matters.
+With both at the default shrink, `GSM5028824` beside `GSE165242 · Embryo / stem cell` ellipsed to `GSM502…` - the one string in the row that cannot be inferred from the rest of it.
+Weighting the shrink towards the detail helped and did not fix it: any shrink at all on a 78 px label truncates it, and `flex-shrink: 0` instead spends the detail down to `OSD-100 · l…`.
+Neither half is expendable - the OSDR sample names differ in their *last* characters (`Rep1_M23` against `Rep2_M24`), which is exactly what an ellipsis eats.
+
+Stacked, both are whole at every width tested (1680, 1280, 1100, 860, 600 and 393 px), at about 11 px per row.
+The list holds ten suggestions in a 196 px window, so four rows and part of a fifth are visible: a window sized to a whole number of rows looks complete when it is not, and the cut row is the affordance that says it scrolls.
+
+The list is **inline** rather than floating, because the rail is itself a scroll container and an absolutely-positioned popup would either be clipped by it or detach from the field it belongs to.
+
+### 6. What a miss says
+
+A miss carries the reason `find()` already distinguishes, and the interface answers each one differently.
+A well-formed accession this map does not carry gets one flat, unselectable row ("Nothing on this map matches that."), because that is worth saying.
+Free text gets **no list at all** - a dropdown volunteering "no matches" under the word "liver" would contradict the sentence below the box, which correctly says that free text is not what this control takes.
+
+### 7. How it is tested
+
+20 unit tests in `tests/test_find.py`: each grammar's completion, exact-match-first ordering, the series sample count, substring matching on OSDR names, studies ranked above their own samples, the free-text refusal, each miss reason, the one-character floor, the limit, the degraded no-GEO-join state, the blank-`series_id` rows that would crash a naive prefix parse, and the contract that **every suggested value resolves through `find()`** - which is what keeps one resolution path rather than two.
+
+Three callback-level tests in `tests/test_app.py` pin the wiring: that a re-rendered family is not a click, that a component merely appearing is not a commit, and that nothing changing per keystroke can reach the search callback.
+
+27 browser checks in `tests/e2e_check.py`, plus a 40-check interactive sweep run during development covering partial and exact queries, case, rapid typing, clearing and reopening, mouse, touch and keyboard selection, Escape, click-outside, scrolling past the visible height, and the six supported viewports.
+
+---
+
+<a id="reset-view"></a>
+
+## One reset for every framing
+
+### The question that decided where it goes
+
+Three things narrow the map's viewport: framing a find, framing a retrieval, and the reader's own scroll or drag.
+The first question was whether those share state. They do, completely: all three write `viewport-store`, which one callback owns, and `None` is that callback's word for the whole corpus.
+By the time it is written, a framed study and a scroll zoom are indistinguishable.
+
+So there is one thing to undo, and it takes one control.
+A button beside "Frame it" and a second beside "Frame the retrieval" would have been two handlers for one piece of state - and neither would have answered a plain scroll-zoom, which is how most readers narrow the view in the first place.
+
+**It sits on the plot rather than on the rail**, and that follows the rail's own rule rather than breaking it: a control's qualifier sits with that control, and this one qualifies the viewport, which belongs to the plot. It shares the badge strip, which already reports what is drawn right now.
+
+It is labelled **Reset view** rather than "Unframe" because it also undoes a scroll zoom, which was never a frame.
+
+### The part that would have failed silently
+
+`theme.base_figure_layout` sets `uirevision="keep"`, which asks Plotly to preserve the reader's own pan and zoom across a figure update **unless the incoming figure changes the attribute in question**.
+Framing works on that rule: it sets a range where the previous figure had none.
+Resetting has to go the other way, and an absent key is not a changed value - leaving the range off and expecting Plotly to autorange leans on the one thing `uirevision` exists to prevent.
+
+`callbacks.viewport_axes` therefore says `autorange` outright.
+Measured on the real corpus, the reset restores the whole map exactly: x span 60.17 → 1.13 → 60.17 in UMAP, 116,882 → 1.46 → 116,882 in t-SNE, 2.22 → 0.51 → 2.22 in PCA.
+
+### What it clears, and what it must not
+
+Exactly one store, so there is nothing else it *could* clear.
+Verified end to end for the find (study, series and single GSM, in all three projections) and for all four retrieval paths (sample, cohort, comparison, upload): after a reset the query text, the found marks, both cohorts' members, every hit and the frame button are all still there, and framing again gives the identical window rather than a stale one.
+
+3-D never offers it. `frame_points` declines there and the viewport does not drive a `Scatter3d` camera, so a reset would be a click with no visible effect - which is what the lasso was removed for.
+
+---
+
+<a id="osdr-only-color-bys"></a>
+
+## The nine OSDR-only color-bys, and what their machinery is still for
+
+Removed on 2026-08-12: Flight vs Ground, Spaceflight arm, Strain, Sex, Genotype, Study, Habitat, Mission duration, Diet.
+None of them separated anything on this map. They coloured 2,108 of 942,563 points - 0.2% - and the 2,108 are scattered through a corpus whose structure is set by the 940,455 they sit among, so a spaceflight arm or a mouse strain drew a handful of differently-coloured diamonds with no spatial pattern to read.
+Tissue and Species remain, and both colour all 942,563 points.
+
+`manifold/data._flight_status` went with them: it derived a Flight/Ground collapse that existed for one colour-by and had no other reader. The raw `spaceflight` column is untouched, because `find.py` prints it in the record panel and the retrieval half groups cohorts by it - on the raw arms rather than the collapse, since a basal animal was sacrificed at experiment start and a vivarium animal never entered flight hardware.
+
+**The coverage machinery stays, and is not vestigial.** It looks over-engineered for a two-entry registry and is not, because **Tissue becomes an OSDR-only field on a machine that never fetched `cache/archs4_metadata.parquet`** - which is the state a fresh clone starts in. On that path the menu labels it "OSDR only", the coverage bar goes amber and states the exact count, the fix is named under the control, and the renderer draws ARCHS4 as a faint context cloud rather than as a grey category. That is invariant 5, and it is now the only route to it, so the tests that used to assert it through `flight_status` assert it through degraded Tissue instead - a stronger test, since it is a state a real user reaches.
+
+One consequence worth recording: the fixture corpus had exactly one field that overflowed the eleven-slot palette, and it was Study. With Study gone the fixture's Tissue spanned seven buckets and nothing anywhere in it could overflow a legend. `tests/fixture_corpus.py` now draws ARCHS4's raw source names from eighteen strings that canonicalize to eighteen distinct buckets, three per synthetic cluster, so Tissue overflows there the way it does on the real corpus - 39 buckets against eleven slots.
 
 ---
 

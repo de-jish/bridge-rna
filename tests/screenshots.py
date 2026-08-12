@@ -13,9 +13,9 @@ search, open a hit in the inspector, then jump to the map and frame the
 viewport on the query and its neighbours so the retrieved network and its
 position in the whole corpus are shown side by side. The liver query also
 widens to top-20 before that. Then a clean map pass: default UMAP view coloured
-by tissue and by species, the OSDR-only coverage case, a zoomed neighbourhood,
-a hover card, and all three projections (PCA, UMAP, t-SNE) in both 2-D and
-3-D.
+by tissue and by species, the find box completing an identifier, a framed study
+beside the reset that undoes it, a zoomed neighbourhood, a hover card, and all
+three projections (PCA, UMAP, t-SNE) in both 2-D and 3-D.
 
 Named so pytest does not collect it, for the same reason `e2e_check.py` is: it
 needs the real artifacts and takes about ten minutes.
@@ -334,13 +334,33 @@ def main() -> int:
             mp.wait_for_timeout(3000)
             s.shot(mp, "map-umap-species")
 
-            print("== map: an OSDR-only field draws ARCHS4 as context ==", flush=True)
-            set_colorby(mp, "Flight vs Ground")
-            wait_points(mp, minimum=900_000)
+            # This frame used to be the OSDR-only coverage case, reached by
+            # picking "Flight vs Ground". All nine OSDR-only color-bys were
+            # removed on 2026-08-11 and that state is no longer reachable from a
+            # full cache. The find box's autocomplete took the slot: it is the
+            # newest thing on the rail and the one part of the map a static
+            # screenshot of the plot cannot show at all.
+            print("== map: completing an identifier in the find box ==", flush=True)
+            mp.locator("#find-input").click()
+            mp.locator("#find-input").type("OSD-13", delay=60)
+            mp.wait_for_timeout(2500)
+            mp.keyboard.press("ArrowDown")
+            mp.wait_for_timeout(600)
+            rows = mp.locator("#find-suggestions [role='option']").count()
+            print(f"     {rows} suggestions offered", flush=True)
+            s.shot(mp, "map-find-autocomplete")
+            mp.keyboard.press("Enter")
+            mp.wait_for_timeout(3500)
+            mp.locator("#frame-find").click()
             mp.wait_for_timeout(3000)
-            cov = mp.locator("#coverage").inner_text().replace("\n", " ")
-            print(f"     coverage: {cov[:120]}", flush=True)
-            s.shot(mp, "map-coverage-osdr-only")
+            print("== map: a framed study, and the reset that undoes it ==", flush=True)
+            s.shot(mp, "map-framed-with-reset")
+            mp.locator("#reset-view").click()
+            mp.wait_for_timeout(3000)
+            mp.fill("#find-input", "")
+            mp.wait_for_timeout(120)
+            mp.press("#find-input", "Enter")
+            mp.wait_for_timeout(2500)
 
             print("== map: back to tissue, zoom into a neighbourhood ==", flush=True)
             set_colorby(mp, "Tissue")

@@ -46,11 +46,32 @@ def test_whole_map_fields_cover_every_point(corpus):
         assert covered == total, f"{spec.key} is grouped as whole-map but covers {covered}"
 
 
-def test_osdr_only_fields_leave_archs4_uncovered(corpus):
+def test_an_osdr_only_field_leaves_archs4_uncovered(corpus, without_archs4_metadata):
+    """`NOT_COVERED` has to actually reach the ARCHS4 block.
+
+    This used to be asserted on `flight_status`, one of nine registered
+    OSDR-only fields. All nine were removed on 2026-08-11 and the sentinel is
+    reached by exactly one route now: Tissue on a machine that never fetched the
+    optional GEO join. That route is the one a fresh clone takes, so this is a
+    stronger test than the one it replaces rather than a substitute for it.
+    """
     n_archs4 = corpus["n_archs4"]
-    values = colorby.labels("flight_status")
+    values = colorby.labels("tissue")
     assert (values[:n_archs4] == colorby.NOT_COVERED).all()
     assert (values[n_archs4:] != colorby.NOT_COVERED).all()
+
+
+def test_no_osdr_only_field_is_registered(corpus):
+    """The nine spaceflight-detail color-bys must not come back by accident.
+
+    None of them separated anything on this map, and re-registering one is a
+    single line - which is exactly why it needs an assertion rather than a
+    comment. A field that is OSDR-only *by declaration* is the thing banned
+    here; Tissue degrading to OSDR-only when its artifact is missing is a
+    different fact and is asserted directly above.
+    """
+    declared = [s.key for s in colorby.REGISTRY if colorby.ARCHS4 not in s.scope]
+    assert not declared, f"OSDR-only color-bys are registered again: {declared}"
 
 
 def test_the_default_field_colours_the_whole_map(corpus):
@@ -58,9 +79,17 @@ def test_the_default_field_colours_the_whole_map(corpus):
     assert covered == total, "the app opens on a field that leaves the map partly blank"
 
 
-def test_menu_lists_whole_map_fields_before_osdr_only(corpus):
+def test_menu_lists_whole_map_fields_before_osdr_only(corpus,
+                                                      without_archs4_metadata):
+    """Ordering is only observable when both groups are populated at once.
+
+    With the GEO join present every registered field is whole-map, so there is
+    no ordering to check. Without it Tissue drops to OSDR-only and Species does
+    not, which is the one state where the menu has both.
+    """
     options = colorby.menu_options()
     groups = [colorby.group_of(colorby.get(o["value"])) for o in options]
+    assert colorby.GROUP_OSDR in groups and colorby.GROUP_WHOLE_MAP in groups
     first_osdr = groups.index(colorby.GROUP_OSDR)
     assert colorby.GROUP_WHOLE_MAP not in groups[first_osdr:], (
         "a whole-map field is buried below the OSDR-only ones")

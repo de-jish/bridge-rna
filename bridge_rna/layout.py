@@ -87,15 +87,21 @@ def _initial_study() -> str:
 # One list drives the tablist, the panels, the action buttons and the callback
 # that swaps between them, so a fourth query source is one entry here rather
 # than four edits that can disagree. Same reason `app.ROUTES` exists.
+#
+# Each mode carried a one-line `hint` under the switch until 2026-08-11 - "One
+# OSDR sample against every ARCHS4 sample", and two like it. They are gone. Each
+# restated its own tab in a longer form, and the panel underneath answers the
+# same question concretely a moment later: Sample shows a study and a sample
+# picker, Cohort shows the facet chips, Upload shows a dropzone that names the
+# file format it wants. The line was a caption on a control the reader was
+# already looking at, and it pushed the picker three lines further down the
+# rail on the mode a first-time reader lands in.
 QUERY_MODES = (
     {"key": "sample", "label": "Sample",
-     "hint": "One OSDR sample against every ARCHS4 sample.",
      "button_id": "search-button", "button_label": "Search"},
     {"key": "cohort", "label": "Cohort",
-     "hint": "A whole experimental group, pooled into one query.",
      "button_id": "cohort-search-button", "button_label": "Search cohort"},
     {"key": "upload", "label": "Upload",
-     "hint": "A counts file the corpus has never seen, embedded live.",
      "button_id": "upload-search-button", "button_label": "Embed & search"},
 )
 DEFAULT_QUERY_MODE = QUERY_MODES[0]["key"]
@@ -311,8 +317,6 @@ def build_view() -> html.Div:
                                 className="control-group control-group--query",
                                 children=[
                                     build_mode_switch(),
-                                    html.Div(id="mode-hint", className="mode-hint",
-                                             children=QUERY_MODES[0]["hint"]),
                                     # Shared by Sample and Cohort, because both
                                     # ask the catalog and a reader who has picked
                                     # a study should not have to pick it twice

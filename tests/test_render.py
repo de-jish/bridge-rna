@@ -167,7 +167,7 @@ def test_figure_builds_for_every_control_combination(corpus):
     # to data.METHODS cannot ship without ever having been drawn.
     for method in data.METHODS:
         for dims in ("2d", "3d"):
-            for color_by in ("species", "flight_status", "tissue", "study"):
+            for color_by in (c.key for c in colorby.REGISTRY):
                 fig, legend, badges = render.build_figure(
                     method, dims, color_by, ALL_LAYERS, 2000, None)
                 assert len(fig.data) > 0, f"{method}/{dims}/{color_by} drew nothing"
@@ -269,15 +269,21 @@ def test_3d_caps_the_cloud_and_the_legend_counts_the_cap(corpus, monkeypatch):
 
 # --- The no-grey-cloud contract --------------------------------------------
 
-def test_an_osdr_only_field_draws_archs4_as_faint_context_not_as_a_category(corpus):
+def test_a_field_that_cannot_describe_archs4_draws_it_as_faint_context(
+        corpus, without_archs4_metadata):
     """The core fix: ARCHS4 keeps its shape on screen without impersonating data.
 
     It is drawn in one context colour that is not in the palette, faintly, and
     labelled as context, rather than taking a grey palette slot and reading as
     "measured, and empty here".
+
+    Reached through Tissue on a machine with no GEO join, which is how this
+    branch is reached at all now that the nine OSDR-only fields are gone - and
+    it is the state a fresh clone starts in, so it is the case most worth
+    pinning rather than a contrivance standing in for the deleted ones.
     """
     fig, _, badges = render.build_figure(
-        "pca", "2d", "flight_status", ALL_LAYERS, 2000, None)
+        "pca", "2d", "tissue", ALL_LAYERS, 2000, None)
     assert len(_drawn_xy(fig)) > corpus["n_osdr"], "no context cloud was drawn"
     context = [t for t in fig.data if t.marker.color == theme.ARCHS4_CONTEXT]
     assert context, "the context cloud is not using the context colour"
@@ -286,19 +292,19 @@ def test_an_osdr_only_field_draws_archs4_as_faint_context_not_as_a_category(corp
     assert any("context only" in b for b in badges), badges
 
 
-def test_the_context_cloud_is_drawn_in_3d_too(corpus):
+def test_the_context_cloud_is_drawn_in_3d_too(corpus, without_archs4_metadata):
     """Context is not a 2-D fallback; it is what an uncovered corpus always gets."""
     fig, _, badges = render.build_figure(
-        "pca", "3d", "flight_status", ALL_LAYERS, 1000, None)
+        "pca", "3d", "tissue", ALL_LAYERS, 1000, None)
     context = [t for t in fig.data if t.marker.color == theme.ARCHS4_CONTEXT]
     assert context, "3-D lost the ARCHS4 context cloud"
     assert any("context only" in b for b in badges), badges
 
 
-def test_context_points_never_enter_the_legend(corpus):
+def test_context_points_never_enter_the_legend(corpus, without_archs4_metadata):
     """Uncovered points have no value under this field, so they get no swatch."""
     _, legend, _ = render.build_figure(
-        "pca", "2d", "flight_status", ALL_LAYERS, 2000, None)
+        "pca", "2d", "tissue", ALL_LAYERS, 2000, None)
     labels = [i["label"] for i in legend["items"]]
     assert colorby.NOT_COVERED not in labels
     assert sum(i["count"] for i in legend["items"]) == corpus["n_osdr"]
@@ -339,7 +345,7 @@ def test_the_color_plan_is_compact_integer_codes(corpus):
 def test_every_covered_point_lands_in_exactly_one_legend_row(corpus):
     """Codes are the only link between a glyph and its swatch, so the mapping
     from points to legend rows must be total and must agree with the counts."""
-    for key in ("tissue", "species", "flight_status"):
+    for key in (c.key for c in colorby.REGISTRY):
         codes, legend = render._color_plan(key)
         counted = sum(row["count"] for row in legend)
         assert int((codes >= 0).sum()) == counted, (
@@ -366,7 +372,7 @@ def test_the_figure_carries_no_layout_images(corpus):
     of the same data.
     """
     for dims in ("2d", "3d"):
-        for color_by in ("tissue", "flight_status"):
+        for color_by in (c.key for c in colorby.REGISTRY):
             fig, _, _ = render.build_figure("pca", dims, color_by, ALL_LAYERS,
                                             1000, None)
             assert not fig.layout.images, f"{dims}/{color_by} drew an underlay"
@@ -404,11 +410,10 @@ def test_legend_reports_categories_with_counts(corpus):
     """Counts total the points actually plotted, so toggling the ARCHS4 layer
     off leaves even a whole-map field showing only its OSDR points.
 
-    With only the OSDR layer drawn, an OSDR-only field and a whole-map field
-    both total n_osdr - the whole-map field's ARCHS4 categories simply have
-    nothing on screen to count.
+    With only the OSDR layer drawn, every field totals n_osdr - a whole-map
+    field's ARCHS4 categories simply have nothing on screen to count.
     """
-    for key in ("flight_status", "tissue"):
+    for key in (c.key for c in colorby.REGISTRY):
         _, legend, _ = render.build_figure("pca", "2d", key, ["osdr"], 1000, None)
         items = legend["items"]
         assert items, f"no legend produced for {key}"
@@ -418,15 +423,24 @@ def test_legend_reports_categories_with_counts(corpus):
 
 
 def test_high_cardinality_color_by_collapses_into_other(corpus):
-    """Past the palette size, the tail must fold into one neutral Other bucket."""
-    _, legend, _ = render.build_figure("pca", "2d", "study", ["osdr"], 1000, None)
+    """Past the palette size, the tail must fold into one neutral Other bucket.
+
+    Tissue is what exercises this now. It used to be Study, whose 70 OSD
+    accessions overflowed the eleven slots comfortably; with the OSDR-only
+    fields gone, Tissue is both the only high-cardinality field left and the one
+    where the overflow is real rather than arranged - the shared vocabulary has
+    39 buckets against a palette of eleven, so the tail is not a test fixture.
+    """
+    _, legend, _ = render.build_figure("pca", "2d", "tissue", ALL_LAYERS, 4000, None)
     labels = [i["label"] for i in legend["items"]]
-    n_studies = data.osdr_field_values("study").nunique()
-    if n_studies > render.TOP_N:
-        assert "Other" in labels
-        assert len(labels) <= render.TOP_N + 2  # + Other, + Unknown
-        other = next(i for i in legend["items"] if i["label"] == "Other")
-        assert other["color"] == theme.OTHER_COLOR
+    n_tissues = len({t for t in colorby.labels("tissue")
+                     if not colorby.is_residual(t)})
+    assert n_tissues > render.TOP_N, (
+        f"only {n_tissues} tissue buckets drawn; nothing overflows to test")
+    assert "Other" in labels
+    assert len(labels) <= render.TOP_N + 2  # + Other, + Unknown
+    other = next(i for i in legend["items"] if i["label"] == "Other")
+    assert other["color"] == theme.OTHER_COLOR
 
 
 def test_residual_categories_never_take_a_bright_slot(corpus):

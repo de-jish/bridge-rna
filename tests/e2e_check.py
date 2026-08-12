@@ -185,7 +185,7 @@ def main() -> int:
 
             print("\n=== 2. the control rail ===")
             budget_labels = page.locator(
-                ".bm-group:has(.bm-group-label:text-is('ARCHS4 point budget')) "
+                ".bm-group:has(.bm-group-label:text-is('Number of ARCHS4 points')) "
                 ".bm-seg .dash-options-list-option").all_inner_texts()
             print(f"     budget tiers: {budget_labels}")
             c.ok(len(budget_labels) == 4, f"four budget tiers offered: {budget_labels}")
@@ -251,29 +251,56 @@ def main() -> int:
             page.locator("#layers input[type=checkbox]").nth(1).check()
             page.wait_for_timeout(2500)
 
-            print("\n=== 3. an OSDR-only field draws context, not a grey category ===")
+            print("\n=== 3. two color-bys, and the nine that were removed ===")
+            # This section used to pick "Flight vs Ground" and assert that the
+            # ARCHS4 cloud degraded to a faint context layer. All nine OSDR-only
+            # fields were removed on 2026-08-11, so that state is no longer
+            # reachable from a full cache at all - the only route into it is
+            # Tissue on a machine that never fetched the GEO join, which this
+            # suite cannot produce and `tests/test_render.py` covers directly.
+            # What is checkable here is the removal itself, and that both
+            # survivors really do color the whole corpus in every projection.
             page.locator("#color-by").click()
-            page.locator(".dash-dropdown-content").get_by_text(
-                "Flight vs Ground", exact=False).first.click()
-            page.wait_for_timeout(2500)
-            info = wait_for_points(page)
-            ctx = [t for t in info["traces"] if t["color"] == "#43597c"]
-            print(f"     traces: {[(t['name'], t['n']) for t in info['traces']][:6]}")
-            c.ok(bool(ctx), "an ARCHS4 context trace is drawn in the context colour")
-            if ctx:
-                c.ok(ctx[0]["opacity"] < 0.5,
-                     f"the context cloud is faint (opacity {ctx[0]['opacity']})")
-                c.ok(ctx[0]["n"] > 900_000,
-                     f"the context cloud carries the whole ARCHS4 corpus ({ctx[0]['n']:,})")
-            c.ok(info["images"] == 0, "still no underlay image")
-            badges = page.locator(".bm-plot-badges").inner_text()
-            print(f"     badges: {badges!r}")
-            c.ok("context only" in badges, "the plot badge says 'context only'")
-            coverage = page.locator("#coverage").inner_text()
-            print(f"     coverage: {coverage!r}")
-            c.ok("context" in coverage.lower(),
-                 "the coverage readout explains what happens to uncolored points")
-            page.screenshot(path=str(SHOTS / "02-osdr-only-context.png"))
+            page.wait_for_timeout(500)
+            options = page.locator(
+                ".dash-dropdown-content .dash-options-list-option").all_inner_texts()
+            print(f"     color-by options: {options}")
+            c.ok(len(options) == 2, f"two color-bys are offered: {options}")
+            removed = [name for name in
+                       ("Flight vs Ground", "Spaceflight arm", "Strain", "Sex",
+                        "Genotype", "Study", "Habitat", "Mission duration", "Diet")
+                       if any(name in option for option in options)]
+            c.ok(not removed, f"no removed color-by is back in the menu: {removed}")
+            c.ok(all("whole map" in option for option in options),
+                 "every offered field colors the whole map")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(400)
+
+            # Every projection x every color-by, because a stale legend or a
+            # stale color plan would only show up on the second combination.
+            for method in ("t-SNE", "PCA", "UMAP"):
+                set_segment(page, "Projection", method)
+                page.wait_for_timeout(1500)
+                for field in ("Species", "Tissue"):
+                    page.locator("#color-by").click()
+                    page.wait_for_timeout(400)
+                    page.locator(".dash-dropdown-content").get_by_text(
+                        field, exact=False).first.click()
+                    page.wait_for_timeout(2500)
+                    info = wait_for_points(page)
+                    title = page.locator("#legend-title").inner_text()
+                    rows = page.locator("#legend-list .bm-legend-item").count()
+                    print(f"     {method:6} / {field:8} {info['total']:>9,} glyphs, "
+                          f"{rows:2} legend rows, title {title!r}")
+                    c.ok(info["total"] > 900_000,
+                         f"{method}/{field} draws the whole corpus ({info['total']:,})")
+                    c.ok(rows > 0, f"{method}/{field} produced a legend")
+                    # The heading is small-caps by stylesheet, and `inner_text`
+                    # reports the transformed text, so this compares folded.
+                    c.ok(field.lower() in title.lower(),
+                         f"{method}/{field} legend is not stale: {title!r}")
+                    c.ok(info["images"] == 0, "still no underlay image")
+            page.screenshot(path=str(SHOTS / "02-two-color-bys.png"))
 
             print("\n=== 4. budget tiers re-render ===")
             page.locator("#color-by").click()
@@ -289,7 +316,7 @@ def main() -> int:
                                     ("500k", 500_000 + n_osdr),
                                     ("All", 940_455 + n_osdr)):
                 t0 = time.time()
-                set_segment(page, "ARCHS4 point budget", label)
+                set_segment(page, "Number of ARCHS4 points", label)
                 page.wait_for_function(
                     "e => { const gd = document.querySelector('.js-plotly-plot');"
                     " if (!gd || !gd._fullData) return false;"
@@ -315,7 +342,7 @@ def main() -> int:
             # 3-D must not offer a budget it cannot honour: the tiers cap at
             # 40,000 with no "All" pill, and the cloud is drawn at that cap.
             budget_3d = page.locator(
-                ".bm-group:has(.bm-group-label:text-is('ARCHS4 point budget')) "
+                ".bm-group:has(.bm-group-label:text-is('Number of ARCHS4 points')) "
                 ".bm-seg .dash-options-list-option").all_inner_texts()
             print(f"     3-D budget tiers: {budget_3d}")
             c.ok(not any("All" in b for b in budget_3d),
@@ -330,7 +357,7 @@ def main() -> int:
             set_segment(page, "Dimensions", "2D")
             page.wait_for_timeout(2500)
             budget_2d = page.locator(
-                ".bm-group:has(.bm-group-label:text-is('ARCHS4 point budget')) "
+                ".bm-group:has(.bm-group-label:text-is('Number of ARCHS4 points')) "
                 ".bm-seg .dash-options-list-option").all_inner_texts()
             c.ok(any("All" in b for b in budget_2d),
                  f"2-D restores the 'All' tier: {budget_2d}")
@@ -474,12 +501,54 @@ def main() -> int:
             print("\n=== 7b. finding a sample on the map ===")
             page.goto(f"http://127.0.0.1:{args.port}/map", wait_until="networkidle")
             wait_for_points(page)
+            # `wait_for_points` returns as soon as one trace has coordinates,
+            # which is before the view has finished hydrating - and the first
+            # interaction after a navigation is the one that finds out. Let it
+            # settle before typing into a control that was mounted a moment ago.
+            page.wait_for_timeout(2500)
 
+            # The pause between filling the box and pressing Enter is not
+            # padding, and it is not a workaround for a defect in the app.
+            #
+            # The find box no longer debounces, so its `value` is published on
+            # every keystroke and Enter now means only `n_submit`. Under
+            # `debounce=True` the two were one event - Dash's Input flushes the
+            # pending value on Enter *only* when debounce is literally `true` -
+            # so `fill` immediately followed by `press` used to be atomic and no
+            # longer is. `page.fill` and `page.press` are two CDP calls with no
+            # event-loop tick between them, which a browser cannot produce from
+            # real input: measured on this app, a gap of 0 ms commits the
+            # previous text and **every gap from 5 ms up commits the right one**,
+            # against a fastest realistic keypress-to-keypress of tens of
+            # milliseconds. So this restores the ordering a real keyboard has,
+            # rather than hiding anything.
             def find_it(term):
                 page.fill("#find-input", "")
-                page.fill("#find-input", term)
+                # `type`, not a second `fill`. Filling replaces the whole value
+                # in one synthetic event; typing produces one input event per
+                # character, which is what a keyboard does and what the
+                # suggestion callback is written against.
+                page.type("#find-input", term, delay=20)
+                page.wait_for_timeout(250)
                 page.press("#find-input", "Enter")
-                page.wait_for_timeout(3500)
+                # Wait for the answer, not for a guess at how long it takes.
+                #
+                # A fixed sleep was enough while Enter was the *only* thing the
+                # box did. It is not any more: Enter now runs a search whose
+                # first invocation also builds the 460 ms accession index, and
+                # the figure it redraws carries 942,563 glyphs - so the first
+                # find of a session lands well after the third of a second the
+                # later ones need, and only the first one failed. That is this
+                # file's stated discipline anyway: wait on what the page reports
+                # about itself, so a slow render produces a late read rather
+                # than a wrong one.
+                try:
+                    page.wait_for_function(
+                        "() => (document.getElementById('find-status')"
+                        ".innerText || '').trim().length > 0", timeout=20_000)
+                except Exception:
+                    pass  # an empty query legitimately says nothing; read it anyway
+                page.wait_for_timeout(1500)
                 return page.evaluate("""() => {
                     const gd = document.querySelector('#manifold-graph .js-plotly-plot');
                     const t = (gd._fullData || []).find(t => t.name === 'found');
@@ -496,7 +565,8 @@ def main() -> int:
                 }""")
 
             one = find_it("GSM4256053")
-            print(f"     GSM4256053 -> {one['marks']} mark(s), {one['type']}")
+            print(f"     GSM4256053 -> {one['marks']} mark(s), {one['type']}, "
+                  f"status {' '.join(one['status'].split())[:70]!r}")
             c.ok(one["marks"] == 1, f"a GSM marks exactly one point ({one['marks']})")
             c.ok(one["type"] == "scattergl",
                  f"the found layer is WebGL in 2-D, not the non-gl Scatter ({one['type']})")
@@ -571,7 +641,211 @@ def main() -> int:
             set_segment(page, "Dimensions", "2D")
             page.wait_for_timeout(3000)
 
-            print("\n=== 8. console ===")
+            print("\n=== 8. the find box completes what is being typed ===")
+            # The placeholder is the only thing an empty box says, and it had
+            # been clipping mid-word at "sample na…" since the control shipped:
+            # it taught three accession formats and trailed off inside the
+            # fourth. Nothing in Python can catch that - it is a text
+            # measurement in the rail's own font - so it is measured here, the
+            # way the browser measures it.
+            fit = page.evaluate("""() => {
+                const el = document.getElementById('find-input');
+                const cs = getComputedStyle(el);
+                const c = document.createElement('canvas').getContext('2d');
+                c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} `
+                       + `${cs.fontFamily}`;
+                return {text: el.placeholder, avail: el.clientWidth,
+                        width: Math.round(c.measureText(el.placeholder).width)};
+            }""")
+            print(f"     placeholder {fit['text']!r}: {fit['width']}px "
+                  f"in {fit['avail']}px")
+            c.ok(fit["width"] <= fit["avail"],
+                 f"the placeholder fits its box ({fit['width']} of {fit['avail']}px)")
+            for grammar in ("GSM", "GSE", "OSD-100", "name"):
+                c.ok(grammar in fit["text"],
+                     f"and still names {grammar}: {fit['text']!r}")
+            # The suggestions exist because the input stopped debouncing, so the
+            # first thing to establish is that typing still costs nothing: the
+            # search, and the 942,563-point figure that hangs off it, must not
+            # run until Enter, blur or a chosen row says so.
+            page.fill("#find-input", "")
+            page.wait_for_timeout(120)
+            page.press("#find-input", "Enter")
+            page.wait_for_timeout(2500)
+            page.click("#find-input")
+            page.type("#find-input", "GSM4256", delay=45)
+            page.wait_for_timeout(2500)
+            typed = page.evaluate("""() => {
+                const box = document.getElementById('find-input');
+                const list = document.getElementById('find-suggestions');
+                const rows = [...list.querySelectorAll('[role="option"]')];
+                const r = list.getBoundingClientRect();
+                return {n: rows.length, height: +r.height.toFixed(1),
+                        scrolls: list.scrollHeight > r.height + 2,
+                        role: box.getAttribute('role'),
+                        expanded: box.getAttribute('aria-expanded'),
+                        first: rows.length ? rows[0].innerText.split('\\n')[0] : '',
+                        status: document.getElementById('find-status').innerText,
+                        marked: !!(document.querySelector(
+                            '#manifold-graph .js-plotly-plot')._fullData || [])
+                            .find(t => t.name === 'found')};
+            }""")
+            print(f"     {typed['n']} rows in {typed['height']}px, first {typed['first']!r}")
+            c.ok(typed["n"] > 1, f"a partial accession is completed ({typed['n']} rows)")
+            c.ok(typed["first"].startswith("GSM4256"),
+                 f"the completions extend what was typed: {typed['first']!r}")
+            c.ok(typed["height"] <= 200,
+                 f"the list is bounded rather than growing ({typed['height']}px)")
+            c.ok(typed["scrolls"], "and scrolls inside that bound")
+            c.ok(typed["role"] == "combobox" and typed["expanded"] == "true",
+                 f"the box is an expanded combobox ({typed['role']}, {typed['expanded']})")
+            c.ok(typed["status"].strip() == "",
+                 f"typing alone runs no search: {typed['status'][:60]!r}")
+            c.ok(not typed["marked"], "and marks nothing on the map")
+            page.screenshot(path=str(SHOTS / "08-find-autocomplete.png"))
+
+            # Arrow keys move a virtual cursor and scroll it into view; Enter
+            # takes the row rather than the half-typed text under it.
+            for _ in range(6):
+                page.keyboard.press("ArrowDown")
+                page.wait_for_timeout(120)
+            keyed = page.evaluate("""() => {
+                const list = document.getElementById('find-suggestions');
+                const rows = [...list.querySelectorAll('[role="option"]')];
+                const i = rows.findIndex(r => r.classList.contains('is-active'));
+                const lr = list.getBoundingClientRect();
+                const rr = i >= 0 ? rows[i].getBoundingClientRect() : null;
+                return {i: i, scrollTop: list.scrollTop,
+                        inView: rr ? (rr.top >= lr.top - 1 && rr.bottom <= lr.bottom + 1)
+                                   : false,
+                        aria: document.getElementById('find-input')
+                              .getAttribute('aria-activedescendant'),
+                        label: i >= 0 ? rows[i].innerText.split('\\n')[0] : ''};
+            }""")
+            c.ok(keyed["i"] == 5, f"six Downs land on the sixth row ({keyed['i']})")
+            c.ok(keyed["inView"], "the active row is scrolled into view")
+            c.ok(keyed["scrollTop"] > 0, f"the list scrolled ({keyed['scrollTop']}px)")
+            c.ok(bool(keyed["aria"]), "aria-activedescendant follows the cursor")
+            page.keyboard.press("Enter")
+            page.wait_for_timeout(3500)
+            chosen = page.evaluate("""() => ({
+                value: document.getElementById('find-input').value,
+                open: document.getElementById('find-suggestions')
+                      .getBoundingClientRect().height > 0,
+                status: document.getElementById('find-status').innerText,
+                panel: document.getElementById('picked-group').innerText,
+            })""")
+            print(f"     Enter chose {chosen['value']!r}")
+            c.ok(chosen["value"] == keyed["label"],
+                 f"Enter commits the active row ({chosen['value']!r})")
+            c.ok(not chosen["open"], "and closes the list")
+            c.ok(chosen["value"] in chosen["status"],
+                 f"the search ran for it: {chosen['status'][:60]!r}")
+            c.ok(chosen["value"] in chosen["panel"] or chosen["panel"].strip(),
+                 "the record panel opened for it")
+
+            # Escape closes without clearing; free text is still refused.
+            page.click("#find-input")
+            page.type("#find-input", "0", delay=40)
+            page.wait_for_timeout(2000)
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(400)
+            escaped = page.evaluate("""() => ({
+                open: document.getElementById('find-suggestions')
+                      .getBoundingClientRect().height > 0,
+                value: document.getElementById('find-input').value,
+                expanded: document.getElementById('find-input')
+                          .getAttribute('aria-expanded'),
+            })""")
+            c.ok(not escaped["open"], "Escape closes the list")
+            c.ok(escaped["expanded"] == "false", "and says so to a screen reader")
+            c.ok(escaped["value"].endswith("0"), "without clearing what was typed")
+
+            page.fill("#find-input", "")
+            page.type("#find-input", "liver", delay=40)
+            page.wait_for_timeout(2200)
+            refused = page.evaluate("""() => {
+                const list = document.getElementById('find-suggestions');
+                return {rows: list.querySelectorAll('[role="option"]').length,
+                        empty: !!list.querySelector('.bm-suggest-empty'),
+                        open: list.getBoundingClientRect().height > 0};
+            }""")
+            c.ok(refused["rows"] == 0 and not refused["open"],
+                 "free text is refused here exactly as it is in the search")
+            c.ok(not refused["empty"],
+                 "and gets no 'no matches' row to contradict the sentence below")
+
+            print("\n=== 9. one reset undoes every kind of framing ===")
+            page.fill("#find-input", "")
+            page.wait_for_timeout(120)
+            page.press("#find-input", "Enter")
+            page.wait_for_timeout(2500)
+            whole = page.evaluate("() => document.querySelector"
+                                  "('#manifold-graph .js-plotly-plot')"
+                                  "._fullLayout.xaxis.range.slice()")
+            c.ok(not page.locator("#reset-view").is_visible(),
+                 "the reset is not offered on an unframed map")
+
+            def x_span():
+                r = page.evaluate("() => document.querySelector"
+                                  "('#manifold-graph .js-plotly-plot')"
+                                  "._fullLayout.xaxis.range.slice()")
+                return abs(r[1] - r[0])
+
+            find_it("OSD-100")
+            page.click("#frame-find")
+            page.wait_for_timeout(3000)
+            narrowed = x_span()
+            c.ok(narrowed < abs(whole[1] - whole[0]), f"framing narrows ({narrowed:.2f})")
+            c.ok(page.locator("#reset-view").is_visible(),
+                 "the reset appears once the map is framed")
+            page.screenshot(path=str(SHOTS / "09-framed-and-reset.png"))
+            page.click("#reset-view")
+            page.wait_for_timeout(3000)
+            back = x_span()
+            print(f"     x span {abs(whole[1] - whole[0]):.2f} -> {narrowed:.2f} "
+                  f"-> {back:.2f}")
+            # `uirevision="keep"` means Plotly holds the user's zoom unless the
+            # figure changes the attribute, so a reset that merely omits the
+            # range leaves the map where it was. This is that assertion.
+            c.ok(abs(back - abs(whole[1] - whole[0])) < 0.05,
+                 f"the reset restores the whole map ({back:.2f})")
+            c.ok(not page.locator("#reset-view").is_visible(),
+                 "and takes itself off again")
+            c.ok(page.input_value("#find-input") == "OSD-100",
+                 "the query survives the reset")
+            c.ok(page.locator("#frame-find").is_visible(),
+                 "and so does the result, ready to be framed again")
+            page.click("#frame-find")
+            page.wait_for_timeout(3000)
+            c.ok(abs(x_span() - narrowed) < 0.05,
+                 f"re-framing gives the same window, not a stale one ({x_span():.2f})")
+            page.click("#reset-view")
+            page.wait_for_timeout(2500)
+
+            # A plain scroll zoom is the same state by the time it is stored, so
+            # the same control undoes it - which is the reason there is one.
+            page.mouse.move(900, 500)
+            for _ in range(4):
+                page.mouse.wheel(0, -240)
+                page.wait_for_timeout(400)
+            page.wait_for_timeout(2500)
+            c.ok(x_span() < abs(whole[1] - whole[0]), "a scroll zoom narrows the view")
+            c.ok(page.locator("#reset-view").is_visible(),
+                 "and offers the same reset")
+            page.click("#reset-view")
+            page.wait_for_timeout(3000)
+            c.ok(abs(x_span() - abs(whole[1] - whole[0])) < 0.05,
+                 f"which restores the whole map too ({x_span():.2f})")
+
+            set_segment(page, "Dimensions", "3D")
+            page.wait_for_timeout(5000)
+            c.ok(not page.locator("#reset-view").is_visible(),
+                 "3-D hides the reset, whose axis ranges its camera ignores")
+            set_segment(page, "Dimensions", "2D")
+            page.wait_for_timeout(3000)
+
+            print("\n=== 10. console ===")
             real = [e for e in console_errors
                     if "favicon" not in e.lower() and "_dash-component-suites" not in e]
             for e in real[:10]:

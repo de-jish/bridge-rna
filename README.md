@@ -105,10 +105,13 @@ Without that step the first principal component is really a magnitude axis and h
 
 Type an accession into **Find a sample** on the rail and the matching points are marked with a white X.
 A GEO sample (`GSM…`) marks one point, a GEO series (`GSE…`) marks all of its samples, an OSDR study (`OSD-###`) marks all of that study's, and an OSDR sample resolves by its name or its full key.
+Suggestions appear as you type - `OSD-13` offers the studies it could become, with how many samples each holds, and `Mmus_C57` offers the samples whose names contain it, with their study and tissue.
+The list is bounded and scrolls; arrow keys walk it, Enter takes the highlighted row, Escape closes it.
 A button then offers to frame what it found; it is a button rather than something the search does for you, because a set can span the map, and because being zoomed into a region invites reading the points around your sample as its neighbours when a 2-D projection does not preserve who those are.
+Once the view is framed - by a search, by a retrieval, or by your own scroll - a **Reset view** chip appears on the plot and takes you back to the whole map without losing what you searched for.
 
-The box searches identifiers and not free text.
-Typing "liver" tells you so and points at the Tissue color-by, which is the control that actually answers it across both collections.
+The box searches identifiers and not free text, and so do the suggestions.
+Typing "liver" offers nothing, tells you so, and points at the Tissue color-by, which is the control that actually answers it across both collections.
 A very large series is marked up to a stated limit rather than silently truncated, and whatever is selected - found or clicked - is described in one panel, with a link to its GEO record or to a retrieval, whichever applies.
 
 ### Coloring both collections by tissue
@@ -122,8 +125,12 @@ Because both collections go through the same function, a liver in GEO and a NASA
 All 48 OSDR values and 90.6% of the Earth samples land in a named bucket.
 
 The map will not paint a collection it cannot describe as though it were data.
-Pick an OSDR-only field like Flight vs Ground and the 940,455 Earth points have no value for it, so rather than a flat grey cloud that reads as "measured and empty", they are drawn as faint context with no legend entry.
+On a machine that has not fetched the GEO metadata, the 940,455 Earth points have no tissue, so rather than a flat grey cloud that reads as "measured and empty", they are drawn as faint context with no legend entry.
 The color-by menu says up front what each field covers, and a field whose data has not been built is shown disabled with the command that builds it.
+
+There are two colorings, Tissue and Species, and both cover every point.
+There used to be nine more, describing the NASA samples only - flight status, strain, sex, mission duration and so on.
+They were removed: each colored 2,108 points out of 942,563, scattered through a corpus whose shape is set by the 940,455 they sit among, so none of them separated anything you could see.
 
 ### Hovering and inspecting
 
@@ -250,10 +257,10 @@ The test tooling is a separate install, because running Bridge RNA does not need
 ```
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 387 tests, about twenty-seven seconds
-.venv/bin/python tests/e2e_check.py              # 71 browser checks; needs the built cache
+.venv/bin/python -m pytest tests/ -q             # 401 tests, about twenty-seven seconds
+.venv/bin/python tests/e2e_check.py              # 129 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 156 checks of cohort retrieval
+.venv/bin/python tests/e2e_cohort_check.py       # 164 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.

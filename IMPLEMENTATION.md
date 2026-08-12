@@ -378,6 +378,7 @@ See section 7.4 for the full argument.
 Level of detail: on zoom (`relayout`), the new x/y bounds become a viewport and the server re-runs stratified sampling over the full 940k coordinates restricted to that window, so zooming reveals fine structure instead of enlarging sparse dots.
 A relayout that is not a zoom (a hover, a legend click, a drag-mode switch) returns a sentinel that leaves the current sample alone rather than triggering a resample.
 Config: `displaylogo` off, `scrollZoom` on, `dragmode="pan"`, and `uirevision` set so zoom survives a color-by change.
+That last one cuts both ways and is worth knowing before touching the viewport: `uirevision="keep"` preserves the reader's zoom unless the incoming figure *changes* the attribute, so releasing a framed view has to say `autorange` outright rather than omitting the range - see [`docs/design-notes.md`](docs/design-notes.md#reset-view).
 Both selection tools are removed from the modebar (`select2d` and `lasso2d`), because no selection feature exists and a marquee that does nothing is a promise the app does not keep.
 The first version of this config removed `select2d` but not `lasso2d`, so the lasso button was in fact still on the modebar after the feature was gone.
 
@@ -390,6 +391,8 @@ Everything in it exists to answer one question that the first build got wrong: w
 
 The first build had about ten color-bys for the 2,108 OSDR samples (spaceflight arm, flight status, tissue, strain, sex, genotype, study, habitat, duration, diet) and exactly one for the 940,455 ARCHS4 samples (species).
 Choosing any OSDR field painted 940,455 of 942,563 points, 99.8% of the map, a single flat grey.
+
+> **2026-08-12.** The nine OSDR-only fields have since been removed outright: none of them separated anything, for the reason the next paragraph gives about what 0.2% of a corpus can show. The registry is Tissue and Species, and both cover the whole map. Everything below still describes live machinery, because Tissue *becomes* an OSDR-only field on a machine with no GEO join - the state a fresh clone starts in - and that is now the only route to the degraded paths this section exists to explain. See [`docs/design-notes.md`](docs/design-notes.md#osdr-only-color-bys).
 
 That is not a cosmetic problem.
 On a scientific plot a uniform color is a statement, and the statement it makes is "these samples were measured and are all the same on this axis."

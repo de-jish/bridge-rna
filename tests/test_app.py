@@ -66,6 +66,16 @@ def mounted_ids(app):
 
     trees.append(rna_layout.build_view())
     trees.append(layout.build_view())
+    # The find box's suggestion rows are the one component family that cannot be
+    # mounted up front: there are between zero and SUGGESTION_LIMIT of them and
+    # each carries its own identifier in its id, which is what lets a click
+    # commit the row that was clicked rather than an index into a list that the
+    # next keystroke has already replaced. So the check mounts what the view can
+    # *render*, through the same builder the callback uses - a typo in the id
+    # then fails here exactly as it would for a static component.
+    trees.append(html.Div(layout.suggestion_children(
+        {"items": [{"value": "GSM1", "label": "GSM1", "detail": "", "kind": "gsm"}],
+         "reason": ""})))
     # The shell itself, built outside a request so it takes the default route.
     trees.append(app.layout() if callable(app.layout) else app.layout)
     for tree in trees:
@@ -474,6 +484,153 @@ def test_non_zoom_events_leave_the_sample_alone():
     assert callbacks._viewport_from_relayout({"hovermode": "closest"}) == "unchanged"
 
 
+# --- What counts as committing a search --------------------------------------
+
+class _Ctx:
+    """A stand-in for `dash.ctx`, which only exists inside a live callback."""
+
+    def __init__(self, triggered_id=None, triggered=()):
+        self.triggered_id = triggered_id
+        self.triggered = list(triggered)
+
+
+def test_a_re_rendered_suggestion_family_is_not_a_click(monkeypatch):
+    """A pattern-matching `ALL` input fires when its family is re-rendered.
+
+    This family is re-rendered on every keystroke, with every `n_clicks` back at
+    zero, so "some suggestion input fired" is not "a suggestion was chosen".
+    """
+    ids = [{"type": "find-suggestion", "value": v}
+           for v in ("GSM1", "GSM9000005", "GSM3")]
+
+    # A keystroke: the whole family re-rendered, nothing clicked.
+    monkeypatch.setattr(callbacks, "ctx", _Ctx(ids[0], []))
+    assert callbacks.chosen_suggestion([0, 0, 0], ids) is None
+
+    # A real click on the second row.
+    monkeypatch.setattr(callbacks, "ctx", _Ctx(ids[1], []))
+    assert callbacks.chosen_suggestion([0, 1, 0], ids) == {
+        "value": "GSM9000005", "seq": 1}
+
+    # Choosing the same row twice must be two distinct payloads, or the second
+    # write would not change the store and would commit nothing.
+    assert callbacks.chosen_suggestion([0, 2, 0], ids) == {
+        "value": "GSM9000005", "seq": 2}
+
+    # Enter or blur is not a suggestion at all.
+    monkeypatch.setattr(callbacks, "ctx", _Ctx("find-input", []))
+    assert callbacks.chosen_suggestion([0, 1, 0], ids) is None
+
+
+def test_a_component_merely_appearing_is_not_a_commit(monkeypatch):
+    """Dash wakes a callback when one of its inputs newly appears, and reports
+    that with a `None` value. Read as an event, it committed the empty box and
+    wiped the marks from a search the reader had not touched."""
+    monkeypatch.setattr(callbacks, "ctx", _Ctx(
+        "find-input", [{"prop_id": "find-input.n_blur", "value": None}]))
+    assert not callbacks._fired("find-input.n_blur")
+    monkeypatch.setattr(callbacks, "ctx", _Ctx(
+        "find-input", [{"prop_id": "find-input.n_blur", "value": 1}]))
+    assert callbacks._fired("find-input.n_blur")
+    monkeypatch.setattr(callbacks, "ctx", _Ctx(None, []))
+    assert not callbacks._fired("find-input.n_submit")
+
+
+def test_nothing_that_changes_per_keystroke_can_reach_the_search(app):
+    """The search callback must not share a wake-up with the suggestion list.
+
+    Two separate defects made this a rule rather than a preference, and the
+    second is the reason the chosen row arrives as a store instead of as its own
+    click. `find-input.value` on this callback ran a real search - and rebuilt a
+    942,563-point figure - on every letter typed. The suggestion family's `ALL`
+    input did something worse: it woke this callback on every keystroke with
+    nothing to do, and **Dash discards the response to a request a newer request
+    for the same callback supersedes**, so a keystroke's no-op overtook an Enter
+    that the server had already answered correctly. Measured on the real app,
+    the first find of every session was silently lost.
+
+    Every input here must therefore change only when someone has finished.
+    """
+    key = next(k for k in app.callback_map if "find-store.data" in k)
+    inputs = {(str(i["id"]), i["property"])
+              for i in app.callback_map[key]["inputs"]}
+    assert ("find-input", "value") not in inputs
+    assert not [i for i in inputs if "find-suggestion" in i[0]], (
+        f"the suggestion family can wake the search callback: {inputs}")
+    assert {("find-input", "n_submit"), ("find-input", "n_blur"),
+            ("find-chosen", "data")} <= inputs
+
+
+def test_the_suggestion_list_is_the_only_thing_a_keystroke_redraws(app):
+    """And the corollary: `find-input.value` reaches exactly one callback."""
+    readers = [k for k, cb in app.callback_map.items()
+               if any(i["id"] == "find-input" and i["property"] == "value"
+                      for i in cb["inputs"])]
+    assert readers == ["find-suggestions.children"], readers
+
+
+# --- Framing and its one reverse --------------------------------------------
+
+def test_the_reset_is_offered_only_when_the_map_is_framed():
+    """A visible control that does nothing is what the lasso was removed for.
+
+    "Framed" is a property of `viewport-store` and of nothing else, which is the
+    finding that made one reset enough: framing a find, framing a retrieval and
+    the user's own scroll-zoom are three ways to write one value, and by the
+    time it is written they are indistinguishable.
+    """
+    window = [0.0, 1.0, 0.0, 1.0]
+    assert callbacks.is_framed(window, "2d")
+    assert not callbacks.is_framed(None, "2d")
+    assert not callbacks.is_framed([], "2d")
+    # 3-D never frames: frame_points declines and the camera ignores axis
+    # ranges, so a reset there would be a click with no visible effect.
+    assert not callbacks.is_framed(window, "3d")
+
+
+def test_an_unframed_figure_releases_the_axes_rather_than_omitting_them():
+    """`uirevision="keep"` preserves the user's zoom unless the figure changes
+    the attribute, so "no range key" is not the same instruction as "autorange".
+    Omitting it left a reset that redrew the whole corpus into the window the
+    user was already looking at."""
+    assert theme.base_figure_layout(False)["uirevision"], (
+        "this test is about uirevision; the layout no longer sets one")
+
+    framed = callbacks.viewport_axes([1.0, 2.0, 3.0, 4.0], "2d")
+    assert framed["xaxis"]["range"] == [1.0, 2.0]
+    assert framed["yaxis"]["range"] == [3.0, 4.0]
+
+    freed = callbacks.viewport_axes(None, "2d")
+    assert freed["xaxis"]["autorange"] is True
+    assert freed["yaxis"]["autorange"] is True
+    assert "range" not in freed["xaxis"]
+
+    assert callbacks.viewport_axes([1.0, 2.0, 3.0, 4.0], "3d") == {}
+
+
+def test_one_callback_owns_the_viewport_and_every_framing_action_feeds_it(app):
+    """Three actions narrow the view and one undoes them, through one writer.
+
+    Two callbacks writing one Output is a race Dash only sometimes rejects, and
+    a reset handler bolted onto each frame button would have been exactly that -
+    plus a third state, a plain scroll-zoom, that neither of them could undo.
+    """
+    writers = [key for key in app.callback_map if "viewport-store.data" in key]
+    assert len(writers) == 1, f"viewport-store has {len(writers)} writers"
+    inputs = {i["id"] for i in app.callback_map[writers[0]]["inputs"]}
+    assert {"frame-find", "frame-retrieval", "reset-view"} <= inputs
+
+
+def test_the_reset_clears_the_viewport_and_nothing_else(app):
+    """Unframing must keep the query, the results and the selection.
+
+    It writes one Output, so there is nothing else it *could* clear - which is
+    the argument, and is worth pinning rather than re-reading the callback.
+    """
+    key = next(k for k in app.callback_map if "viewport-store.data" in k)
+    assert key.strip(".").split("...") == ["viewport-store.data"]
+
+
 # --- Plot badge markup ------------------------------------------------------
 
 def test_bold_markup_is_parsed_not_injected():
@@ -830,9 +987,13 @@ def _text(component) -> str:
     return _text(children) if children is not None else ""
 
 
-def test_coverage_states_the_exact_point_count(corpus):
-    """The answer to "why is most of my map not coloured?", given up front."""
-    text = _text(callbacks.coverage_children("flight_status"))
+def test_coverage_states_the_exact_point_count(corpus, without_archs4_metadata):
+    """The answer to "why is most of my map not coloured?", given up front.
+
+    Asserted on degraded Tissue, which is the only partial field left after the
+    nine OSDR-only ones were removed - and the one a fresh clone actually meets.
+    """
+    text = _text(callbacks.coverage_children("tissue"))
     assert f"{corpus['n_osdr']:,}" in text
     assert f"{corpus['total']:,}" in text
     assert "context" in text.lower(), (
@@ -852,13 +1013,19 @@ def test_coverage_says_nothing_when_a_field_paints_everything(corpus):
     assert _text(children).strip() == ""
 
 
-def test_coverage_bar_is_amber_only_for_a_partial_field(corpus):
-    def fill_class(key):
-        bar = callbacks.coverage_children(key)[0]
-        return bar.children.className
+def _coverage_fill_class(key: str) -> str:
+    return callbacks.coverage_children(key)[0].children.className
 
-    assert "partial" not in fill_class("species")
-    assert "partial" in fill_class("flight_status")
+
+def test_coverage_bar_is_full_for_a_whole_map_field(corpus):
+    assert "partial" not in _coverage_fill_class("species")
+    assert "partial" not in _coverage_fill_class("tissue")
+
+
+def test_coverage_bar_is_amber_for_a_partial_field(corpus, without_archs4_metadata):
+    assert "partial" in _coverage_fill_class("tissue")
+    assert "partial" not in _coverage_fill_class("species"), (
+        "species reads the identity table and is whole-map with any cache")
 
 
 def test_coverage_offers_the_fix_when_the_join_is_missing(
@@ -1175,16 +1342,23 @@ def test_a_shared_hit_is_one_sample_wherever_it_is_counted(two_cohorts):
     assert f"<b>{len(overlay['shared_points'])}</b> retrieved by both" in badge
 
 
-def test_the_map_caveat_is_true_in_three_dimensions_too():
-    """The retrieval group is a static subtree and stays on screen in 3-D, so a
-    caveat reading "a projection of 512 dimensions into two" would be false to
-    a reader looking at three axes. That is the same class of error as a
-    parameter chip naming one t-SNE gradient method for both dimensionalities,
-    which `projection_params` takes `dims` specifically to avoid."""
-    caveat = _text(layout.control_rail())
-    assert "Hover a hit" in caveat
-    assert "into two" not in caveat
-    assert "cannot preserve" in caveat
+def test_the_retrieval_group_carries_no_standing_paragraph():
+    """The rail's retrieval group is a control, a summary line and a button.
+
+    It used to end with a permanent caveat about the two rank orderings
+    disagreeing. That fact is still true and is still shown, in the hover
+    `render._map_ranks` builds, which is where the reader meets it at the moment
+    it applies; the rail was telling them to go and read a tooltip. The caveat
+    is pinned in REMOVED_COPY below - this asserts the shape that replaced it,
+    so a different three-line paragraph cannot quietly take its place.
+    """
+    group = next(c for c in _walk(layout.control_rail())
+                 if getattr(c, "id", None) == "retrieval-group")
+    hints = [c for c in _walk(group)
+             if "bm-hint" in str(getattr(c, "className", ""))]
+    assert len(hints) == 1, (
+        "the retrieval group has more than the summary line under its control")
+    assert hints[0].id == "retrieval-summary"
 
 
 def test_the_corpus_key_rows_only_the_layers_that_are_drawn(corpus):
@@ -1225,6 +1399,20 @@ REMOVED_COPY = (
     "Each glyph is a pooled member",
     "no line is drawn",
     "anatomical vocabulary",
+    # Removed 2026-08-11. Both said something true; neither said it where the
+    # reader needed it. The rank disagreement is in every hit's hover, and the
+    # trailing clause narrated a picture already on screen.
+    "Hover a hit for its rank",
+    "drawn where they sit in the space",
+    # The three one-line mode hints under Sample / Cohort / Upload. Each
+    # restated its own tab, above a panel that answers the same question with
+    # real controls a moment later.
+    "One OSDR sample against every ARCHS4 sample",
+    "A whole experimental group, pooled into one query",
+    "A counts file the corpus has never seen",
+    # The rail names the quantity, not the mechanism, and this was its only
+    # piece of implementation vocabulary. The component id is still `budget`.
+    "ARCHS4 point budget",
 )
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from dash import Input, Output, State, ctx, html, no_update
+from dash import ALL, Input, Output, State, ctx, html, no_update
 
 from . import colorby, data, find, layout, render, theme
 
@@ -299,6 +299,94 @@ def find_status_children(found: dict | None):
             "a condition instead, use ", html.B("Color by"), " above."]
 
 
+def chosen_suggestion(clicks, values) -> dict | None:
+    """The click payload a suggestion row commits, or None if none was clicked.
+
+    `values` is every identifier currently on offer, in the order Dash reports
+    their clicks, so the chosen one is read positionally from the family that
+    actually fired rather than from a separately-stored list that a re-render
+    could have replaced.
+
+    The `seq` is not decoration. This becomes a store, and Dash fires a callback
+    on a store only when its value *changes* - so choosing GSM4256053, clearing
+    the box, and choosing GSM4256053 again would write an identical payload the
+    second time and commit nothing. The running click total makes every choice a
+    distinct value, including a repeat of the last one.
+    """
+    triggered = ctx.triggered_id
+    if not isinstance(triggered, dict) or triggered.get("type") != "find-suggestion":
+        return None
+    total = sum(n or 0 for n in (clicks or []))
+    if not total:
+        return None
+    return {"value": str(triggered.get("value") or ""), "seq": total}
+
+
+def _fired(prop: str) -> bool:
+    """Did `prop` actually change in the request that woke this callback?
+
+    `ctx.triggered_id` names one trigger and says nothing about *why* the
+    callback ran, and "why" is the whole question for a callback with a
+    per-keystroke input among its dependencies. Dash wakes a callback whenever
+    any of its inputs is re-rendered, appears, or disappears - measured here: a
+    `fill("")` that empties the suggestion family woke `resolve_find` with no
+    click and no submit, and it committed the empty box, wiping the marks from
+    a search the reader had not touched.
+
+    So the commit is gated on the prop having a value in `ctx.triggered` rather
+    than on the absence of other explanations. `value is not None` is what
+    separates a real event from a component Dash is merely reporting as new.
+    """
+    return any(t.get("prop_id") == prop and t.get("value") is not None
+               for t in (ctx.triggered or []))
+
+
+def viewport_axes(vp, dims: str) -> dict:
+    """The axis layout that puts `vp` on screen, or the whole corpus back.
+
+    **The `autorange` branch is not a no-op and must not be dropped.**
+    `theme.base_figure_layout` sets `uirevision="keep"`, which asks Plotly to
+    preserve the user's own pan and zoom across a figure update unless the
+    incoming figure *changes* the attribute in question. Framing works on that
+    rule: it sets a range where the previous figure had none. Resetting has to
+    go the other way, and an absent key is not a changed value - leaving the
+    range off and expecting Plotly to autorange leans on the one thing
+    `uirevision` exists to prevent. Saying `autorange` outright is the only
+    honest spelling of "back to the whole map", and it is what makes the reset
+    button, a projection change and the modebar's own reset agree, since all
+    three reach `update_figure` as `viewport = None`.
+
+    3-D contributes nothing: the viewport store does not drive a `Scatter3d`
+    camera, so there is no axis to pin and none to release.
+    """
+    if dims != "2d":
+        return {}
+    if vp:
+        return {"xaxis": dict(range=[vp[0], vp[1]]),
+                "yaxis": dict(range=[vp[2], vp[3]])}
+    return {"xaxis": dict(autorange=True), "yaxis": dict(autorange=True)}
+
+
+def is_framed(viewport, dims: str) -> bool:
+    """Is the map showing a window rather than the whole corpus?
+
+    The one definition of "framed", so the button that undoes it and the
+    callback that produced it cannot disagree about when there is anything to
+    undo. It is a property of `viewport-store` alone, deliberately: framing a
+    find, framing a retrieval and the user's own scroll-zoom all end up there
+    and are the same state by the time they arrive, which is why one control
+    can reverse all three.
+
+    3-D is never framed. `frame_points` declines outright there and
+    `update_figure` passes `None` for the viewport, because pinning 2-D axis
+    ranges does nothing to a `Scatter3d` camera - the same reason both frame
+    buttons hide in 3-D. Offering a reset for a state the view cannot be in
+    would be a click with no visible effect, which is what the lasso was
+    removed for.
+    """
+    return dims == "2d" and bool(viewport)
+
+
 def coverage_children(color_by: str):
     """The coverage readout under the color-by control.
 
@@ -375,10 +463,7 @@ def register(app):
             method, dims, color_by, layers or [], budget,
             vp if dims == "2d" else None, retrieval=retrieval, found=found)
         legend_data["title"] = layout.color_by_label(color_by)
-        # Persist zoom in 2D by pinning axis ranges to the viewport.
-        if vp and dims == "2d":
-            fig.update_layout(xaxis=dict(range=[vp[0], vp[1]]),
-                              yaxis=dict(range=[vp[2], vp[3]]))
+        fig.update_layout(**viewport_axes(vp, dims))
         badge_children = [_badge(b) for b in badges]
         items = legend_data.get("items", [])
 
@@ -439,18 +524,88 @@ def register(app):
         return layout.projection_params_children(method, dims)
 
     @app.callback(
+        Output("find-input", "value"),
+        Output("find-chosen", "data"),
+        Input({"type": "find-suggestion", "value": ALL}, "n_clicks"),
+        State({"type": "find-suggestion", "value": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def choose_suggestion(clicks, ids):
+        """A row was clicked: put it in the box, and publish it as a commit.
+
+        **This callback exists so that the commit does not.** A pattern-matching
+        `ALL` input fires whenever its family is *re-rendered*, and this family
+        re-renders on every keystroke - so a callback carrying both this input
+        and the search would be woken constantly with nothing to do. That is not
+        merely wasteful, it is a lost search: Dash discards the response to a
+        request that a newer request for the same callback has superseded, and
+        the keystroke-driven no-op reliably overtook the Enter that had already
+        been answered correctly on the server. Measured on the real app - the
+        first find of every session vanished, the rest survived on timing alone.
+
+        So the family's input lives here, where being woken spuriously costs a
+        `no_update` on a store nobody redraws, and `find-store` is written by a
+        callback with no per-keystroke input at all.
+        """
+        chosen = chosen_suggestion(clicks, ids)
+        if chosen is None:
+            return no_update, no_update
+        return chosen["value"], chosen
+
+    @app.callback(
         Output("find-store", "data"),
+        # The two events `debounce=True` used to fire on, now named outright
+        # because the input publishes its value on every keystroke and only
+        # these mean "I have finished". Committing here rather than on `value`
+        # is what keeps a 942,563-point figure from being rebuilt per letter.
+        Input("find-input", "n_submit"),
+        Input("find-input", "n_blur"),
+        # The third way to finish, arriving as a store rather than as the click
+        # itself - see `choose_suggestion` for why that indirection is the whole
+        # point. Every input here changes only when someone has actually
+        # finished, so this callback is never woken with nothing to do and can
+        # never be superseded by its own no-op.
+        Input("find-chosen", "data"),
+        State("find-input", "value"),
+        prevent_initial_call=True,
+    )
+    def resolve_find(_submits, _blurs, chosen, typed):
+        """Turn what was committed into the points it names.
+
+        One writer for `find-store`, three ways to reach it, and the three
+        cannot disagree: each hands the same `find.find` the same kind of
+        string, so a chosen suggestion resolves exactly as if it had been typed.
+
+        A chosen row commits its own identifier rather than the box's current
+        text, because the text is put there by a different callback and this
+        must not depend on having won a race with it.
+
+        The default is `no_update`: a commit is positively identified rather
+        than inferred from the absence of other explanations, because Dash also
+        wakes a callback when an input component newly appears - which is how
+        clearing the box once wiped the marks from a search nobody had touched.
+        """
+        if _fired("find-chosen.data") and chosen:
+            return find.find(str(chosen.get("value") or ""))
+        if _fired("find-input.n_submit") or _fired("find-input.n_blur"):
+            return find.find(typed)
+        return no_update
+
+    @app.callback(
+        Output("find-suggestions", "children"),
         Input("find-input", "value"),
     )
-    def resolve_find(query):
-        """Turn what was typed into the points it names.
+    def offer_suggestions(query):
+        """Complete the identifier being typed, on every keystroke.
 
-        `debounce=True` on the input means this fires on Enter or on blur, not
-        per keystroke, so the 460 ms first-search index build happens once when
-        the user has finished typing rather than after every letter of
-        "GSM4256053".
+        Cheap enough to run per keystroke and measured rather than assumed: a
+        warm accession lookup is a handful of `searchsorted` calls over the
+        int32 index, about 2 ms, and the OSDR side is a scan of 2,108 strings.
+        The one expensive call is the first, which builds the 460 ms index -
+        the same build the first search has always paid for, now paid a few
+        keystrokes earlier.
         """
-        return find.find(query)
+        return layout.suggestion_children(find.suggest(query))
 
     @app.callback(
         Output("find-status", "children"),
@@ -600,9 +755,9 @@ def register(app):
         shown = [c for c in full["cohorts"] if c["role"] in roles]
         if not shown:
             # The tick hides the overlay outright, and saying so is the whole
-            # job of this line. It used to describe the retrieval regardless,
-            # so unticking left the rail asserting glyphs "drawn where they sit
-            # in the space" over a map with none of them on it.
+            # job of this line. It used to describe the retrieval regardless, so
+            # unticking left the rail describing marks over a map with none of
+            # them on it.
             return ("Not drawn. Tick it above to put it back on the map."
                     if len(full["cohorts"]) < 2 else
                     "Neither arm is drawn. Tick one to put it back on the map.")
@@ -610,10 +765,16 @@ def register(app):
         if len(full["cohorts"]) < 2:
             n = len(set(full["hit_points"]))
             query = full["query_label"] or "an OSDR sample"
+            # The sentence used to carry a trailing clause about the marks
+            # sitting where they do in the space, which narrated the picture the
+            # reader is already looking at rather than telling them anything
+            # about it. Removed on 2026-08-11; the count is the part that
+            # carries information, so the sentence stops after it. The phrase is
+            # pinned in `tests/test_app.py::REMOVED_COPY`, which is why it is
+            # described here rather than quoted.
             return [
                 html.B(query.split("|")[-1]),
-                f" and its {n} nearest ARCHS4 neighbor{'s' if n != 1 else ''}, "
-                "drawn where they sit in the space.",
+                f" and its {n} nearest ARCHS4 neighbor{'s' if n != 1 else ''}.",
             ]
 
         if len(shown) < 2:
@@ -646,6 +807,11 @@ def register(app):
         # arrives at the callback that already owns the viewport rather than
         # becoming a second writer to it.
         Input("frame-find", "n_clicks"),
+        # And so does undoing any of it. One store holds the framing, whoever
+        # narrowed it, so one Input clears it - rather than a reset handler per
+        # frame button, which would be two ways to write one value and would
+        # still leave a plain scroll-zoom with no way back.
+        Input("reset-view", "n_clicks"),
         State("hits-store", "data"),
         State("find-store", "data"),
         State("method", "value"),
@@ -656,11 +822,16 @@ def register(app):
         prevent_initial_call=True,
     )
     def update_viewport(relayout, method, dims, _frame_clicks, _find_clicks,
-                        hits_payload, found, method_state, dims_state,
-                        show_retrieval):
+                        _reset_clicks, hits_payload, found, method_state,
+                        dims_state, show_retrieval):
         from dash import ctx
-        if ctx.triggered_id in ("method", "dims"):
-            return None  # reset zoom when the projection changes
+        if ctx.triggered_id in ("method", "dims", "reset-view"):
+            # None is this callback's word for the whole corpus, so the reset
+            # button lands in the same branch a projection change does. It
+            # clears the viewport and nothing else: the find, the retrieval, the
+            # selected sample and the ticks above them are all other stores, so
+            # the query a user framed is still there to be framed again.
+            return None
         if ctx.triggered_id == "frame-retrieval":
             roles = _roles_from_checklist(show_retrieval) or (ROLE_A, ROLE_B)
             return _frame_for(hits_payload, method_state, dims_state, roles)
@@ -678,6 +849,21 @@ def register(app):
         if vp is None:
             return None
         return list(vp)
+
+    @app.callback(
+        Output("reset-view", "style"),
+        Input("viewport-store", "data"),
+        Input("dims", "value"),
+    )
+    def show_reset_view(viewport, dims):
+        """Offer the reset only while there is something to reset.
+
+        A permanently visible "Reset view" over an unframed map is a control
+        that does nothing, which is the standard this map already applies to the
+        two frame buttons and to the selection tools it removed from the
+        modebar.
+        """
+        return {} if is_framed(viewport, dims) else {"display": "none"}
 
     @app.callback(
         Output("legend-list", "children"),

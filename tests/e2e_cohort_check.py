@@ -811,29 +811,27 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
          f"and the badge stops claiming two: {solo_badges[:80]!r}")
     shot(page, "08-one-arm")
 
-    # The panel used to be shown or hidden on the color items alone, so
-    # the one state that draws no colored category - an OSDR-only field
-    # with the OSDR layer unticked - would have taken the whole key off
-    # screen, retrieval and all, while the retrieval was still drawn.
-    page.locator("#color-by").click()
-    page.wait_for_timeout(400)
-    page.locator(".dash-dropdown-content").get_by_text(
-        "Flight vs Ground", exact=False).first.click()
-    page.wait_for_timeout(3000)
-    page.locator("#layers input[type=checkbox]").nth(1).uncheck()
-    page.wait_for_timeout(3000)
+    # The panel used to be shown or hidden on the color items alone, so a state
+    # that draws no colored category would have taken the whole key off screen,
+    # retrieval and all, while the retrieval was still drawn.
+    #
+    # That state used to be reached with an OSDR-only color-by and the OSDR
+    # layer unticked. All nine OSDR-only fields were removed on 2026-08-11, so
+    # it is reached here by unticking *both* corpus layers - which is a stronger
+    # version of the same case: the retrieval overlay is drawn outside the layer
+    # toggles entirely, so this leaves the map with nothing on it but the two
+    # cohorts and no legend row to hang the panel on.
+    for i in (0, 1):
+        page.locator("#layers input[type=checkbox]").nth(i).uncheck()
+    page.wait_for_timeout(3500)
     c.ok(page.locator("#legend").is_visible(),
          "the key survives a state with no colored category on screen")
     c.ok(page.locator("#legend-retrieval .bm-key-row").count() > 0,
          "and still decodes the retrieval that is still drawn")
     c.ok(not page.locator("#legend-color").is_visible(),
          "while the empty color section takes itself off")
-    page.locator("#layers input[type=checkbox]").nth(1).check()
-    page.wait_for_timeout(2500)
-    page.locator("#color-by").click()
-    page.wait_for_timeout(400)
-    page.locator(".dash-dropdown-content").get_by_text(
-        "Tissue", exact=False).first.click()
+    for i in (0, 1):
+        page.locator("#layers input[type=checkbox]").nth(i).check()
     page.wait_for_timeout(3000)
 
     # The ticks are the user's, and only a new retrieval may reset them.
@@ -878,6 +876,52 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
     page.wait_for_timeout(2500)
     c.ok(len((page.evaluate(MAP_OVERLAY_JS) or {}).get("members", [])) == 2,
          "and reticking brings it back")
+
+    # ---- 8c. framing a comparison, and the one control that undoes it ----
+    #
+    # Framing a retrieval and framing a find write the same `viewport-store`,
+    # so one reset undoes both - which is the whole reason there is one control
+    # rather than a button beside each. The find half is checked in
+    # `e2e_check.py`; this is the retrieval half, on the payload with the most
+    # to lose, because a reset that cleared the wrong store would take two
+    # pooled queries and twelve member marks with it.
+    print("\n=== 8c. framing a comparison, and the reset that undoes it ===")
+
+    def map_span():
+        return page.evaluate(
+            "() => { const fl = document.querySelector"
+            "('#manifold-graph .js-plotly-plot')._fullLayout;"
+            " return fl.xaxis.range[1] - fl.xaxis.range[0]; }")
+
+    drawn = page.evaluate(MAP_OVERLAY_JS) or {}
+    whole = map_span()
+    c.ok(not page.locator("#reset-view").is_visible(),
+         "the map is unframed until something frames it")
+    page.locator("#frame-retrieval").click()
+    page.wait_for_timeout(3000)
+    framed = map_span()
+    c.ok(framed < whole * 0.9,
+         f"framing a comparison narrows the view ({framed:.2f} of {whole:.2f})")
+    c.ok(page.locator("#reset-view").is_visible(),
+         "and the reset appears once it has")
+    page.locator("#reset-view").click()
+    page.wait_for_timeout(3000)
+    back = map_span()
+    c.ok(abs(back - whole) < whole * 0.02,
+         f"the reset restores the whole map ({back:.2f})")
+    c.ok(not page.locator("#reset-view").is_visible(),
+         "and takes itself off again")
+    after = page.evaluate(MAP_OVERLAY_JS) or {}
+    c.ok(len(after.get("members", [])) == len(drawn.get("members", [])),
+         f"both cohorts survive the reset: {len(after.get('members', []))} arms")
+    c.ok(len(after.get("hits", [])) == len(drawn.get("hits", [])),
+         "and so does every hit they retrieved")
+    page.locator("#frame-retrieval").click()
+    page.wait_for_timeout(3000)
+    c.ok(abs(map_span() - framed) < max(framed * 0.02, 0.001),
+         f"re-framing gives the same window, not a stale one ({map_span():.2f})")
+    page.locator("#reset-view").click()
+    page.wait_for_timeout(2500)
 
     # ---- 9. several cohorts, several depths -------------------------
     print("\n=== 9. other studies, cohorts and depths ===")

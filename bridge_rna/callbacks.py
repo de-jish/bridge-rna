@@ -542,7 +542,6 @@ def register(app) -> None:
         *[Output(f"mode-tab-{m['key']}", "aria-selected") for m in QUERY_MODES],
         *[Output(f"mode-panel-{m['key']}", "style") for m in QUERY_MODES],
         *[Output(f"action-slot-{m['key']}", "style") for m in QUERY_MODES],
-        Output("mode-hint", "children"),
         Output("study-group", "style"),
         Output("network-graph", "figure", allow_duplicate=True),
         *[Input(f"mode-tab-{m['key']}", "n_clicks") for m in QUERY_MODES],
@@ -593,7 +592,6 @@ def register(app) -> None:
             keys = {m["key"] for m in QUERY_MODES}
             candidate = _safe_str(stored_mode)
             active = candidate if candidate in keys else QUERY_MODES[0]["key"]
-        hint = next(m["hint"] for m in QUERY_MODES if m["key"] == active)
         shown, hidden = {}, {"display": "none"}
 
         # The empty canvas has to invite the thing the active mode can actually
@@ -616,7 +614,6 @@ def register(app) -> None:
             *["true" if m["key"] == active else "false" for m in QUERY_MODES],
             *[shown if m["key"] == active else hidden for m in QUERY_MODES],
             *[shown if m["key"] == active else hidden for m in QUERY_MODES],
-            hint,
             # Upload has no study; Sample and Cohort share one.
             hidden if active == "upload" else shown,
             canvas,

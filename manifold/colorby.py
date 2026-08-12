@@ -11,7 +11,7 @@ a `ColorBy` that reports which corpora it can actually color *right now*, given
 which artifacts exist on this machine. That single fact drives everything
 downstream:
 
-  * the menu groups whole-map fields above spaceflight-only ones,
+  * the menu groups whole-map fields above OSDR-only ones,
   * an option with no data at all is offered but disabled, with the command to
     run attached, instead of silently missing or silently grey,
   * the control rail states the exact point count a field colors, and
@@ -22,6 +22,16 @@ downstream:
 `labels()` returns one array over the full corpus in fixed global order, with
 `NOT_COVERED` marking points the field does not describe. Everything else is a
 plain categorical render.
+
+**Two fields are registered, and the partial-coverage machinery is still the
+point.** The nine OSDR-only fields this module was written around are gone
+(see the note in `REGISTRY`), so with `cache/archs4_metadata.parquet` present
+both Tissue and Species color all 942,563 points and none of the degraded paths
+run. Without it, Tissue drops to the 2,108 OSDR points and every one of them
+does: the menu labels it "OSDR only", the coverage bar goes amber and states the
+count, the fix is named under the control, and the renderer draws ARCHS4 as a
+faint context cloud rather than as a grey category. That is invariant 5, it is
+the state a fresh clone starts in, and it is what these declarations are for.
 """
 
 from __future__ import annotations
@@ -95,15 +105,6 @@ def _tissue() -> np.ndarray:
     return out
 
 
-def _osdr_field(name: str) -> Callable[[], np.ndarray]:
-    def resolve() -> np.ndarray:
-        n_archs4, _, total = data.counts()
-        out = np.full(total, NOT_COVERED, dtype=object)
-        out[n_archs4:] = data.osdr_field_values(name).to_numpy()
-        return out
-    return resolve
-
-
 #: The one sentence that says how to get the optional GEO join, so the two
 #: controls that depend on it - the color-by and the find box - cannot end up
 #: telling a user to run two different things.
@@ -137,30 +138,28 @@ REGISTRY: tuple[ColorBy, ...] = (
     # ARI ~0.45 - and 81% species-pure. Painting an arbitrary partition on a
     # scientific instrument and numbering it "Cluster 1..24" invites exactly the
     # over-reading the rest of this file exists to prevent. See IMPLEMENTATION.md.
-    # --- Spaceflight detail: defined for the 2,108 OSDR samples only. -------
-    ColorBy(key="flight_status", label="Flight vs Ground", scope=(OSDR,),
-            resolver=_osdr_field("flight_status"),
-            hint="The one contrast the OSDR corpus is built around."),
-    ColorBy(key="spaceflight", label="Spaceflight arm", scope=(OSDR,),
-            resolver=_osdr_field("spaceflight"),
-            hint="The seven raw control arms kept distinct - a basal animal and "
-                 "a vivarium animal are different experiments."),
-    ColorBy(key="strain", label="Strain", scope=(OSDR,), resolver=_osdr_field("strain")),
-    ColorBy(key="sex", label="Sex", scope=(OSDR,), resolver=_osdr_field("sex")),
-    ColorBy(key="genotype", label="Genotype", scope=(OSDR,), resolver=_osdr_field("genotype")),
-    ColorBy(key="study", label="Study", scope=(OSDR,), resolver=_osdr_field("study"),
-            hint="Each OSD study is one batch. Color by this to see how much "
-                 "apparent structure is study rather than biology."),
-    ColorBy(key="habitat", label="Habitat", scope=(OSDR,), resolver=_osdr_field("habitat")),
-    ColorBy(key="duration", label="Mission duration", scope=(OSDR,),
-            resolver=_osdr_field("duration")),
-    ColorBy(key="diet", label="Diet", scope=(OSDR,), resolver=_osdr_field("diet")),
+    #
+    # There are also deliberately no OSDR-only fields. Nine of them shipped -
+    # Flight vs Ground, Spaceflight arm, Strain, Sex, Genotype, Study, Habitat,
+    # Mission duration, Diet - and every one was removed on 2026-08-11 because
+    # none of them separated anything on this map. They were the field the
+    # coverage machinery below was built for, and they are the reason it looks
+    # over-engineered for two entries; it is not, because **Tissue becomes an
+    # OSDR-only field on a machine that never fetched the GEO join**, which is
+    # the state a fresh clone starts in. Coverage, the "OSDR only" scope note,
+    # the amber partial bar and the renderer's context cloud are all still live
+    # on that path and are all still load-bearing. See
+    # docs/design-notes.md#osdr-only-color-bys for what was measured.
 )
 
 _BY_KEY = {c.key: c for c in REGISTRY}
 
 GROUP_WHOLE_MAP = "Whole map"
-GROUP_OSDR = "Spaceflight detail (OSDR only)"
+#: A field that can only color the 2,108 OSDR points on this machine. No field
+#: is registered that way any more; Tissue lands here when the optional GEO
+#: join is absent, which is the only route into this group and the reason it
+#: still exists.
+GROUP_OSDR = "OSDR only"
 
 
 def get(key: str) -> ColorBy:

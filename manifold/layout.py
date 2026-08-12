@@ -290,8 +290,17 @@ def control_rail() -> html.Aside:
             # thing drawing those points). In 3-D the tiers stop at the rotation
             # cap; budget_options() decides, and callbacks.sync_budget_to_dims
             # swaps the tiers when the dimensionality changes.
+            # The label names the quantity. It used to name the mechanism - the
+            # word was "budget" - which was the rail's only piece of
+            # implementation vocabulary, on a control whose four pills already
+            # read 100k / 250k / 500k / All. The old wording is pinned in
+            # `tests/test_app.py::REMOVED_COPY`.
+            #
+            # The component id stays `budget`. It is internal, three callbacks
+            # and two test modules name it, and renaming it would be churn with
+            # no reader on the other end.
             _group(
-                "budget-label", "ARCHS4 point budget",
+                "budget-label", "Number of ARCHS4 points",
                 _segmented("budget", budget_options("2d"), default_budget("2d")),
             ),
             # "Where is this sample?" - the one question the map could not be
@@ -316,14 +325,64 @@ def control_rail() -> html.Aside:
                     html.Label("Find a sample", id="find-label",
                                className="bm-group-label", htmlFor="find-input"),
                     dcc.Input(
-                        id="find-input", type="text", debounce=True,
+                        id="find-input", type="text",
                         className="bm-find-input",
-                        # The placeholder carries the grammar. Without it the
-                        # box is a blank field that silently expects one of four
-                        # accession formats, and the commonest first query -
-                        # a word like "liver" - looks like a broken search
-                        # rather than the wrong control.
-                        placeholder="GSM…  GSE…  OSD-100  sample name",
+                        # `debounce=False`, which is a change and is the whole
+                        # reason the suggestions can exist: Dash's `debounce`
+                        # means "publish the value on Enter or blur", so with it
+                        # on there is no per-keystroke value to complete. The
+                        # commit is not lost, it is made explicit - `n_submit`
+                        # and `n_blur` are exactly the two events `debounce` was
+                        # firing on, and they are Inputs to `resolve_find` now.
+                        # That split is what keeps a 942,563-point figure from
+                        # being rebuilt on every letter of "GSM4256053".
+                        debounce=False,
+                        # The browser's own history dropdown would sit on top of
+                        # ours, offering whatever this user last typed into a
+                        # box called `find-input` on any page.
+                        autoComplete="off",
+                        # The placeholder still carries the grammar, because it
+                        # is what an empty box says and the list has nothing to
+                        # offer until something is typed.
+                        #
+                        # Its length is measured, not judged. The field is
+                        # 215 px wide inside its padding on the 268 px rail, and
+                        # the previous wording rendered at 237 px - so it taught
+                        # three formats and then trailed off in the middle of
+                        # the fourth, at "sample na…", from the day the control
+                        # shipped. This one measures 206 px in the rail's own
+                        # font and still names all four.
+                        # `test_the_find_placeholder_fits_its_box` in
+                        # `tests/e2e_check.py` re-measures it in the browser,
+                        # because no Python assertion can.
+                        placeholder="GSM… GSE… OSD-100 or a name",
+                        # The combobox semantics - role, aria-autocomplete,
+                        # aria-controls, aria-expanded, aria-activedescendant -
+                        # are set by `assets/find-suggest.js` and not here.
+                        # `dcc.Input` declares no `aria-*` or `role` wildcard in
+                        # Dash 4, so passing them raises at layout time rather
+                        # than being ignored. That is the right place for them
+                        # anyway: three of the five are live state that only the
+                        # code operating the list can keep true, and the feature
+                        # does not exist without that file.
+                    ),
+                    # The suggestion list. Inline rather than floating: the rail
+                    # scrolls, so an absolutely-positioned popup would either be
+                    # clipped by that scroll container or detach from the box it
+                    # belongs to. Inline, it is bounded by its own max-height
+                    # and pushes the panels below it down for as long as it is
+                    # open, which is a change the reader caused and can undo.
+                    #
+                    # Empty when there is nothing to offer, and hidden by
+                    # `:empty` rather than by a style this or any callback
+                    # writes. Whether it is *open* is the browser's business -
+                    # Escape, a click outside, a chosen row - and lives in one
+                    # class on the group above. Two independent facts, one
+                    # owner each, composed by CSS into one `display`.
+                    html.Div(
+                        id="find-suggestions", className="bm-suggest",
+                        role="listbox",
+                        **{"aria-label": "Matching samples"},
                     ),
                     html.Div(id="find-status", className="bm-hint"),
                     html.Button("Frame it", id="frame-find", n_clicks=0,
@@ -359,22 +418,18 @@ def control_rail() -> html.Aside:
                 html.Div(id="retrieval-summary", className="bm-hint"),
                 html.Button("Frame the retrieval", id="frame-retrieval",
                             n_clicks=0, className="bm-button"),
-                # What each mark means now lives in the key on the plot, beside
-                # the marks. What stays here is the one thing the picture cannot
-                # show: that a hit carries two different orderings, and the
-                # nearer of two hits on screen is not the better one.
-                # Not "into two". This div is static and the group stays on
-                # screen in 3-D, where that would be a false statement to a
-                # reader looking at three axes - the same class of error as a
-                # parameter chip naming one t-SNE gradient method for both
-                # dimensionalities. The claim is true of any projection, so it
-                # is made that way rather than made dims-aware.
-                html.Div(
-                    "Hover a hit for its rank in the search and its rank on "
-                    "the map. The two disagree: a projection cannot preserve "
-                    "512-dimensional distances.",
-                    className="bm-hint",
-                ),
+                # What each mark means lives in the key on the plot, beside the
+                # marks. Nothing else belongs here.
+                #
+                # A standing paragraph used to, telling the reader to hover a hit
+                # for its two ranks and warning that a projection cannot
+                # preserve 512-dimensional distances. Removed on 2026-08-11. The
+                # disagreement it described is real and is still shown -
+                # `render._map_ranks` puts both ranks in every hit's hover, which
+                # is where a reader meets the fact at the moment it applies - so
+                # the rail was spending three permanent lines telling the reader
+                # to go and read a tooltip. The sentence is pinned in
+                # `tests/test_app.py::REMOVED_COPY`, hence described not quoted.
             ]),
         ],
     )
@@ -516,6 +571,50 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
         rows.append(_key_row("hit-both", "retrieved by both",
                              len(overlay.get("shared_points") or [])))
     return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
+
+
+def suggestion_children(suggestions: dict | None) -> list:
+    """The rows inside the suggestion listbox.
+
+    Each row is a real option in a real listbox: `role="option"` under the
+    `role="listbox"` the layout declares, so a screen reader announces "3 of 10"
+    rather than reading ten unlabelled divs. The row is a `<div>` and not a
+    `<button>` deliberately - a button inside a listbox is announced as a button
+    and takes its own place in the tab order, and an ARIA combobox keeps focus
+    in the text field and moves a *virtual* cursor instead.
+
+    The identifier its `id` carries is what the click callback reads, so the
+    value a row commits is the value the row was built from and there is no
+    index into a list that a re-render could invalidate.
+
+    A miss gets one flat row rather than an empty box, and only when the query
+    was the right *shape* to have matched: "no sample matches GSM99999999" is
+    worth saying, where a dropdown volunteering "no matches" under the word
+    "liver" would contradict the sentence below the box, which correctly says
+    that free text is not what this control takes.
+    """
+    suggestions = suggestions or {}
+    items = suggestions.get("items") or []
+    if not items:
+        if suggestions.get("reason") == find.ABSENT:
+            return [html.Div("Nothing on this map matches that.",
+                             className="bm-suggest-empty")]
+        return []
+    return [
+        html.Div(
+            id={"type": "find-suggestion", "value": str(item["value"])},
+            className="bm-suggest-row",
+            role="option",
+            n_clicks=0,
+            **{"aria-selected": "false"},
+            children=[
+                html.Span(str(item["label"]), className="bm-suggest-label"),
+                html.Span(str(item["detail"]), className="bm-suggest-detail",
+                          title=str(item["detail"])),
+            ],
+        )
+        for item in items
+    ]
 
 
 def selected_panel_children(record: dict | None) -> list:
@@ -678,7 +777,33 @@ def build_view() -> html.Div:
         html.Div(className="bm-body", children=[
             control_rail(),
             html.Main(className="bm-plot-wrap", **{"aria-label": "Embedding map"}, children=[
-                html.Div(id="plot-badges", className="bm-plot-badges"),
+                # The strip across the top of the canvas: what is drawn right
+                # now, and the one action that changes it.
+                #
+                # **Reset view is on the plot rather than on the rail, and that
+                # is the whole point of it.** Three things narrow the viewport -
+                # framing a find, framing a retrieval, and the user's own scroll
+                # or drag - and all three write the same `viewport-store`, so
+                # there is one thing to undo and it should be undone by one
+                # control. A button beside "Frame it" and a second beside
+                # "Frame the retrieval" would be two handlers for one piece of
+                # state, and neither would answer a plain scroll-zoom. The rail's
+                # rule is that an action sits with the control it qualifies;
+                # this one qualifies the viewport, and the viewport belongs to
+                # the plot, so this is where it goes.
+                #
+                # It is declared here and hidden, not created by a callback, for
+                # the reason the legend's parts are: Dash validates its callback
+                # graph against the initial layout, and an id that only ever
+                # exists as callback output fails silently in the browser rather
+                # than loudly at startup.
+                html.Div(className="bm-plot-badges", children=[
+                    html.Div(id="plot-badges", className="bm-badges"),
+                    html.Button("Reset view", id="reset-view", n_clicks=0,
+                                className="bm-reset-view",
+                                title="Return to the whole map",
+                                style={"display": "none"}),
+                ]),
                 legend_panel(),
                 # dcc.Loading wraps its children in two nested divs of its own.
                 # Both need an explicit full height or the chain from
@@ -732,4 +857,15 @@ def build_view() -> html.Div:
         # initial layout, so an id that only ever exists as callback output
         # fails silently at runtime instead of loudly at startup.
         dcc.Store(id="find-store"),
+        # One chosen suggestion, and the only reason it is a store rather than
+        # the click itself: a pattern-matching `ALL` input fires whenever its
+        # family is re-rendered, which for the suggestion rows is every
+        # keystroke. Dash discards the answer to a request that a newer request
+        # for the same callback supersedes, so with that input on the callback
+        # that searches, the keystroke-driven no-op overtook the Enter that had
+        # already been answered - the first find of every session was lost, and
+        # the rest survived on timing. This store changes only when a row is
+        # actually clicked, so the search callback is never woken with nothing
+        # to do. See `callbacks.choose_suggestion`.
+        dcc.Store(id="find-chosen"),
     ])

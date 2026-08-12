@@ -20,10 +20,13 @@ behaviour - silently gave the same category two different colors whenever the
 two corpora had different category orderings, which is a legend that lies.
 
 *A corpus a field does not describe is drawn as context, not as data.* Picking
-an OSDR-only field used to paint 940,455 uniform grey glyphs, which reads as
-"ARCHS4 was measured and has no structure here". Instead those points are drawn
-in one deliberately faint context color at 0.35 opacity, outside the legend, so
-they read as scenery rather than as a category. See manifold/colorby.py.
+a field that says nothing about ARCHS4 used to paint 940,455 uniform grey
+glyphs, which reads as "ARCHS4 was measured and has no structure here". Instead
+those points are drawn in one deliberately faint context color at 0.35 opacity,
+outside the legend, so they read as scenery rather than as a category. The nine
+OSDR-only fields that first raised this are gone; the branch is still reached,
+by Tissue on a machine that never fetched the optional GEO join, which is the
+state a fresh clone starts in. See manifold/colorby.py.
 """
 
 from __future__ import annotations

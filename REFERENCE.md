@@ -377,7 +377,7 @@ Four library behaviours the code actively depends on, each of which caused a rea
   Components are styled through Dash's own structural classes and its `--Dash-*` tokens.
   Dash's dropdown also has no option-group support, which is why `colorby.menu_options()` carries grouping through ordering plus a scope suffix rather than faked header rows.
 - **pandas 3.0, again, and this one is a memory trap rather than a correctness one**: `.to_numpy()` on a string-dtype Series materializes a *fresh* Python `str` object per element.
-  `render._color_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry, against an app that otherwise opens 80.8 MB.
+  `render._color_plan` memoizes one per-point category array per color-by, and as strings that array held 942,563 distinct objects to express 13 distinct values: **127.5 MB measured, per color-by**, or about 1.4 GB across the 11-entry registry it was measured on, against an app that otherwise opens 80.8 MB. The registry is two entries now, which lowers the total and not the argument.
   It is stored as `int16` legend slots instead, which is 1.9 MB, and category selection becomes a vectorized integer compare rather than 942,563 Python string comparisons.
   Measured effect on the render path: a warm figure over the whole corpus went from 1.33 s to 0.06 s.
 
@@ -460,7 +460,7 @@ The arms themselves are *not* merged: basal animals were sacrificed at experimen
 ### As shipped, over the 2,108 embedded samples
 
 Verified 2026-07-21 by reading `cache/osdr_metadata.parquet` directly.
-The parquet carries exactly the columns the color-by registry resolves: `sample_key`, `spaceflight`, `tissue`, `strain`, `sex`, `genotype`, `study`, `habitat`, `duration`, `diet`.
+The parquet carries `sample_key`, `spaceflight`, `tissue`, `strain`, `sex`, `genotype`, `study`, `habitat`, `duration`, `diet`. It was written to match the color-by registry; only `sample_key`, `tissue`, `spaceflight` and `study` still have a reader, and the rest are kept because the fixture and the artifact should have the same shape.
 
 | field | distinct values |
 | --- | --- |
@@ -475,27 +475,27 @@ The parquet carries exactly the columns the color-by registry resolves: `sample_
 | diet | 5 |
 
 Spaceflight arms after case folding: Space Flight 777, Ground Control 738, Basal Control 278, Vivarium Control 271, Ground Control Rerun 35, Cohort Control #1 5, Cohort Control #2 4.
-The derived `flight_status` (`data._flight_status`) collapses those to Ground 1,331 and Space Flight 777, with no Unknown.
+A derived `flight_status` used to collapse those to Ground 1,331 and Space Flight 777, with no Unknown. It backed one color-by, had no other reader, and went with it on 2026-08-12; the raw arms are what `find.py` prints and what the retrieval half groups cohorts by.
 
 ### The color-by registry
 
 Color-bys are no longer a chain of `if/elif` in the renderer.
-`manifold/colorby.py` holds a registry of 11 `ColorBy` records, each declaring a `scope` (which corpora it *could* describe), a resolver, an optional hint, and an optional `(predicate, fix-hint)` pair for an artifact it needs.
+`manifold/colorby.py` holds a registry of `ColorBy` records, each declaring a `scope` (which corpora it *could* describe), a resolver, an optional hint, and an optional `(predicate, fix-hint)` pair for an artifact it needs.
 `covers()` reports which corpora it can color *right now on this machine*, and that one fact drives the menu order, the disabled state, the coverage readout under the control, and what the renderer does with the corpus a field does not describe.
+
+**Two entries as of 2026-08-12**, down from eleven.
 
 | key | label | scope | notes |
 | --- | --- | --- | --- |
-| tissue | Tissue | ARCHS4 + OSDR | needs `cache/archs4_metadata.parquet` for the ARCHS4 half; the default color-by |
+| tissue | Tissue | ARCHS4 + OSDR | needs `cache/archs4_metadata.parquet` for the ARCHS4 half; the default color-by, and the only field that can degrade to OSDR-only |
 | species | Species | ARCHS4 + OSDR | always available; the reference for what a working color-by looks like |
-| flight_status | Flight vs Ground | OSDR | derived contrast |
-| spaceflight | Spaceflight arm | OSDR | the seven raw arms kept distinct |
-| strain | Strain | OSDR | |
-| sex | Sex | OSDR | |
-| genotype | Genotype | OSDR | |
-| study | Study | OSDR | 70 studies; this is the batch axis |
-| habitat | Habitat | OSDR | |
-| duration | Mission duration | OSDR | |
-| diet | Diet | OSDR | |
+
+The nine OSDR-only fields - `flight_status`, `spaceflight`, `strain`, `sex`, `genotype`, `study`, `habitat`, `duration`, `diet` - were removed on 2026-08-12, with `data._flight_status` and the `_osdr_field` resolver factory.
+Each colored 2,108 of 942,563 points, scattered through a corpus whose structure is set by the 940,455 they sit among, so none of them separated anything on the map.
+The columns stay in the parquet, and the table above them is still accurate about what it holds.
+
+The coverage machinery survives them and is not vestigial: **Tissue is an OSDR-only field on a machine that never fetched the GEO join**, which is the state a fresh clone starts in, and every degraded path - the "OSDR only" scope note, the amber partial bar, the context cloud - is reached there.
+See [`docs/design-notes.md`](docs/design-notes.md#osdr-only-color-bys).
 
 Two invariants of this table are worth stating because both were real defects that tests now pin:
 
@@ -778,7 +778,7 @@ The rows sum to the headline; regenerate both with `pytest tests/ -q --collect-o
 Every row above was regenerated that way on 2026-08-06, which caught two that had drifted independently of this session's work: `test_app.py` was recorded at 63 against an actual 76, so the table summed to 290 while the headline said 307.
 A hand-maintained count is the same failure mode the browser suites fixed by counting themselves.
 
-Plus **276 browser checks**, which are not collected by pytest and need the real cache: 50 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, 156 in `tests/e2e_cohort_check.py`.
+Plus **363 browser checks**, which are not collected by pytest and need the real cache: 129 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, 164 in `tests/e2e_cohort_check.py`.
 These are counted by the suites themselves, not by hand. The previous figures here and in CLAUDE.md disagreed (202 against 173) and neither matched what ran, so each `Checks` instance now reports its own total.
 
 The suite was 103 tests in 4.54 s two sessions ago, and 144 in 0.55 s before this one.
@@ -837,7 +837,7 @@ There is no way to narrow it, and that is the whole of the registry.
 
 Six further facets were offered and deleted: `sex`, `strain`, `genotype`, `habitat`, `duration`, `diet`.
 Every one of them could only ever split a cohort, and the stability curve below is a function of size, so they traded away the quantity pooling exists to buy.
-The columns remain in `cache/osdr_metadata.parquet` and remain map color-bys; re-adding one is a single line in `bridge_rna/cohorts.FACETS`, and the deletion touched no other source file, which is the registry design working.
+The columns remain in `cache/osdr_metadata.parquet`; re-adding one is a single line in `bridge_rna/cohorts.FACETS`, and the deletion touched no other source file, which is the registry design working. They were map color-bys too until 2026-08-12, when those nine were removed for a different reason - see section 7.
 **Every measurement in this section was taken under `(study, tissue, spaceflight)`, which is exactly what remains, so none of it needs re-measuring.**
 
 `R̄`, the vMF resultant length shown as "Group tightness", was removed in the same pass and `resultant_length` deleted.

@@ -59,31 +59,21 @@ def counts() -> tuple[int, int, int]:
 
 @lru_cache(maxsize=1)
 def osdr_metadata() -> pd.DataFrame:
-    df = pd.read_parquet(paths.OSDR_METADATA_PARQUET)
-    if "spaceflight" in df.columns:
-        df["flight_status"] = df["spaceflight"].map(_flight_status)
-    return df
+    """The OSDR label table, exactly as `embed_osdr.py` wrote it.
 
+    Returned unmodified. It used to gain a derived `flight_status` column here,
+    collapsing OSDR's seven raw control arms onto the binary Flight vs Ground -
+    a column that existed for one color-by and nothing else. That color-by was
+    removed on 2026-08-11 with the other eight OSDR-only ones, so the derivation
+    went with it rather than being left to compute a column no reader has.
 
-def _flight_status(v: str) -> str:
-    """Collapse the spaceflight arm onto the binary contrast Flight vs Ground.
-
-    OSDR records seven distinct control arms (Ground Control, Basal Control,
-    Vivarium Control, Cohort Control #1/#2, Ground Control Rerun, ...) and these
-    are *not* interchangeable: a basal animal was sacrificed at experiment
-    start, a vivarium animal never entered flight hardware. The raw arm is kept
-    as its own color-by so that structure stays visible; this derived field
-    exists only for the one question the corpus is built around - did the animal
-    fly - and is deliberately the coarser of the two.
+    The raw `spaceflight` column is untouched and still in use: `find.py` prints
+    it in the record panel, and the retrieval half groups cohorts by it - on its
+    own copy of the metadata, and on the raw arms rather than the collapse,
+    because a basal animal was sacrificed at experiment start and a vivarium
+    animal never entered flight hardware.
     """
-    s = str(v).strip().lower()
-    if not s or s in ("nan", "none", "na", "n/a", "unknown"):
-        return "Unknown"
-    if "flight" in s and "control" not in s:
-        return "Space Flight"
-    if any(k in s for k in ("control", "basal", "vivarium", "ground", "cohort")):
-        return "Ground"
-    return "Unknown"
+    return pd.read_parquet(paths.OSDR_METADATA_PARQUET)
 
 
 # --- ARCHS4 GEO metadata ----------------------------------------------------
@@ -179,8 +169,8 @@ def projection_stats() -> dict:
     Returns ``{}`` when the file is absent or unreadable rather than raising.
     This feeds a label on the control rail, not a correctness gate, so a cache
     built before a stage existed shows fewer parameters instead of taking the
-    map down - the same degradation `osdr_field_values` chooses for a color-by
-    the precompute step never populated. `precompute/validate_artifacts.py` is
+    map down - the same degradation `osdr_field_values` chooses for a column the
+    precompute step never populated. `precompute/validate_artifacts.py` is
     where a missing or malformed record is an error.
     """
     if not paths.PROJECTION_STATS_JSON.exists():
@@ -201,11 +191,15 @@ def species_labels() -> np.ndarray:
 
 
 def osdr_field_values(field: str) -> pd.Series:
-    """The OSDR color-by values (length n_osdr), indexed 0..n_osdr-1.
+    """One OSDR metadata column (length n_osdr), indexed 0..n_osdr-1.
 
-    An unknown field yields all-"Unknown" rather than raising, so a color-by
-    that was never populated by the precompute step degrades to a flat cloud
-    instead of taking the app down.
+    An unknown field yields all-"Unknown" rather than raising, so a column the
+    precompute step never populated degrades to a flat label instead of taking
+    the app down.
+
+    `osdr_tissue` is the only caller left. This used to back nine OSDR-only
+    color-bys through a resolver factory in `colorby.py`; they are gone, and
+    tissue is the one OSDR column the map still reads by name.
     """
     df = osdr_metadata()
     if field not in df.columns:

@@ -510,3 +510,163 @@ def test_an_external_record_is_an_anchor_and_a_retrieval_is_a_dash_link(corpus):
     assert len(links) == 1
     assert links[0].href.startswith("/?q=")
     assert not [c for c in internal if isinstance(c, html.A)]
+
+
+# --- Suggestions -------------------------------------------------------------
+#
+# The box completes an identifier while it is being typed. Everything below is
+# about the one rule that keeps that from becoming the free-text search this
+# module refused to build: a suggestion is a *prefix of a grammar*, never a
+# guess at what a word might have meant.
+
+def _labels(query, **kw):
+    return [item["label"] for item in find.suggest(query, **kw)["items"]]
+
+
+def test_a_partial_accession_is_completed(corpus):
+    """The index holds numbers, not strings, so a prefix is a union of decade
+    ranges rather than a string compare - and it has to actually work."""
+    labels = _labels("GSM90000")
+    assert labels, "a real accession prefix offered nothing"
+    assert all(label.startswith("GSM90000") for label in labels), labels
+    assert len(labels) == len(set(labels)), "a sample was offered twice"
+
+
+def test_a_completed_prefix_offers_the_exact_match_first(corpus):
+    """Typing a whole accession must put that accession at the top, not bury it
+    under the longer numbers that happen to start with it."""
+    assert _labels("GSM9000005")[0] == "GSM9000005"
+
+
+def test_every_suggested_value_resolves_through_find(corpus):
+    """The contract that keeps one resolution path: selecting a suggestion puts
+    its `value` in the box, so a value `find()` cannot resolve would be a row
+    that silently does nothing.
+    """
+    for query in ("GSM90000", "GSE500", "OSD-1", "SAMPLE_00"):
+        items = find.suggest(query)["items"]
+        assert items, f"{query} offered nothing to check"
+        for item in items:
+            got = find.find(item["value"])
+            assert got["reason"] == "", f"{item['value']!r} does not resolve"
+            assert got["points"], f"{item['value']!r} resolves to no points"
+
+
+def test_a_series_suggestion_counts_its_samples(corpus):
+    """The detail has to distinguish two adjacent series, and the only thing
+    that does is how many samples each holds."""
+    meta = data.archs4_metadata()
+    series = _a_real_series()
+    expected = int((meta["series_id"].astype(str) == series).sum())
+    item = next(i for i in find.suggest(series)["items"] if i["label"] == series)
+    assert f"{expected:,}" in item["detail"]
+
+
+def test_an_osdr_sample_is_matched_anywhere_in_its_name(corpus):
+    """A substring rather than a prefix, and deliberately: a sample name is
+    itself an identifier, there are 2,108 of them rather than 940,455, and
+    nobody remembers which end of one they are sure of."""
+    key = str(data.osdr_metadata()["sample_key"].iloc[3])
+    name = key.split("|", 1)[1]
+    items = find.suggest(name[-6:])["items"]
+    assert key in [i["value"] for i in items]
+    chosen = next(i for i in items if i["value"] == key)
+    assert chosen["label"] == name, "the row shows the name, not the 39-char key"
+    assert chosen["value"] == key, "but commits the key, which is unambiguous"
+
+
+def test_a_study_prefix_offers_studies_before_their_samples(corpus):
+    """"OSD-100" is far more often the whole intent than a step towards one of
+    its twelve samples, and the samples are one keystroke away."""
+    items = find.suggest("OSD-1")["items"]
+    kinds = [i["kind"] for i in items]
+    assert "osd" in kinds
+    assert kinds.index("osd") == 0
+    assert "osdr_sample" not in kinds[:kinds.count("osd")]
+
+
+def test_free_text_is_refused_here_exactly_as_it_is_in_find(corpus):
+    """The decision this module was built around. `archs4_metadata.parquet`
+    carries titles and a substring scan of them is affordable; offering it as a
+    dropdown would reintroduce, as a feature, the search that was rejected -
+    "liver" returning hundreds of rows and reading as a biological query."""
+    for query in ("liver", "mouse brain", "spaceflight"):
+        got = find.suggest(query)
+        assert got["items"] == [], f"{query!r} was answered with suggestions"
+        assert got["reason"] == find.SHAPE
+
+
+def test_a_miss_says_which_kind_of_miss_it_was(corpus):
+    """Answering "liver" and "GSM99999999" with the same empty list tells the
+    first user their search is broken and the second nothing about whether this
+    machine could have looked it up - the same distinction `find()` draws, drawn
+    with the same constants."""
+    assert find.suggest("")["reason"] == find.EMPTY
+    assert find.suggest("   ")["reason"] == find.EMPTY
+    assert find.suggest("GSM99999999")["reason"] == find.ABSENT
+    assert find.suggest("OSD-99999")["reason"] == find.ABSENT
+    assert find.suggest("liver")["reason"] == find.SHAPE
+
+
+def test_one_letter_suggests_nothing(corpus):
+    """A single character matches most of the corpus and completes nothing."""
+    assert find.suggest("M")["items"] == []
+
+
+def test_the_limit_is_honoured_and_a_zero_limit_offers_nothing(corpus):
+    assert len(find.suggest("GSM9", limit=3)["items"]) == 3
+    assert find.suggest("GSM9", limit=0)["items"] == []
+    assert len(find.suggest("GSM9")["items"]) <= find.SUGGESTION_LIMIT
+
+
+def test_geo_suggestions_say_so_when_the_join_is_missing(corpus,
+                                                         without_archs4_metadata):
+    """Reporting a GEO accession as absent on a machine that cannot look one up
+    would be invariant 5 by another route - and it is the reason `searchable()`
+    reads the availability predicate rather than re-deriving a path."""
+    assert find.suggest("GSM90000")["reason"] == find.NO_GEO_METADATA
+    assert find.suggest("GSE5000")["reason"] == find.NO_GEO_METADATA
+    # OSDR needs only the label table, which the app cannot start without.
+    assert find.suggest("OSD-1")["items"], "OSDR stopped being suggestible"
+
+
+def test_the_empty_rows_of_the_real_join_do_not_break_a_prefix(corpus):
+    """839 rows of the real join carry an empty series_id, and the fixture
+    carries the same shape. `int(s[3:])` raises on one of those and would take
+    the whole suggestion path down with it."""
+    meta = data.archs4_metadata()
+    assert (meta["series_id"].astype(str).str.strip() == "").any(), (
+        "the fixture no longer carries the blank series ids this guards")
+    assert _labels("GSE5")
+
+
+# --- The rows the layout builds from them ------------------------------------
+
+def test_a_suggestion_row_carries_its_own_identifier_in_its_id(corpus):
+    """A click commits the row that was clicked. The alternative - an index into
+    a parallel store - can be invalidated by the keystroke that lands between
+    the click and the callback reading it."""
+    from manifold import layout
+
+    rows = layout.suggestion_children(find.suggest("GSM90000"))
+    values = [r.id["value"] for r in rows]
+    assert values == [i["value"] for i in find.suggest("GSM90000")["items"]]
+    assert all(r.id["type"] == "find-suggestion" for r in rows)
+    assert all(getattr(r, "role", None) == "option" for r in rows)
+
+
+def test_a_well_formed_miss_gets_a_row_and_free_text_gets_silence(corpus):
+    """A dropdown volunteering "no matches" under the word "liver" would
+    contradict the sentence below the box, which says free text is not what this
+    control takes."""
+    from manifold import layout
+
+    absent = layout.suggestion_children(find.suggest("GSM99999999"))
+    assert len(absent) == 1
+    assert absent[0].className == "bm-suggest-empty"
+    assert getattr(absent[0], "role", None) != "option", (
+        "the no-match row must not be selectable")
+
+    assert layout.suggestion_children(find.suggest("liver")) == []
+    assert layout.suggestion_children(find.suggest("")) == []
+    assert layout.suggestion_children(None) == []

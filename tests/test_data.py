@@ -8,10 +8,9 @@ sample with the kidney colour, and nothing on screen says so.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
-import pytest
-
-from manifold import colorby, data, paths
+from manifold import data, paths
 
 
 def test_global_order_is_archs4_then_osdr(corpus):
@@ -48,15 +47,12 @@ def test_species_labels_cover_the_whole_corpus(corpus):
 
 def test_osdr_field_values_align_with_metadata_rows(corpus):
     n_osdr = corpus["n_osdr"]
-    osdr_fields = [s.key for s in colorby.REGISTRY if s.scope == (colorby.OSDR,)]
-    assert osdr_fields, "no OSDR-only fields registered"
-    for field in osdr_fields:
-        vals = data.osdr_field_values(field)
-        assert len(vals) == n_osdr, f"{field} has {len(vals)} values for {n_osdr} points"
-        assert vals.index[0] == 0 and vals.index[-1] == n_osdr - 1
+    vals = data.osdr_field_values("tissue")
+    assert len(vals) == n_osdr, f"{len(vals)} values for {n_osdr} points"
+    assert vals.index[0] == 0 and vals.index[-1] == n_osdr - 1
     # Values must line up positionally with the metadata frame itself.
     meta = data.osdr_metadata()
-    assert list(data.osdr_field_values("tissue")) == list(meta["tissue"].astype(str))
+    assert list(vals) == list(meta["tissue"].astype(str))
 
 
 def test_unknown_field_degrades_instead_of_raising(corpus):
@@ -65,35 +61,22 @@ def test_unknown_field_degrades_instead_of_raising(corpus):
     assert set(vals) == {"Unknown"}
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("Space Flight", "Space Flight"),
-    ("spaceflight", "Space Flight"),
-    ("Ground Control", "Ground"),
-    ("Ground control", "Ground"),
-    ("Ground Control Rerun", "Ground"),
-    ("Basal Control", "Ground"),
-    ("Vivarium Control", "Ground"),
-    ("Cohort Control #1", "Ground"),
-    ("", "Unknown"),
-    ("nan", "Unknown"),
-])
-def test_flight_status_is_the_binary_contrast(raw, expected):
-    assert data._flight_status(raw) == expected
+def test_the_metadata_frame_carries_no_derived_columns(corpus):
+    """`osdr_metadata` returns the parquet, unmodified.
 
-
-def test_control_arms_stay_distinct_under_the_raw_field(corpus):
-    """The coarse Flight/Ground field must not be the only view of the arm.
-
-    Basal, Vivarium, and Ground controls are different experiments. Collapsing
-    them is fine for the headline contrast but must not be the only option, or
-    real structure becomes invisible.
+    It used to add a derived `flight_status`, collapsing OSDR's seven raw
+    control arms onto Flight vs Ground for a color-by that no longer exists. A
+    derived column with no reader is a column that goes stale silently, and the
+    collapse is one the retrieval half deliberately refuses to make - a basal
+    animal and a vivarium animal are different experiments - so it must not
+    reappear here as an apparently-authoritative field of the label table.
     """
-    keys = {s.key for s in colorby.REGISTRY}
-    assert "spaceflight" in keys and "flight_status" in keys
-    arms = set(data.osdr_field_values("spaceflight"))
-    statuses = set(data.osdr_field_values("flight_status"))
-    assert len(arms) >= len(statuses)
-    assert statuses <= {"Space Flight", "Ground", "Unknown"}
+    meta = data.osdr_metadata()
+    on_disk = pd.read_parquet(paths.OSDR_METADATA_PARQUET)
+    assert list(meta.columns) == list(on_disk.columns)
+    assert "flight_status" not in meta.columns
+    # The raw arm is untouched: find.py prints it, and cohorts group by it.
+    assert "spaceflight" in meta.columns
 
 
 def test_method_availability_reflects_disk(corpus):
