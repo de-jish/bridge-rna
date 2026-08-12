@@ -6,9 +6,37 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-11 (find a sample on the map, and eight design docs become one)
+
+**The map draws 942,563 glyphs and had no way to ask about a specific one.**
+`manifold/find.py` resolves an identifier to the points it names - a GEO sample, a GEO series, an OSDR study, or an OSDR sample by full key or bare name - and the matches are marked with a white X, with a button offering to frame them.
+It opens no embedding, builds no figure and imports nothing from Dash, so all 35 of its unit tests run against the fixture corpus.
+Design, every measurement and the rejected alternatives: `docs/design-notes.md#finding-a-sample-on-the-map`.
+
+**The plan went through a design review before any of it was built, and the review changed four things.**
+Each of the four was then verified against the real corpus rather than taken on the reviewer's word.
+
+*The premise was false.* GSM and GSE resolve only through `cache/archs4_metadata.parquet`, which is **optional** - a fresh clone starts without it - so on such a machine 940,455 of 942,563 points are unfindable. The first draft had no coverage state and no fix hint. `find.searchable()` now reads `data.archs4_metadata_available` itself, and the message is `colorby.ARCHS4_META_HINT`, the same sentence the color-by uses, so the two controls that depend on that artifact cannot send a user after two different commands.
+
+*Framing was broken twice over.* `_frame_for`'s pad is `max(span * 0.6, 0.35)`, tuned for a retrieval's handful of neighbouring points. Measured on the real corpus, **OSD-457's 192 samples framed to 1.22x the corpus width and GSE228590's 8,764 to 1.03x**, so a "frame" zoomed the user *out*; typical sets are unaffected at 0.02x and 0.06x. `_clamped_to_corpus` fixes it for both callers (after: 1.00x and 0.87x). And auto-framing was reversing a decision `_frame_for`'s own docstring had already made - framing is offered as an action, never done automatically - which matters more here than there, because the map's 20 nearest points overlap the true cosine top-20 by a **median of 0**, so zooming someone into their sample's surroundings invites reading them as related. It is a button now, hidden in 3-D, and a structural test asserts `find-store` is not an Input of the viewport callback.
+
+*The index build would have crashed.* "A prefix plus digits" is false for **839 rows**, whose `series_id` is empty - the samples present in the release-matched v2.5 metadata and absent from the v2.latest the API serves. `int(s[3:])` raises on them. They are filtered before parsing, and `tests/fixture_corpus.py` now blanks every 53rd series so this path is no longer tested against only the easy half of its input.
+
+*Uncapped marks contradicted the repo's own precedent.* A series can be 8,764 samples. The cap is 500 and it states what it dropped in three places, following `RETRIEVAL_MAX_NUMERALS` and `COMPARISON_MAX_LABELS`.
+
+**Two of my own measurements were wrong and are corrected in place.** An index build quoted at "90 ms" was the integer parse alone, excluding the string materialization that is most of the cost; a later "5,963 ms" was taken with `tracemalloc` running, which inflates allocation-heavy code several-fold. The honest figure is **460 ms once, then about 0.8 ms a lookup**, and the parse is ~200 ms whether written as a regex, a slice or a Python loop.
+
+**The click probe was specified and cut, and the reason is now a test.** The ARCHS4 cloud emits no click event at all, because `hoverinfo="skip"` suppresses click picking as well as hover; enabling hover to recover it costs a measured **median 240 ms per mouse move** at full corpus. A DOM-listener route does work - `p2d` round-trips at 0.004 px and the server resolves the nearest drawn point in 0.5-0.9 ms - but a click at full-corpus zoom has **758 drawn points within 3 px**, so it cannot honestly mean "this sample". `test_archs4_cloud_carries_no_hover_or_customdata` now carries the 240 ms measurement, so a future "fix" fails there. The record half shipped anyway through the find box: looking a GSM up renders exactly the GEO record a click would have shown.
+
+**One panel, two ways in.** Clicking an OSDR diamond and finding a sample ask the same question, so `picked-group` serves both and a click is turned into a find. `picked-group`'s children are callback output now, because an OSDR sample offers an in-app `dcc.Link` and a GEO sample an external `<a>` - a `dcc.Link` pointing off-site hands its href to Dash's router, which tries to resolve `ncbi.nlm.nih.gov` as an application route. A click on empty cloud leaves the panel alone rather than wiping what was just searched for.
+
+**Docs: eight files became one.** `docs/design-notes.md` holds every design decision that needed more than a code comment, keyed by topic, with the twenty cross-document references turned into anchors. Nothing was dropped - every measurement and every rejected alternative survives - and 15 files were repointed. The eight originals are deleted; `docs/` is now one markdown file and the two README images.
+
+**Tests.** 387 pytest (up from 346) and 297 browser checks (up from 277: `e2e_check.py` goes 51 to 71, the other two suites unchanged and re-run). Both README screenshots recaptured, since the rail gained a control, and both still report no clipped panel and 0.000% ink in the outer 3 px. Verified at 1680, 900, 620 and 393 px with no overflow and no page errors. pyflakes is clean across the repo for the first time - six unused imports, a dead local and a placeholder-free f-string, all pre-existing but one.
+
 ## 2026-08-11 (the README screenshots, recaptured and measured instead of framed)
 
-Both images in `README.md` were replaced, and the harness that produces them is now committed as `tests/screenshot_readme.py`. Design doc, measurements and rejected alternatives: `docs/readme_screenshots.md`.
+Both images in `README.md` were replaced, and the harness that produces them is now committed as `tests/screenshot_readme.py`. Design doc, measurements and rejected alternatives: [`docs/design-notes.md`](docs/design-notes.md#readme-screenshots).
 
 **The retrieval screenshot was cut off, and it had been since 2026-07-22.**
 The inspector ended mid-record, so the top hit's publication, journal and DOI were not in the frame, and the network's lowest node was sliced by the bottom edge.
@@ -86,7 +114,7 @@ The hit inspector printed NCBI's `gpl` field raw, so "Platform 21103" - a number
 `build_bar_figure` was defined, never called, never imported, never tested and named in no document - and it drew similarity on a Plotly-autoranged axis, so it was a truncated-axis chart waiting to be revived. Deleted.
 `biopython` moved out of `requirements.txt`, where it was described as pinned to what the app was verified against: the app never imports it, it is reached only by `demo_osdr_top5.py --biopython-metadata`, and it was not installed in the venv every measurement in this repository was taken on.
 `requirements-dev.txt` is new because the README told you to run pytest and Playwright and nothing in the repository would install either.
-`MEETING_QA.md` is deleted; the upload cap and the "no metadata is collected" fact were the only things in it that lived nowhere else, and both are now in `docs/file_ingestion.md`.
+`MEETING_QA.md` is deleted; the upload cap and the "no metadata is collected" fact were the only things in it that lived nowhere else, and both are now in [`docs/design-notes.md`](docs/design-notes.md#file-ingestion).
 `tests/check_join.py` was the one file that *looked* dead and is not - it is the honesty gate on the arithmetic the whole merged app rests on - so it is now named in the README beside the other two science gates.
 `IMPLEMENTATION.md` and `REFERENCE.md` are retitled off "Bridge Manifold", a name the product has not used since the merge and which was still in their titles, in module docstrings, and in a user-visible `SystemExit` message.
 
@@ -138,7 +166,7 @@ Every desktop measurement of the even split was clean while this was broken, whi
 **Two smaller things came out of the same review.**
 At 320 px of page width the "moves it most" label and its score stop fitting on one line in a 121 px column, and cohort A's score sat against cohort B's label; `.stability-weakest-label` is `flex: 0 1 auto` with `min-width: 0` now, so it wraps identically in both columns and the even split survives 320 px without a breakpoint that would have stacked the arms on a phone.
 And the 12.4 px by which the two blocks used to differ was **not** the `differs by` phrase, which costs nothing: it is +13.0 px of separator box on the second block, -15.94 px from cohort A's sentence wrapping where B's did not, and +15.28 px from cohort B's key wrapping where A's did not.
-Two content terms that nearly cancelled by luck, over one structural offset - so the old layout was metastable rather than stably asymmetric, and the gap moved from one search to the next. `docs/stability_panel_even_split.md` carries the decomposition; the first draft of that document got it wrong and is corrected.
+Two content terms that nearly cancelled by luck, over one structural offset - so the old layout was metastable rather than stably asymmetric, and the gap moved from one search to the next. [`docs/design-notes.md`](docs/design-notes.md#stability-panel-even-split) carries the decomposition; the first draft of that document got it wrong and is corrected.
 
 **Five dead CSS rules went with it**, all orphaned by earlier deletions rather than by this change: `.cohort-stat + .cohort-stat`, `.cohort-stat-head`, `.cohort-stat-label` and `.cohort-stat-value` dressed the two-stat card whose second stat was `R̄`, removed on 2026-08-05, and `.cohort-flag-body` was orphaned when the caution became one line.
 `test_app.py`'s stylesheet check could not see any of them: it filters to `bm-` and `app-` prefixes.
@@ -147,7 +175,7 @@ Two content terms that nearly cancelled by luck, over one structural offset - so
 `test_every_row_the_pair_grid_places_has_a_rule_that_places_it` is the one worth keeping in mind: it reads the stylesheet and fails if a direct child of an arm has no `grid-row`, because such a row lands in an implicit track the other column does not have and shears the two apart. Verified by injecting a fifth row and watching it fail, then removing it.
 The browser suite now re-measures the panel at 900, 390 and 320 px, which is the regression above turned into a check.
 Ten payload shapes were also rendered through the shipping `build_stability_panel` and measured in Chromium at 1700 px and 390 px - both arms named, one arm without a weakest member, neither, one flagged, both flagged, the corpus's longest key in both columns, long labels at top-k 50, a zero baseline, and a lone cohort with and without a named member - every one with equal widths, equal heights, aligned names, aligned numbers, no horizontal overflow.
-The layout was chosen by a design workflow that specified three candidates in full and judged them on information design, doctrine fidelity and implementation risk; all three judges ranked this one first. Its measurements and the rejected alternatives: `docs/stability_panel_even_split.md`.
+The layout was chosen by a design workflow that specified three candidates in full and judged them on information design, doctrine fidelity and implementation risk; all three judges ranked this one first. Its measurements and the rejected alternatives: [`docs/design-notes.md`](docs/design-notes.md#stability-panel-even-split).
 
 ## 2026-08-06 (result stability is measured on the query that ran, not looked up)
 
@@ -190,7 +218,7 @@ The review also caught that `REFERENCE.md`'s per-file test table had been stale 
 Two passes were run and produced byte-identical measurements, which is what a state-carried-between-runs bug would have broken.
 The load-bearing unit test is the one that scores every leave-one-out pool the slow and obvious way, one scan each, and requires the fused path to agree.
 One finding worth keeping: a batch of queries and a single query agree to about 1.3e-07 rather than bit for bit, because one is a BLAS matrix-matrix product and the other a matrix-vector product. That is a couple of float32 ulps, and it is the same effect check 1 of the validator documents.
-Design, measurements and rejected alternatives: `docs/live_stability.md`.
+Design, measurements and rejected alternatives: [`docs/design-notes.md`](docs/design-notes.md#live-stability).
 
 **Hosted on 8050 and checked against the running instance rather than against a suite.**
 The port was already occupied by a server from 01:10 that morning, serving pre-change code and looking perfectly healthy - the second time that has happened, and the reason last session's entry says a green e2e proves the code works rather than that the hosted process runs it.
@@ -245,7 +273,7 @@ Neither was changed, which is the right outcome for a check that finds nothing.
 ## 2026-08-06 (the map keys every mark it draws; both pooled queries get described)
 
 A copy pass over both views, plus one design change and two defects the audit behind it turned up.
-Full design document: `docs/map_key.md`.
+Full design document: [`docs/design-notes.md`](docs/design-notes.md#map-key).
 
 **Seven sentences deleted from the interface.**
 "Not a difference vector." / "Nothing is dropped for you." / the three-line metadata-enrichment cost note / "Colours all 942,563 points." / the Tissue color-by's anatomical-vocabulary paragraph / "One glyph per sample; zoom re-samples the visible window." / "Each glyph is a pooled member; the query itself is a mean of them and has no position here."
@@ -291,7 +319,7 @@ Re-adding one is a single line in `FACETS`; nothing else hard-codes a facet, whi
 
 **`R̄` is gone from the cohort card and the inspector.**
 Across all 212 real cohorts its median is 0.9991 and it is no lower at k=2 than at k=30, so it never separated a group worth trusting from one that was not, while a number pinned within a thousandth of its maximum sitting beside one that genuinely varies is read as a grade.
-`resultant_length` is deleted rather than left unused; the measurement stays in `docs/cohort_pooling.md`.
+`resultant_length` is deleted rather than left unused; the measurement stays in [`docs/design-notes.md`](docs/design-notes.md#cohort-pooling).
 The **per-member** leave-one-out cosine and the outlier flag stay: that statistic varies within a cohort, names an individual animal, and is what the exclude checkbox acts on.
 
 **A comparison now draws both cohorts on the map.**
@@ -303,7 +331,7 @@ Gold `#ffc233` against teal `#0bab9f` is dE2000 43.4 normal and 31.7 at worst un
 Both hit symbols are in `Scatter3d`'s vocabulary, so 2-D and 3-D encode a hit identically.
 **A shared hit is emergent, never computed**: it is in both hit lists, so it gets both traces and draws as a ring inside a square, and the map's shared count therefore cannot drift from the banner's.
 The "Show it on the map" tick became one tick per cohort with a colour key under it, and framing follows the ticks.
-Rejected with reasons in `docs/cohort_retrieval.md` section 9: a convex-hull footprint (claims territory the cohort does not occupy, and invites area comparison across projections that preserve neither), connecting polylines (already rejected for the single-cohort overlay, and the reason survives doubling), a dedicated shared hue.
+Rejected with reasons in [`docs/design-notes.md`](docs/design-notes.md#cohort-retrieval) section 9: a convex-hull footprint (claims territory the cohort does not occupy, and invites area comparison across projections that preserve neither), connecting polylines (already rejected for the single-cohort overlay, and the reason survives doubling), a dedicated shared hue.
 
 **Three pre-existing defects fixed on the way.**
 The halo scaled with membership - every member carried a 46 px ring at 0.50 alpha, so a 38-animal cohort composited into a teal disc; alpha is now `0.50/sqrt(k)` floored at 0.14.
@@ -332,9 +360,9 @@ Each has a test that fails without its fix. The lesson worth keeping is the shap
 
 ## 2026-08-05 (cohort retrieval built, validated on the real corpus, and shipped)
 
-`docs/cohort_pooling.md` had specified and measured this feature on 2026-07-30 and left it unbuilt.
+[`docs/design-notes.md`](docs/design-notes.md#cohort-pooling) had specified and measured this feature on 2026-07-30 and left it unbuilt.
 It is built now: a fifth query-vector source that pools an experimental group into one query, a Sample / Cohort / Upload switch on the retrieval rail, an optional two-arm comparison, and `precompute/validate_cohorts.py` as the honesty gate.
-Design and every measurement: `docs/cohort_retrieval.md`.
+Design and every measurement: [`docs/design-notes.md`](docs/design-notes.md#cohort-retrieval).
 
 **A cohort is study x tissue x spaceflight arm by default, and the user can retune it.**
 That is the ISA-Tab factor grouping OSDR already curates: 212 cohorts with two or more members across 70 studies, median 10, max 38, grouping 2,105 of the 2,108 embedded samples.
@@ -389,7 +417,7 @@ The reaping is PID-tagged rather than signal-based, and the reason is worth keep
 
 **One observation, deliberately not acted on:** after a failed embed the network is replaced with "Embedding failed" while the inspector still describes the *previous* successful query, because the failure path returns `no_update` for `hits-store`. It is a mixed state. Clearing it would mean clearing `hits-store`, which lives on the shell so the map can draw a retrieval you ran before walking over to it - so this is a cross-view semantics decision, not a local fix, and it is Josh's call.
 
-**Cohort pooling was measured and specified, not built.** Full analysis in `docs/cohort_pooling.md`; the headline is that the measurements change why the feature is worth building.
+**Cohort pooling was measured and specified, not built.** Full analysis in [`docs/design-notes.md`](docs/design-notes.md#cohort-pooling); the headline is that the measurements change why the feature is worth building.
 Mean pooling is exactly "average the members' cosine scores", weighted by L2 norm - so normalize each member first, because invariant 2 already establishes that norm is transcriptome concentration and not a nuisance scale. Averaging embeddings was checked against the biological alternative on five real cohorts: the pseudo-bulk embedding (counts summed, embedded live through `embed_upload.py`) sits **closer to the spherical centroid than the cohort's own members do**, in all five, so the centroid is not an off-manifold artifact.
 The premise needs correcting, though. Cohorts have almost no outlier problem - mean pairwise cosine 0.9933 against 0.8826 for random same-size groups - and yet **two replicates of the same cohort share on average 0.13 of their top-5 hits**, sometimes nothing at all. The cause is a scale mismatch: the entire top-500 of the 940,455-sample index spans a cosine range comparable to the gap between two animals in the same cage. Pooling raises leave-one-out top-5 stability from 0.13 to **0.78**, and that six-fold gain, not outlier protection, is the case for the feature.
 The caveat to carry: random samples from the same *study* already reach 0.9805, closing 84% of the distance to a real cohort, so most of a cohort's coherence is batch. A within-study null is the first thing to run before shipping.
@@ -440,7 +468,7 @@ The Retrieve view can now take an OSDR sample the corpus has never seen: upload 
 
 **Validated end to end on the real model and corpus.** Embedding OSD-100's own counts file through the upload path reproduces its precomputed cached vector at **cosine 1.00000000, max abs diff 0.0** - the definitive check that scores are comparable. A full uploaded search of the eye sample `Mmus_C57-6J_EYE_FLT_Rep1_M23` against all 940,455 ARCHS4 samples returns eye-tissue analogs (GSM6204794, GSM4256053) in its top 5, annotated and locatable on the map. Input contract: mouse Ensembl-indexed counts CSV/TSV (OSDR is Mus musculus); a file that maps zero orthologs, or a digest mismatch, is refused with a clean one-line reason, never embedded into a meaningless vector.
 
-UI: a `dcc.Upload` dropzone and a sample-column picker in the Retrieve rail, a separate Embed-&-search callback writing the shared outputs with `allow_duplicate=True`. Downstream callbacks (details, AI summary, See-on-map) resolve the query row from a `query` dict now carried in the hits-store payload, so they work for a sample that is not in `samples_df`. Flask `MAX_CONTENT_LENGTH` capped at 200 MB. Tests 219 (8 new in `test_upload_ingestion.py`, including the live-vs-cached parity gate and the gene-digest abort). Design doc: `docs/file_ingestion.md`.
+UI: a `dcc.Upload` dropzone and a sample-column picker in the Retrieve rail, a separate Embed-&-search callback writing the shared outputs with `allow_duplicate=True`. Downstream callbacks (details, AI summary, See-on-map) resolve the query row from a `query` dict now carried in the hits-store payload, so they work for a sample that is not in `samples_df`. Flask `MAX_CONTENT_LENGTH` capped at 200 MB. Tests 219 (8 new in `test_upload_ingestion.py`, including the live-vs-cached parity gate and the gene-digest abort). Design doc: [`docs/design-notes.md`](docs/design-notes.md#file-ingestion).
 
 ## 2026-07-23 (spectral init restores the species separation)
 

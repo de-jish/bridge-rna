@@ -191,7 +191,7 @@ def _cohort_role_head(cohort_label: str, role: str, contrast: str) -> list[Any]:
     Shown only when there are two pooled queries, because a lone one has nothing
     to be distinguished from. The name is beside the mark rather than left to
     the color, because cohort B's hex cannot agree across the retrieval network
-    and the map (`docs/map_key.md`), so the binding is the name.
+    and the map (`docs/design-notes.md#map-key`), so the binding is the name.
     """
     if role not in COHORT_ROLES:
         return []
@@ -228,7 +228,7 @@ def build_cohort_card(cohort, geometry, role: str = "",
     the depth on screen, and it is reported by `build_stability_panel` on the
     right afterwards. A live number cannot sit under the picker, because it does
     not exist until the query runs - showing the previous cohort's figure there
-    would be worse than the curve was. `docs/live_stability.md` has the
+    would be worse than the curve was. `docs/design-notes.md#live-stability` has the
     evidence and the rejected alternatives.
 
     ``role`` names which arm of a comparison this is, and is empty when only one
@@ -449,7 +449,7 @@ def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], di
     held 456, so nothing is clipped, the two arms are the same size by
     construction rather than by coincidence, and 0.89 sits on the same baseline
     as 0.94 instead of 160 px below it - which is the comparison this panel
-    exists to support. `docs/stability_panel_even_split.md` has the measurements.
+    exists to support. `docs/design-notes.md#stability-panel-even-split` has the measurements.
     """
     payload = payload or {}
     primary = payload.get("stability")

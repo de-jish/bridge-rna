@@ -79,7 +79,7 @@ The overlap the panel reports is a number about two *sets* of hits, and two arms
 Each cohort's pooled animals are drawn in its own color, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
 You can untick either arm when the picture gets crowded.
 
-Full method and every measurement: [`docs/cohort_retrieval.md`](docs/cohort_retrieval.md), and [`docs/live_stability.md`](docs/live_stability.md) for how the trust number is measured.
+Full method and every measurement: [cohort retrieval](docs/design-notes.md#cohort-retrieval), and [live stability](docs/design-notes.md#live-stability) for how the trust number is measured.
 
 ### The map
 
@@ -100,6 +100,16 @@ And it separates the two corpora more than UMAP does, which makes it the worst o
 
 Vectors are L2-normalised before any reduction.
 Without that step the first principal component is really a magnitude axis and holds 57.8% of the variance, swamping the rest; normalised, it drops to 41.3% and the biology comes through.
+
+### Finding one sample among 942,563
+
+Type an accession into **Find a sample** on the rail and the matching points are marked with a white X.
+A GEO sample (`GSM…`) marks one point, a GEO series (`GSE…`) marks all of its samples, an OSDR study (`OSD-###`) marks all of that study's, and an OSDR sample resolves by its name or its full key.
+A button then offers to frame what it found; it is a button rather than something the search does for you, because a set can span the map, and because being zoomed into a region invites reading the points around your sample as its neighbours when a 2-D projection does not preserve who those are.
+
+The box searches identifiers and not free text.
+Typing "liver" tells you so and points at the Tissue color-by, which is the control that actually answers it across both collections.
+A very large series is marked up to a stated limit rather than silently truncated, and whatever is selected - found or clicked - is described in one panel, with a link to its GEO record or to a retrieval, whichever applies.
 
 ### Coloring both collections by tissue
 
@@ -240,8 +250,8 @@ The test tooling is a separate install, because running Bridge RNA does not need
 ```
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 346 tests, about twenty-five seconds
-.venv/bin/python tests/e2e_check.py              # 51 browser checks; needs the built cache
+.venv/bin/python -m pytest tests/ -q             # 387 tests, about twenty-seven seconds
+.venv/bin/python tests/e2e_check.py              # 71 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
 .venv/bin/python tests/e2e_cohort_check.py       # 156 checks of cohort retrieval
 ```
@@ -258,7 +268,7 @@ The two screenshots at the top of this file are produced by the same harness, dr
 
 It sizes the window to the content rather than assuming a viewport, and it exits non-zero if a panel ends up clipped or a figure runs off its canvas.
 Both views scroll internally, so a window that is too short does not produce a scrollbar, it silently crops the frame - which is how the previous retrieval screenshot lost 410 px of the inspector.
-The reasoning and the measurements are in `docs/readme_screenshots.md`.
+The reasoning and the measurements are in [`docs/design-notes.md`](docs/design-notes.md#readme-screenshots).
 
 Three scripts check the science rather than the software, against the real corpus:
 
@@ -292,7 +302,7 @@ The second one is the demanding test, and its result is reported in the docs rat
 Beyond this file there are three kinds of document, and it is worth knowing which one answers your question.
 [`IMPLEMENTATION.md`](IMPLEMENTATION.md) is the map's design record and the longest one: the offline/online split, the three projections, the color-by system, and every candidate that was measured and cut.
 [`REFERENCE.md`](REFERENCE.md) is the numbers - model config read out of the checkpoint, embedding statistics, measured timings, interface signatures with line numbers - and it is the one to trust when two documents disagree.
-`docs/` is one file per feature built since: [cohort retrieval](docs/cohort_retrieval.md) and the [pooling measurement](docs/cohort_pooling.md) behind it, [live stability](docs/live_stability.md), [file ingestion](docs/file_ingestion.md), the [map's key](docs/map_key.md), and the [even split](docs/stability_panel_even_split.md) of a comparison's two arms.
+`docs/design-notes.md` is every design decision that needed more than a code comment, in one file: [cohort retrieval](docs/design-notes.md#cohort-retrieval) and the [pooling measurement](docs/design-notes.md#cohort-pooling) behind it, [live stability](docs/design-notes.md#live-stability), the [even split](docs/design-notes.md#stability-panel-even-split) of a comparison's two arms, the [map's key](docs/design-notes.md#map-key), [finding a sample](docs/design-notes.md#finding-a-sample-on-the-map), [file ingestion](docs/design-notes.md#file-ingestion), and the [README screenshots](docs/design-notes.md#readme-screenshots).
 
 ## Licensing
 

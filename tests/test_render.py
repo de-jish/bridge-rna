@@ -476,8 +476,24 @@ def test_osdr_hover_names_the_sample_and_its_category(corpus):
 
 
 def test_archs4_cloud_carries_no_hover_or_customdata(corpus):
-    """Hover hit-testing dominates the frame cost at 100k glyphs, and the
-    per-point payload is dead weight now that nothing consumes indices."""
+    """Hover hit-testing dominates the frame cost, and the per-point payload is
+    dead weight now that nothing consumes indices.
+
+    This is also the guard on a cut feature, which is the reason it now has a
+    number on it. Inspecting an arbitrary cloud point by clicking it is not
+    buildable the obvious way: `hoverinfo="skip"` suppresses click *picking* as
+    well as hover, so the cloud emits no `plotly_click` at all, and the tempting
+    fix is to turn hover back on. Measured in a real browser against the full
+    942,563-point corpus, restyling these 13 traces to `hoverinfo="x+y"` makes
+    them clickable and takes synchronous mousemove handling to a **median of
+    239.8 ms, max 243.7 ms**, sustained rather than a one-time index build -
+    which is a map that feels frozen under the cursor. `hoverinfo="none"` does
+    not restore picking either.
+
+    So if this test fails because someone enabled hover to make the cloud
+    clickable, the fix is not to update the test. See
+    `docs/design-notes.md#finding-a-sample-on-the-map` section 7.
+    """
     fig, _, _ = render.build_figure("pca", "2d", "species", ["archs4"], 1000, None)
     for trace in fig.data:
         assert trace.hovertemplate is None

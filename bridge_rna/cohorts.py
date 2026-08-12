@@ -11,7 +11,7 @@ corpus on a machine that has neither the 963 MB ARCHS4 memmap nor the model
 checkpoint. `retrieval.run_cohort_retrieval` is the seam where the two meet.
 
 The evidence behind every constant and every design decision is in
-`docs/cohort_pooling.md` (measured) and `docs/cohort_retrieval.md` (built).
+`docs/design-notes.md#cohort-pooling` (measured) and `docs/design-notes.md#cohort-retrieval` (built).
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class Facet:
 # function of (0.34 at k=2 against 0.86 at k>=15), so a finer definition trades
 # away the exact quantity the feature exists to buy, and it does so for a
 # contrast the two-arm comparison already answers more directly. The six are
-# recorded in `docs/cohort_retrieval.md` rather than left on the rail; adding
+# recorded in `docs/design-notes.md#cohort-retrieval` rather than left on the rail; adding
 # one back is one line here, and nothing else in the app hard-codes a facet.
 FACETS: tuple[Facet, ...] = (
     Facet("study", "Study", default=True, pinned=True,
@@ -97,7 +97,7 @@ MIN_COHORT_SIZE = 2
 # This is a statement about *size*, and it is made in the one place where size
 # is the only thing known: the cohort picker, before any search has run. It is
 # no longer used to predict a result's stability, because that prediction is
-# now a measurement - see `StabilityMeasurement` below and `docs/live_stability.md`.
+# now a measurement - see `StabilityMeasurement` below and `docs/design-notes.md#live-stability`.
 #
 # Measured 2026-08-05 over all 212 cohorts. Rerun with:
 #   .venv/bin/python precompute/validate_cohorts.py --stability
@@ -147,7 +147,7 @@ STABILITY_FLOOR = 0.70
 # and `precompute/validate_cohorts.py` check 5 still measures it. What replaced
 # it is the same statistic computed on the query that just ran, at the depth on
 # screen: `StabilityMeasurement`, below. The evidence is in
-# `docs/live_stability.md`.
+# `docs/design-notes.md#live-stability`.
 
 
 # --- The estimator ----------------------------------------------------------
@@ -229,7 +229,7 @@ class StabilityMeasurement:
     """How far this pooled result survives dropping one of its own members.
 
     Measured on the query that just ran, at the depth on screen, rather than
-    looked up from a curve fitted to other cohorts. `docs/live_stability.md`
+    looked up from a curve fitted to other cohorts. `docs/design-notes.md#live-stability`
     carries the evidence and the measured spread that motivated the change.
 
     `per_member[i]` is the Jaccard overlap between the result on screen and the
@@ -337,7 +337,7 @@ def measure_stability(members: list[str] | tuple[str, ...],
 # cohorts and it is essentially constant - median 0.9991, and no lower for a
 # cohort of two than for one of thirty - so it never separated a group worth
 # trusting from one that was not, while sitting on the card looking like a
-# grade. It is deleted rather than hidden; `docs/cohort_pooling.md` keeps the
+# grade. It is deleted rather than hidden; `docs/design-notes.md#cohort-pooling` keeps the
 # measurement. What replaced it is nothing, because the honest confidence number
 # was already beside it - and that one has since been replaced in turn, by
 # `StabilityMeasurement`, which measures rather than predicts it.

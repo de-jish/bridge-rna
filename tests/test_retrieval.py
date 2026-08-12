@@ -337,7 +337,7 @@ def test_the_cached_path_never_opens_a_checkpoint_or_shells_out(monkeypatch, cor
 # cohorts and looked up by size. It is measured now, during the search, over
 # this cohort's own leave-one-out pools - which only works because scoring
 # `2k+1` query vectors costs one memmap pass rather than `2k+1` of them.
-# docs/live_stability.md carries the measurements behind both halves.
+# docs/design-notes.md#live-stability carries the measurements behind both halves.
 
 
 def _cohort_keys(corpus, k: int) -> list[str]:

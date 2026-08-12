@@ -562,7 +562,7 @@ def found_key_children(found: dict | None) -> list:
     """The key row for a found identifier.
 
     A mark with no row is a glyph a reader can only decode by hovering it, which
-    is the whole finding `docs/map_key.md` records - and this one is the fifth
+    is the whole finding `docs/design-notes.md#map-key` records - and this one is the fifth
     encoding the map can carry at once, so it earns a row rather than being the
     exception.
 

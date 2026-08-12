@@ -195,7 +195,7 @@ def test_one_animal_one_vote_regardless_of_transcriptome_concentration(rng):
 
 
 def test_pooled_ranking_is_the_mean_of_the_members_own_cosines(rng):
-    """The central claim of docs/cohort_pooling.md, checked directly.
+    """The central claim of docs/design-notes.md#cohort-pooling, checked directly.
 
     Ranking ARCHS4 by cosine to the spherical mean is identical to ranking by
     the unweighted average of the members' own cosine scores, because the
@@ -296,12 +296,12 @@ def test_the_precomputed_stability_curve_is_gone():
     one of 6 scored 0.849, and both were quoted 0.72.
 
     It is deleted rather than left unused, the way `resultant_length` was.
-    Reintroducing it needs an argument that answers docs/live_stability.md,
+    Reintroducing it needs an argument that answers docs/design-notes.md#live-stability,
     which is what this test exists to make someone read."""
     for name in ("STABILITY_BY_K", "expected_stability", "SINGLE_SAMPLE_STABILITY"):
         assert not hasattr(C, name), (
             f"{name} is back. The measured replacement is StabilityMeasurement; "
-            "see docs/live_stability.md section 5.")
+            "see docs/design-notes.md#live-stability section 5.")
 
 
 def test_the_caution_floor_is_the_threshold_that_set_low_n():

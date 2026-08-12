@@ -60,5 +60,5 @@ It imports the exact symbols the corpus build uses through `manifold/bridge_rna.
 `tests/test_upload_ingestion.py::test_live_upload_embedding_matches_the_cached_corpus_vector` uploads a catalog sample's own counts and checks the live vector reproduces its precomputed one, measured at cosine 1.0 and max absolute difference 0.0.
 That is what makes a cosine of 0.83 against a GEO sample mean the same thing whichever path produced it.
 
-Design notes: `docs/file_ingestion.md`.
+Design notes: [`docs/design-notes.md`](docs/design-notes.md#file-ingestion).
 Browser-level verification of this file: `tests/e2e_upload_check.py`.

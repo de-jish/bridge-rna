@@ -396,7 +396,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
     # name got it read as a property of that cohort: measured live, a cohort
     # of 7 scores 0.316 and one of 6 scores 0.849, and the curve told both
     # of them 0.72. It is measured during the search now and reported on the
-    # right afterwards. See docs/live_stability.md.
+    # right afterwards. See docs/design-notes.md#live-stability.
     c.ok("STABILITY" not in card.upper(),
          f"and nothing about result stability: {card[:70]!r}")
     c.ok(page.locator("#cohort-card .cohort-meter").count() == 0,

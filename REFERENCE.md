@@ -828,7 +828,7 @@ The current `build_projections.py` takes `--umap-neighbors`, `--tsne-perplexity`
 
 Produced by `precompute/validate_cohorts.py` against the real 963 MB ARCHS4 memmap and the real 2,108 cached OSDR embeddings, over **all 212 cohorts** rather than a sample.
 The whole run is 9,270 query vectors scored in **one 73-second pass** over the memmap, using the same running-top-k streaming technique as `validate_artifacts.py --mixing`.
-Full narrative in `docs/cohort_retrieval.md`; the prior measurement that specified the feature is `docs/cohort_pooling.md`.
+Full narrative in [`docs/design-notes.md`](docs/design-notes.md#cohort-retrieval); the prior measurement that specified the feature is [`docs/design-notes.md`](docs/design-notes.md#cohort-pooling).
 
 ### What the user can change, and what was removed (2026-08-05)
 
@@ -897,7 +897,7 @@ The 5-9 row is two buckets merged, because 5-6 scored 0.736 and 7-9 scored 0.696
 It used to be `cohorts.STABILITY_BY_K`, quoted on the rail's cohort card as soon as a cohort was selected.
 Every row above is a mean over tens of cohorts, and the sd column is the reason it could not describe any one of them: at 0.18 within the 5-9 bucket, "0.72" covers real cohorts measuring 0.316 and 0.849.
 The app measures the statistic per query now, at the retrieval depth on screen, and reports it on the right after the search.
-The constant is deleted; `docs/live_stability.md` carries the design and `tests/test_cohorts.py` pins the deletion.
+The constant is deleted; [`docs/design-notes.md`](docs/design-notes.md#live-stability) carries the design and `tests/test_cohorts.py` pins the deletion.
 
 ### Result stability, measured live (2026-08-06)
 

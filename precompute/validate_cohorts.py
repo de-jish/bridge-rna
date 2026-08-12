@@ -64,7 +64,7 @@ from bridge_rna.retrieval import (  # noqa: E402
 DEPTHS = (5, 20, 100)
 MAX_DEPTH = max(DEPTHS)
 
-# The two gates. Both come from docs/cohort_pooling.md, which measured pooled
+# The two gates. Both come from docs/design-notes.md#cohort-pooling, which measured pooled
 # top-5 leave-one-out agreement at 0.78 against 0.13 for a single member.
 MIN_POOLED_STABILITY = 0.60      # check 2: well below 0.78, so noise cannot trip it
 MIN_NULL_MARGIN = 0.03           # check 3: a real cohort must beat random by this
@@ -397,7 +397,7 @@ def main() -> int:
     # deleted on 2026-08-06, because the spread inside a bucket is most of the
     # range (a cohort of 7 measuring 0.316 sat in the same bucket as one of 6
     # measuring 0.849). The app measures this statistic live now, on the query
-    # that just ran; see docs/live_stability.md.
+    # that just ran; see docs/design-notes.md#live-stability.
     #
     # What the curve still settles is the one question it can answer honestly:
     # how large does a cohort have to be before its results usually hold up.

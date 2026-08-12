@@ -35,7 +35,7 @@ a populated inspector - rather than on a fixed sleep.
 Named so pytest does not collect it, for the same reason `e2e_check.py` is: it
 needs the real `cache/` and takes about three minutes.
 
-Design, measurements and rejected alternatives: `docs/readme_screenshots.md`.
+Design, measurements and rejected alternatives: `docs/design-notes.md#readme-screenshots`.
 
     /Users/josh/Bridge-RNA/.venv/bin/python tests/screenshot_readme.py \\
         [--out docs] [--port 8072] [--headed] [--only retrieval|map]

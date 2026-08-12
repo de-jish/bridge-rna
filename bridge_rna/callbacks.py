@@ -114,7 +114,7 @@ def _cohort_query_series(cohort, geometry, excluded: list[str]) -> pd.Series:
         # No stability field. It used to carry `expected_stability(k)`, a curve
         # looked up by cohort size; it is measured during the search now and
         # travels in the payload's own `stability` block, which the inspector's
-        # stability panel reads. See docs/live_stability.md.
+        # stability panel reads. See docs/design-notes.md#live-stability.
         "members": "\n".join(geometry.members),
         "excluded": "\n".join(excluded),
         "outliers": "\n".join(outliers),

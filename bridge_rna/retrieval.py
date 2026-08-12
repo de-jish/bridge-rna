@@ -794,7 +794,7 @@ def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
     much of this list survives dropping one animal, and how much would one
     animal alone have agreed with another" for *this* cohort at *this* depth. It
     replaces a bucketed curve looked up by cohort size, which was a population
-    average being printed beside one cohort's name; `docs/live_stability.md`
+    average being printed beside one cohort's name; `docs/design-notes.md#live-stability`
     carries the measured spread that motivated the change.
 
     Still **one memmap pass**, because all `2k+1` query vectors are built before
