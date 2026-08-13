@@ -303,8 +303,8 @@ def control_rail() -> html.Aside:
                 "budget-label", "Number of ARCHS4 points",
                 _segmented("budget", budget_options("2d"), default_budget("2d")),
             ),
-            # "Where is this sample?" - the one question the map could not be
-            # asked until now. It sits here, after the controls that decide how
+            # "Where did this study land?" - the one question the map could not
+            # be asked until now. It sits here, after the controls that decide how
             # the map is drawn and immediately above the panel that describes
             # whatever is currently selected, because the control and its result
             # belong together: that is the same rule that puts the coverage
@@ -322,7 +322,7 @@ def control_rail() -> html.Aside:
                 id="find-group", className="bm-group", role="group",
                 **{"aria-labelledby": "find-label"},
                 children=[
-                    html.Label("Find a sample", id="find-label",
+                    html.Label("Find a study", id="find-label",
                                className="bm-group-label", htmlFor="find-input"),
                     dcc.Input(
                         id="find-input", type="text",
@@ -347,15 +347,14 @@ def control_rail() -> html.Aside:
                         #
                         # Its length is measured, not judged. The field is
                         # 215 px wide inside its padding on the 268 px rail, and
-                        # the previous wording rendered at 237 px - so it taught
-                        # three formats and then trailed off in the middle of
-                        # the fourth, at "sample na…", from the day the control
-                        # shipped. This one measures 206 px in the rail's own
-                        # font and still names all four.
+                        # an earlier four-grammar wording rendered at 237 px, so
+                        # it taught three formats and then trailed off in the
+                        # middle of the fourth. Two grammars leave room to spell
+                        # both out.
                         # `test_the_find_placeholder_fits_its_box` in
                         # `tests/e2e_check.py` re-measures it in the browser,
                         # because no Python assertion can.
-                        placeholder="GSM… GSE… OSD-100 or a name",
+                        placeholder="GSE143281 or OSD-100",
                         # The combobox semantics - role, aria-autocomplete,
                         # aria-controls, aria-expanded, aria-activedescendant -
                         # are set by `assets/find-suggest.js` and not here.
@@ -777,26 +776,6 @@ def build_view() -> html.Div:
         html.Div(className="bm-body", children=[
             control_rail(),
             html.Main(className="bm-plot-wrap", **{"aria-label": "Embedding map"}, children=[
-                # The strip across the top of the canvas: what is drawn right
-                # now, and the one action that changes it.
-                #
-                # **Reset view is on the plot rather than on the rail, and that
-                # is the whole point of it.** Three things narrow the viewport -
-                # framing a find, framing a retrieval, and the user's own scroll
-                # or drag - and all three write the same `viewport-store`, so
-                # there is one thing to undo and it should be undone by one
-                # control. A button beside "Frame it" and a second beside
-                # "Frame the retrieval" would be two handlers for one piece of
-                # state, and neither would answer a plain scroll-zoom. The rail's
-                # rule is that an action sits with the control it qualifies;
-                # this one qualifies the viewport, and the viewport belongs to
-                # the plot, so this is where it goes.
-                #
-                # It is declared here and hidden, not created by a callback, for
-                # the reason the legend's parts are: Dash validates its callback
-                # graph against the initial layout, and an id that only ever
-                # exists as callback output fails silently in the browser rather
-                # than loudly at startup.
                 html.Div(className="bm-plot-badges", children=[
                     html.Div(id="plot-badges", className="bm-badges"),
                     html.Button("Reset view", id="reset-view", n_clicks=0,

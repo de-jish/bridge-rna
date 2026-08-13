@@ -1,4 +1,4 @@
-/* Keyboard, pointer and open/closed behaviour for the "Find a sample" combobox.
+/* Keyboard, pointer and open/closed behaviour for the "Find a study" combobox.
  *
  * This is the map's only JavaScript, and it exists because Dash cannot express
  * the one thing an autocomplete is made of: a keystroke. `dcc.Input` publishes

@@ -1,4 +1,4 @@
-"""Resolve an identifier to the points it names on the map.
+"""Resolve a study identifier to the points it names on the map.
 
 The map draws 942,563 glyphs and, until this module existed, offered no way to
 ask about a specific one. This is the whole of the answer: a string in, a list
@@ -9,20 +9,33 @@ unit-testable against the synthetic fixture corpus on a machine with neither the
 963 MB memmap nor the real cache - the same boundary `bridge_rna/cohorts.py`
 draws for what a cohort is.
 
-**Identity only.** Four grammars resolve: a GEO sample (`GSM…`), a GEO series
-(`GSE…`), an OSDR study (`OSD-###`), and an OSDR sample by its full
-`<study>|<name>` key or by the name alone. Free text does not, and that is a
-decision rather than an omission. `archs4_metadata.parquet` carries `title`,
-`source_name` and `characteristics`, and a substring scan of 940,455 rows is
-affordable - but it would return hundreds of rows for "liver" and read as a
-biological query when it is a string match, on the one map whose whole design is
-that a field declares what it does and does not describe. "Where is liver" is
-the Tissue color-by's question and `manifold/colorby.py` already answers it
-across both corpora. A query that matches no grammar is reported as `"shape"`
-rather than `"absent"` precisely so the interface can say that.
+**Studies, not samples.** Two grammars resolve: a GEO series (`GSE…`) and an
+OSDR study (`OSD-###`). That is a deliberate narrowing, made on 2026-08-13. The
+box used to take an individual GEO sample (`GSM…`) and an OSDR sample by its
+full `<study>|<name>` key or by name alone, which meant four grammars, two
+suggestion rankers and a 39-character identifier nobody types from memory - and
+the question a reader actually brings to a 942,563-point map is "where did this
+experiment land", not "where is replicate 3". A study is also the unit that
+draws a *shape* on the map: one glyph among a million is a dot, and its twelve
+siblings are a neighbourhood. `describe()` still renders a single sample's
+record, because a series of one resolves to one point.
+
+Clicking an OSDR diamond still selects that one sample, through `osdr_sample()`
+rather than through the typed grammar. The map's own marks may address a sample;
+the box may not.
+
+**Free text does not resolve, and that is a decision rather than an omission.**
+`archs4_metadata.parquet` carries `title`, `source_name` and `characteristics`,
+and a substring scan of 940,455 rows is affordable - but it would return
+hundreds of rows for "liver" and read as a biological query when it is a string
+match, on the one map whose whole design is that a field declares what it does
+and does not describe. "Where is liver" is the Tissue color-by's question and
+`manifold/colorby.py` already answers it across both corpora. A query that
+matches no grammar is reported as `"shape"` rather than `"absent"` precisely so
+the interface can say that.
 
 **Two failures that look alike and are not.** A well-formed accession this
-corpus does not contain is `"absent"`. A well-formed accession on a machine
+corpus does not contain is `"absent"`. A well-formed GEO series on a machine
 where the optional GEO join was never fetched is `"no_geo_metadata"`, because
 without `cache/archs4_metadata.parquet` 940,455 of the 942,563 points cannot be
 addressed at all, and telling a user their accession does not exist when the
@@ -30,17 +43,6 @@ truth is that this machine cannot look it up is the same class of error
 invariant 5 exists to prevent. `searchable()` is what the rail states up front,
 and it reads `data.archs4_metadata_available` itself rather than re-deriving the
 path - a second source of truth for that file was already a real bug once.
-
-**One distinction is deliberately not drawn.** 788 of the 2,896 OSDR samples the
-retrieval picker lists were never embedded and have no position here, so
-searching one of them returns `"absent"` along with every genuine typo. The map
-cannot honestly do better: the catalog that knows those 788 exist lives on the
-retrieval side, behind `BRIDGE_RNA_ROOT`, and the map view deliberately opens
-nothing there. Reading it to sharpen one error message would give the map a
-dependency on the Bridge RNA repository that it does not otherwise have. Only 1
-of the 788 has a study that is itself on the map, so inferring it from map-side
-data alone would sharpen the message for one sample in 788 and mislead about the
-rest.
 """
 
 from __future__ import annotations
@@ -60,7 +62,6 @@ SHAPE = "shape"                    # matches no grammar; probably free text
 ABSENT = "absent"                  # well-formed, and this corpus lacks it
 NO_GEO_METADATA = "no_geo_metadata"  # a GEO id, on a machine with no join
 
-_GSM = re.compile(r"^GSM(\d+)$")
 _GSE = re.compile(r"^GSE(\d+)$")
 #: The hyphen is optional because OSD-100 and OSD100 are the same study to
 #: everyone except a string compare, and whitespace creeps in from a paste.
@@ -69,35 +70,31 @@ _OSD = re.compile(r"^OSD[\s-]*(\d+)$")
 
 @dataclass(frozen=True)
 class _Archs4Index:
-    """Sorted integer keys into the ARCHS4 block, and the rows they address.
+    """Sorted integer series keys into the ARCHS4 block, and the rows they name.
 
     A row **is** a point index: ARCHS4 occupies rows 0..n_archs4-1 of the global
     point order, and `global_index` is verified equal to row position in the
     parquet, so nothing here joins or offsets.
 
     int32 throughout, which is what makes this affordable. Measured on the real
-    corpus: these four arrays retain **15.0 MB** and build in **460 ms**,
-    against 96.8 MB retained for `pd.Index(accessions).get_loc`, on an app whose
-    whole working set is 80.8 MB. Accession numbers are far below int32's range
-    and 940,455 rows are further still.
+    corpus when the index also carried per-sample GSM keys: four arrays retained
+    **15.0 MB** and built in **460 ms**, against 96.8 MB retained for
+    `pd.Index(accessions).get_loc`, on an app whose whole working set is
+    80.8 MB. Dropping the GSM half with the sample grammar halves both figures.
 
-    Two notes on that 460 ms, because both figures it corrects were wrong in
-    instructive ways. It is one-time, on the first search of a session, and a
-    warm lookup is then about 0.8 ms. And it is dominated by materializing two
-    940,455-row string columns, not by the integer parse: the parse alone is
-    about 200 ms whether it is written as a regex, a slice, or a Python loop,
-    all three measured within 20 ms of each other, so there is nothing to win by
-    making it cleverer.
+    That build cost is one-time, on the first search of a session, and a warm
+    lookup is then about 0.8 ms. It is dominated by materializing the string
+    column, not by the integer parse: the parse alone is about 200 ms whether it
+    is written as a regex, a slice, or a Python loop, all three measured within
+    20 ms of each other, so there is nothing to win by making it cleverer.
     """
-    gsm_keys: np.ndarray
-    gsm_rows: np.ndarray
     gse_keys: np.ndarray
     gse_rows: np.ndarray
 
 
 @lru_cache(maxsize=1)
 def _archs4_index() -> _Archs4Index | None:
-    """Build the accession index, or None when the GEO join is absent.
+    """Build the series index, or None when the GEO join is absent.
 
     Built on first search rather than at import, so a session that never
     searches never pays for it.
@@ -105,8 +102,7 @@ def _archs4_index() -> _Archs4Index | None:
     meta = data.archs4_metadata()
     if meta is None:
         return None
-    return _Archs4Index(*_sorted_keys(meta.get("geo_accession"), "GSM"),
-                        *_sorted_keys(meta.get("series_id"), "GSE"))
+    return _Archs4Index(*_sorted_keys(meta.get("series_id"), "GSE"))
 
 
 def _sorted_keys(column, prefix: str) -> tuple[np.ndarray, np.ndarray]:
@@ -117,8 +113,7 @@ def _sorted_keys(column, prefix: str) -> tuple[np.ndarray, np.ndarray]:
     v2.5 metadata and absent from the v2.latest the API serves. Slicing the
     digits off one raises `ValueError` and takes the whole index build with it,
     and coercing it to 0 would file those 839 samples under a series that does
-    not exist. They are skipped, so they are addressable by their own GSM and
-    by nothing else.
+    not exist. They are skipped, so no query reaches them.
     """
     if column is None:
         return np.empty(0, np.int32), np.empty(0, np.int32)
@@ -137,65 +132,32 @@ def _sorted_keys(column, prefix: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 @lru_cache(maxsize=1)
-def _osdr_rows() -> tuple[tuple[str, str, str, str, int], ...]:
-    """(folded key, display key, study, tissue, point) for every OSDR sample.
-
-    Only the suggestion path reads this. It is a flat tuple rather than a dict
-    because the question it answers is "which of these contains what I have
-    typed so far", which is a scan whatever the shape - and 2,108 rows is a scan
-    of about half a millisecond, so there is nothing to index for.
-
-    The display key is kept alongside the folded one because the suggestion has
-    to show a user their own sample name in its own casing while matching
-    case-insensitively, and the point index is kept so a suggestion could be
-    resolved without a second lookup. It is not: selecting one puts the sample
-    key in the box and `find()` resolves it exactly as if it had been typed,
-    which is what keeps one resolution path rather than two.
-    """
-    n_archs4, _, _ = data.counts()
-    meta = data.osdr_metadata()
-    if "sample_key" not in meta.columns:
-        return ()
-    keys = meta["sample_key"].astype(str).to_numpy()
-    studies = (meta["study"].astype(str).to_numpy() if "study" in meta.columns
-               else np.array([""] * len(keys)))
-    tissues = (meta["tissue"].astype(str).to_numpy() if "tissue" in meta.columns
-               else np.array([""] * len(keys)))
-    return tuple(
-        (str(key).casefold(), str(key), str(studies[row]), str(tissues[row]),
-         n_archs4 + row)
-        for row, key in enumerate(keys))
-
-
-@lru_cache(maxsize=1)
-def _osdr_index() -> tuple[dict, dict, dict]:
-    """(by full key, by bare name, by study) -> point indices.
+def _osdr_index() -> tuple[dict, dict]:
+    """(by full sample key, by study) -> point indices.
 
     2,108 rows, so plain dicts. OSDR occupies the block after ARCHS4, hence the
     `n_archs4` offset on every value.
+
+    The sample keys are here for the map's own click path, which selects the
+    diamond that was clicked. Nothing typed into the box reaches them.
     """
     n_archs4, _, _ = data.counts()
     meta = data.osdr_metadata()
     by_key: dict[str, int] = {}
-    by_name: dict[str, int] = {}
     by_study: dict[str, list[int]] = {}
     keys = meta["sample_key"].astype(str).to_numpy() if "sample_key" in meta else []
     studies = (meta["study"].astype(str).to_numpy() if "study" in meta
                else np.array([""] * len(keys)))
     for row, key in enumerate(keys):
-        point = n_archs4 + row
-        by_key[key.casefold()] = point
-        if "|" in key:
-            by_name[key.split("|", 1)[1].casefold()] = point
-        by_study.setdefault(str(studies[row]).casefold(), []).append(point)
-    return by_key, by_name, by_study
+        by_key[key.casefold()] = n_archs4 + row
+        by_study.setdefault(str(studies[row]).casefold(), []).append(n_archs4 + row)
+    return by_key, by_study
 
 
 def clear_caches() -> None:
     """Drop the memoized indexes. For tests that swap the artifacts underneath."""
     _archs4_index.cache_clear()
     _osdr_index.cache_clear()
-    _osdr_rows.cache_clear()
 
 
 def searchable() -> tuple[str, ...]:
@@ -219,12 +181,12 @@ def _hit(points, kind: str, label: str, query: str) -> dict:
 
 
 def find(query: str | None) -> dict:
-    """Resolve `query` to the points it names.
+    """Resolve `query` to the points of the study it names.
 
     Returns `{"points": [int], "kind": str, "label": str, "reason": str}`, where
     `reason` is `""` on a hit and one of the module constants on a miss, and
     `label` is the *canonical* identifier rather than what was typed, so the
-    interface echoes `GSM9000005` back at someone who typed ` gsm9000005 `.
+    interface echoes `GSE143281` back at someone who typed ` gse143281 `.
 
     `points` is sorted. Both consumers - the renderer indexing coordinates and
     `frame_points` taking a bounding box - are order-independent, but a stable
@@ -236,51 +198,41 @@ def find(query: str | None) -> dict:
 
     token = " ".join(raw.split()).upper()
 
-    m = _GSM.match(token)
-    if m:
-        return _geo_lookup(m.group(1), "gsm", f"GSM{int(m.group(1))}", raw)
     m = _GSE.match(token)
     if m:
-        return _geo_lookup(m.group(1), "gse", f"GSE{int(m.group(1))}", raw)
+        return _series_lookup(m.group(1), f"GSE{int(m.group(1))}", raw)
 
     m = _OSD.match(token)
     if m:
         label = f"OSD-{int(m.group(1))}"
-        points = _osdr_index()[2].get(label.casefold(), [])
+        points = _osdr_index()[1].get(label.casefold(), [])
         return _hit(points, "osd", label, raw) if points else _miss(label, ABSENT)
 
-    by_key, by_name, _ = _osdr_index()
-    folded = raw.casefold()
-    point = by_key.get(folded, by_name.get(folded))
-    if point is not None:
-        return _hit([point], "osdr_sample", raw, raw)
-
-    # Nothing matched, and the two reasons that can be need different sentences.
-    return _miss(raw, _shape_or_absent(raw))
+    return _miss(raw, SHAPE)
 
 
-def _shape_or_absent(raw: str) -> str:
-    """Did this look like an identifier the map lacks, or like a word?
+def osdr_sample(key: str | None) -> dict | None:
+    """The point one OSDR `<study>|<name>` key names, or None.
 
-    `OSD-141|Mmus_C57-6J_SPL_cells_Rep1_SP1` is a perfectly well-formed OSDR
-    sample key that this map does not carry - it is one of the 788 the retrieval
-    catalog lists and the embedding never covered - and answering it with "that
-    is not an identifier, try the Tissue color-by" would be wrong twice. A key
-    is unambiguous: nothing else contains a pipe. An OSDR sample *name* is
-    underscore-joined and unspaced, which is not proof but is a good deal more
-    like an identifier than "mouse brain" is.
+    The map's click path, and nothing else. A diamond on screen is an
+    unambiguous reference to one sample, so selecting it is not the free-text
+    problem the typed grammar refuses - but it is also not something the box
+    offers, which is why this is a separate entry point rather than a fifth
+    branch of `find()`.
     """
-    if "|" in raw:
-        return ABSENT
-    return ABSENT if ("_" in raw and not any(c.isspace() for c in raw)) else SHAPE
+    folded = str(key or "").strip().casefold()
+    point = _osdr_index()[0].get(folded)
+    if point is None:
+        return None
+    return _hit([point], "osdr_sample", str(key), str(key))
 
 
 # --- Suggestions -------------------------------------------------------------
 #
-# What the box offers while an identifier is being typed. Everything here is a
-# *prefix* of the same four grammars `find()` resolves, and that is the whole
-# design rule: a suggestion is a completion of what the user is typing, never a
-# search for what they might have meant.
+# What the box offers while a study identifier is being typed. Everything here
+# is a *prefix* of the same two grammars `find()` resolves, and that is the
+# whole design rule: a suggestion is a completion of what the user is typing,
+# never a search for what they might have meant.
 #
 # **The free-text refusal survives, and it had to.** `archs4_metadata.parquet`
 # carries `title`, `source_name` and `characteristics`, and substring-scanning
@@ -291,11 +243,6 @@ def _shape_or_absent(raw: str) -> str:
 # design is that a field declares what it does and does not describe. So a query
 # matching no grammar gets no suggestions and keeps its `shape` reason, which is
 # what puts the sentence about the Tissue color-by under the box instead.
-#
-# An OSDR sample *name* is matched by substring rather than by prefix, which
-# looks like an exception and is not: a name is itself an identifier, there are
-# 2,108 of them rather than 940,455, and nobody remembers whether the one they
-# want begins "Mmus_C57-6J_LVR" or ends "_FLT_Rep1_M23".
 
 #: How many suggestions the box will offer. The cap is what bounds the payload;
 #: the list's `max-height` is what keeps the control compact. Two separate
@@ -303,24 +250,18 @@ def _shape_or_absent(raw: str) -> str:
 #: list visibly scrollable rather than silently truncated.
 SUGGESTION_LIMIT = 10
 
-#: Below this, a name fragment matches most of the corpus and suggests nothing.
-#: Accession grammars have no such floor: "GSM4" is already three characters of
-#: intent and one digit.
-MIN_NAME_QUERY = 2
-
 
 def _decade_slices(keys: np.ndarray, digits: str) -> list[tuple[int, int]]:
     """`(lo, hi)` slices of the sorted key array whose numbers start with `digits`.
 
-    The accession index stores numbers, not strings - 15.0 MB of int32 against
-    96.8 MB for a pandas string index, which is the measurement that made the
-    find box affordable at all. A numeric prefix is therefore not a string
-    compare but a union of ranges: the integers beginning "42" are [42, 43),
-    then [420, 430), then [4200, 4300), and so on. Nine `searchsorted` pairs
-    covers every GEO accession ever issued, and each is a binary search over
-    940,455 int32s.
+    The index stores numbers, not strings - int32 keys against a pandas string
+    index that measured 96.8 MB, which is what made the find box affordable at
+    all. A numeric prefix is therefore not a string compare but a union of
+    ranges: the integers beginning "42" are [42, 43), then [420, 430), then
+    [4200, 4300), and so on. Nine `searchsorted` pairs covers every GEO
+    accession ever issued, and each is a binary search over 940,455 int32s.
 
-    Returned shortest-number-first, so typing "42" offers GSM42 above GSM4200.
+    Returned shortest-number-first, so typing "42" offers GSE42 above GSE4200.
     """
     if not digits or not digits.isdigit() or keys.size == 0:
         return []
@@ -343,34 +284,13 @@ def _suggestion(value: str, label: str, detail: str, kind: str) -> dict:
     return {"value": value, "label": label, "detail": detail, "kind": kind}
 
 
-def _gsm_suggestions(digits: str, limit: int) -> list[dict]:
-    index = _archs4_index()
-    meta = data.archs4_metadata()
-    if index is None or meta is None:
-        return []
-    rows: list[int] = []
-    for lo, hi in _decade_slices(index.gsm_keys, digits):
-        rows.extend(int(r) for r in index.gsm_rows[lo:hi])
-        if len(rows) >= limit:
-            break
-    out = []
-    for row in rows[:limit]:
-        r = meta.iloc[row]
-        accession = str(r.get("geo_accession") or "")
-        # Series and tissue, because two GEO samples with adjacent accessions
-        # are usually the same experiment and the tissue is what tells them
-        # apart. The title is the fallback and not the default: it is free text
-        # of unbounded length on a 268 px rail.
-        detail = " · ".join(p for p in (str(r.get("series_id") or ""),
-                                        str(r.get("tissue") or "")) if p)
-        out.append(_suggestion(accession, accession,
-                               detail or str(r.get("title") or ""), "gsm"))
-    return out
+def _samples(n: int) -> str:
+    return f"{n:,} sample{'s' if n != 1 else ''}"
 
 
 def _gse_suggestions(digits: str, limit: int) -> list[dict]:
     index = _archs4_index()
-    if index is None:
+    if index is None or limit <= 0:
         return []
     out: list[dict] = []
     for lo, hi in _decade_slices(index.gse_keys, digits):
@@ -385,13 +305,9 @@ def _gse_suggestions(digits: str, limit: int) -> list[dict]:
     return out
 
 
-def _samples(n: int) -> str:
-    return f"{n:,} sample{'s' if n != 1 else ''}"
-
-
 def _osd_suggestions(digits: str, limit: int) -> list[dict]:
     """OSDR studies whose accession starts with `digits`, lowest number first."""
-    _, _, by_study = _osdr_index()
+    _, by_study = _osdr_index()
     matches = []
     for folded, points in by_study.items():
         number = folded[4:] if folded.startswith("osd-") else ""
@@ -402,40 +318,12 @@ def _osd_suggestions(digits: str, limit: int) -> list[dict]:
             for n, count in matches[:limit]]
 
 
-def _osdr_sample_suggestions(raw: str, limit: int) -> list[dict]:
-    """OSDR samples whose key contains `raw`, whole-key prefixes first.
-
-    A prefix is a stronger signal than a hit in the middle of a name, so the two
-    are ranked rather than merged - typing an OSD accession should put that
-    study's samples above a sample from elsewhere that happens to contain the
-    same digits in its replicate number.
-    """
-    folded = raw.casefold()
-    starts: list[dict] = []
-    contains: list[dict] = []
-    for key_folded, key, study, tissue, _point in _osdr_rows():
-        if not (folded in key_folded):
-            continue
-        # The name alone, because the study is already the first thing in the
-        # detail line and repeating it inside a 39-character key leaves no room
-        # for the part that differs.
-        name = key.split("|", 1)[-1]
-        detail = " · ".join(p for p in (study, tissue) if p and p != "nan")
-        row = _suggestion(key, name, detail, "osdr_sample")
-        bucket = (starts if key_folded.startswith(folded)
-                  or name.casefold().startswith(folded) else contains)
-        bucket.append(row)
-        if len(starts) >= limit:
-            break
-    return (starts + contains)[:limit]
-
-
 def suggest(query: str | None, limit: int = SUGGESTION_LIMIT) -> dict:
     """What `query` could be completed to.
 
     Returns ``{"items": [...], "reason": str}``. ``reason`` is ``""`` when there
     is something to offer and otherwise one of the module's miss constants, so
-    the interface can tell "nothing matches GSM99999999" from "that is not an
+    the interface can tell "nothing matches GSE99999999" from "that is not an
     identifier at all" - the same distinction `find()` draws, drawn by the same
     constants, because answering both with an empty dropdown is how a user
     concludes the box is broken.
@@ -452,12 +340,6 @@ def suggest(query: str | None, limit: int = SUGGESTION_LIMIT) -> dict:
     limit = max(int(limit), 0)
     token = " ".join(raw.split()).upper()
 
-    m = _GSM.match(token)
-    if m:
-        if _archs4_index() is None:
-            return {"items": [], "reason": NO_GEO_METADATA}
-        items = _gsm_suggestions(m.group(1), limit)
-        return {"items": items, "reason": "" if items else ABSENT}
     m = _GSE.match(token)
     if m:
         if _archs4_index() is None:
@@ -467,18 +349,10 @@ def suggest(query: str | None, limit: int = SUGGESTION_LIMIT) -> dict:
 
     m = _OSD.match(token)
     if m:
-        # Studies first, then that study's own samples in whatever room is left.
-        # "OSD-100" is far more often the whole intent than a step towards one
-        # of its twelve samples, and the samples are one keystroke away.
         items = _osd_suggestions(m.group(1), limit)
-        if len(items) < limit:
-            items += _osdr_sample_suggestions(raw, limit - len(items))
         return {"items": items, "reason": "" if items else ABSENT}
 
-    if len(raw) < MIN_NAME_QUERY:
-        return {"items": [], "reason": SHAPE}
-    items = _osdr_sample_suggestions(raw, limit)
-    return {"items": items, "reason": "" if items else _shape_or_absent(raw)}
+    return {"items": [], "reason": SHAPE}
 
 
 #: The canonical GEO record page. One accession, one URL, built in one place.
@@ -549,17 +423,15 @@ def _osdr_record(row: int, label: str) -> dict:
             "geo": "", "sample_key": key}
 
 
-def _geo_lookup(digits: str, kind: str, label: str, query: str) -> dict:
+def _series_lookup(digits: str, label: str, query: str) -> dict:
     index = _archs4_index()
     if index is None:
         return _miss(label, NO_GEO_METADATA)
     key = int(digits)
     if key > np.iinfo(np.int32).max:
         return _miss(label, ABSENT)
-    keys, rows = ((index.gsm_keys, index.gsm_rows) if kind == "gsm"
-                  else (index.gse_keys, index.gse_rows))
-    lo = int(np.searchsorted(keys, key, "left"))
-    hi = int(np.searchsorted(keys, key, "right"))
+    lo = int(np.searchsorted(index.gse_keys, key, "left"))
+    hi = int(np.searchsorted(index.gse_keys, key, "right"))
     if lo == hi:
         return _miss(label, ABSENT)
-    return _hit(rows[lo:hi], kind, label, query)
+    return _hit(index.gse_rows[lo:hi], "gse", label, query)

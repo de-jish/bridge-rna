@@ -564,17 +564,24 @@ def main() -> int:
                     };
                 }""")
 
-            one = find_it("GSM4256053")
-            print(f"     GSM4256053 -> {one['marks']} mark(s), {one['type']}, "
+            one = find_it("GSE143281")
+            print(f"     GSE143281 -> {one['marks']} mark(s), {one['type']}, "
                   f"status {' '.join(one['status'].split())[:70]!r}")
-            c.ok(one["marks"] == 1, f"a GSM marks exactly one point ({one['marks']})")
+            c.ok(one["marks"] >= 1, f"a series marks its samples ({one['marks']})")
             c.ok(one["type"] == "scattergl",
                  f"the found layer is WebGL in 2-D, not the non-gl Scatter ({one['type']})")
-            c.ok("GSM4256053" in one["key"], "the found mark is named in the key")
-            c.ok("GSM4256053" in one["badges"], "the plot badge names what was found")
+            c.ok("GSE143281" in one["key"], "the found mark is named in the key")
+            c.ok("GSE143281" in one["badges"], "the plot badge names what was found")
             c.ok("GSE143281" in one["panel"],
-                 "the record panel carries the sample's series")
-            c.ok(one["frame"], "framing is offered for a found sample")
+                 "the record panel names the study that was found")
+            c.ok(one["frame"], "framing is offered for a found study")
+
+            # The narrowing of 2026-08-13: the box takes studies, so a sample
+            # accession is a shape miss and not a one-point hit.
+            sample = find_it("GSM4256053")
+            c.ok(sample["marks"] == 0, "a sample accession marks nothing")
+            c.ok("Color by" in sample["status"],
+                 f"and is refused as a shape: {sample['status'][:80]}")
 
             series = find_it("GSE228590")
             print(f"     GSE228590 -> {series['marks']} marks, status: "
@@ -596,7 +603,7 @@ def main() -> int:
                  f"free text is pointed at the color-by: {word['status'][:80]}")
             c.ok(not word["frame"], "no framing is offered when nothing was found")
 
-            missing = find_it("GSM99999999")
+            missing = find_it("GSE9999999")
             c.ok("not on this map" in missing["status"],
                  f"an absent accession says so: {missing['status'][:80]}")
             c.ok("Color by" not in missing["status"],
@@ -642,10 +649,10 @@ def main() -> int:
             page.wait_for_timeout(3000)
 
             print("\n=== 8. the find box completes what is being typed ===")
-            # The placeholder is the only thing an empty box says, and it had
-            # been clipping mid-word at "sample na…" since the control shipped:
-            # it taught three accession formats and trailed off inside the
-            # fourth. Nothing in Python can catch that - it is a text
+            # The placeholder is the only thing an empty box says, and a
+            # four-grammar wording clipped mid-word at "sample na…" for as long
+            # as the box took four grammars. Nothing in Python can catch that -
+            # it is a text
             # measurement in the rail's own font - so it is measured here, the
             # way the browser measures it.
             fit = page.evaluate("""() => {
@@ -661,7 +668,7 @@ def main() -> int:
                   f"in {fit['avail']}px")
             c.ok(fit["width"] <= fit["avail"],
                  f"the placeholder fits its box ({fit['width']} of {fit['avail']}px)")
-            for grammar in ("GSM", "GSE", "OSD-100", "name"):
+            for grammar in ("GSE", "OSD-100"):
                 c.ok(grammar in fit["text"],
                      f"and still names {grammar}: {fit['text']!r}")
             # The suggestions exist because the input stopped debouncing, so the
@@ -673,7 +680,7 @@ def main() -> int:
             page.press("#find-input", "Enter")
             page.wait_for_timeout(2500)
             page.click("#find-input")
-            page.type("#find-input", "GSM4256", delay=45)
+            page.type("#find-input", "GSE1432", delay=45)
             page.wait_for_timeout(2500)
             typed = page.evaluate("""() => {
                 const box = document.getElementById('find-input');
@@ -692,7 +699,7 @@ def main() -> int:
             }""")
             print(f"     {typed['n']} rows in {typed['height']}px, first {typed['first']!r}")
             c.ok(typed["n"] > 1, f"a partial accession is completed ({typed['n']} rows)")
-            c.ok(typed["first"].startswith("GSM4256"),
+            c.ok(typed["first"].startswith("GSE1432"),
                  f"the completions extend what was typed: {typed['first']!r}")
             c.ok(typed["height"] <= 200,
                  f"the list is bounded rather than growing ({typed['height']}px)")

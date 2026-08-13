@@ -1,4 +1,4 @@
-"""Resolving an identifier to the points it names on the map.
+"""Resolving a study identifier to the points it names on the map.
 
 Every test runs against the synthetic corpus in `tests/fixture_corpus.py`, so
 none of this needs the 963 MB memmap or the real cache - `manifold/find.py`
@@ -29,18 +29,7 @@ def _clear_index():
     find.clear_caches()
 
 
-# --- The four grammars -------------------------------------------------------
-
-def test_a_gsm_accession_resolves_to_its_own_point(corpus):
-    """An ARCHS4 accession's memmap row *is* its point index - the join the
-    whole app is built on - so this is an identity check, not a lookup that
-    could be off by one."""
-    for row in (0, 1, 999, corpus["n_archs4"] - 1):
-        got = find.find(f"GSM{9000000 + row}")
-        assert got["reason"] == ""
-        assert got["points"] == [row]
-        assert got["kind"] == "gsm"
-
+# --- The two grammars --------------------------------------------------------
 
 def _a_real_series() -> str:
     """A series id that is actually populated.
@@ -53,6 +42,8 @@ def _a_real_series() -> str:
 
 
 def test_a_series_resolves_to_every_sample_in_it(corpus):
+    """An ARCHS4 sample's memmap row *is* its point index - the join the whole
+    app is built on - so this is an identity check as well as a lookup."""
     meta = data.archs4_metadata()
     series = _a_real_series()
     expected = sorted(np.flatnonzero(meta["series_id"].to_numpy() == series).tolist())
@@ -75,26 +66,43 @@ def test_an_osdr_study_resolves_to_every_sample_in_it(corpus):
     assert got["points"] == expected
 
 
-def test_an_osdr_sample_resolves_by_full_key_and_by_bare_name(corpus):
-    """A user copying from the retrieval view has the full `<study>|<name>`
-    key; a user reading a figure caption has only the name."""
+def test_the_box_takes_studies_and_not_samples(corpus):
+    """The narrowing this module was cut down to on 2026-08-13. A GEO sample
+    accession and an OSDR sample key are both well-formed identifiers and
+    neither is a study, so neither resolves - the box asks "where did this
+    experiment land", and one glyph among 942,563 is a dot where its siblings
+    are a neighbourhood."""
     osdr = data.osdr_metadata()
     key = str(osdr["sample_key"].iloc[7])
-    name = key.split("|", 1)[1]
-    expected = [corpus["n_archs4"] + 7]
-    for query in (key, name):
+    for query in ("GSM9000005", key, key.split("|", 1)[1]):
         got = find.find(query)
-        assert got["reason"] == "", query
-        assert got["points"] == expected, query
-        assert got["kind"] == "osdr_sample"
+        assert got["points"] == [], query
+        assert got["reason"] == find.SHAPE, query
+
+
+def test_a_clicked_diamond_still_selects_its_own_sample(corpus):
+    """The map's own marks may address a sample; the box may not. A diamond on
+    screen is an unambiguous reference to one point, which is not the free-text
+    problem the typed grammar refuses."""
+    osdr = data.osdr_metadata()
+    key = str(osdr["sample_key"].iloc[7])
+    got = find.osdr_sample(key)
+    assert got["points"] == [corpus["n_archs4"] + 7]
+    assert got["kind"] == "osdr_sample"
+    assert got["reason"] == ""
+    assert find.osdr_sample("OSD-999|not-a-sample") is None
+    assert find.osdr_sample("") is None
 
 
 # --- Normalization -----------------------------------------------------------
 
 def test_matching_is_case_insensitive_and_trims_whitespace(corpus):
-    for query in ("  GSM9000005  ", "gsm9000005", "Gsm9000005", "\tGSM9000005\n"):
+    series = _a_real_series()
+    expected = find.find(series)["points"]
+    assert expected
+    for query in (f"  {series}  ", series.lower(), f"\t{series}\n"):
         got = find.find(query)
-        assert got["points"] == [5], query
+        assert got["points"] == expected, query
 
 
 def test_a_study_resolves_with_or_without_its_hyphen(corpus):
@@ -108,14 +116,14 @@ def test_a_study_resolves_with_or_without_its_hyphen(corpus):
 
 
 def test_the_label_is_the_canonical_identifier_not_what_was_typed(corpus):
-    got = find.find("  gsm9000005 ")
-    assert got["label"] == "GSM9000005"
+    series = _a_real_series()
+    assert find.find(f"  {series.lower()} ")["label"] == series
 
 
 # --- Misses, and telling them apart ------------------------------------------
 
 def test_a_well_formed_accession_that_is_absent_says_so(corpus):
-    for query in ("GSM123456789", "GSE999999", "OSD-99999"):
+    for query in ("GSE999999", "OSD-99999"):
         got = find.find(query)
         assert got["points"] == [], query
         assert got["reason"] == "absent", query
@@ -167,14 +175,12 @@ def test_a_blank_series_id_never_becomes_a_findable_series(corpus):
 def test_every_returned_index_is_a_real_point(corpus):
     total = corpus["total"]
     n_archs4 = corpus["n_archs4"]
-    queries = ["GSM9000000", _a_real_series(),
-               str(data.osdr_metadata()["study"].iloc[0]),
-               str(data.osdr_metadata()["sample_key"].iloc[0])]
+    queries = [_a_real_series(), str(data.osdr_metadata()["study"].iloc[0])]
     for query in queries:
         got = find.find(query)
         assert got["points"], query
         assert all(0 <= p < total for p in got["points"]), query
-        if got["kind"] in ("gsm", "gse"):
+        if got["kind"] == "gse":
             assert all(p < n_archs4 for p in got["points"]), query
         else:
             assert all(p >= n_archs4 for p in got["points"]), query
@@ -190,12 +196,13 @@ def test_the_points_come_back_sorted(corpus):
 
 # --- Coverage: the optional metadata join ------------------------------------
 
-def test_without_the_geo_join_a_gsm_says_what_to_run(corpus, without_archs4_metadata):
+def test_without_the_geo_join_a_series_says_what_to_run(corpus,
+                                                        without_archs4_metadata):
     """`cache/archs4_metadata.parquet` is optional, and without it 940,455 of
     the 942,563 points cannot be addressed at all. Reporting that as "absent"
     would tell the user their accession does not exist when the truth is that
     this machine cannot look it up."""
-    got = find.find("GSM9000005")
+    got = find.find("GSE5000")
     assert got["points"] == []
     assert got["reason"] == "no_geo_metadata"
 
@@ -205,10 +212,10 @@ def test_without_the_geo_join_osdr_is_still_findable(corpus,
     """The OSDR half needs no join, so it must keep working - degrading the
     whole control because half of it is unavailable would be the failure the
     coverage system exists to prevent."""
-    osdr = data.osdr_metadata()
-    got = find.find(str(osdr["sample_key"].iloc[3]))
+    study = str(data.osdr_metadata()["study"].iloc[0])
+    got = find.find(study)
     assert got["reason"] == ""
-    assert got["points"] == [corpus["n_archs4"] + 3]
+    assert got["points"]
 
 
 def test_coverage_reports_which_corpora_are_searchable(corpus):
@@ -225,30 +232,20 @@ def test_coverage_drops_archs4_when_the_join_is_missing(corpus,
 def test_the_index_is_built_once_and_not_at_import(corpus):
     find.clear_caches()
     assert find._archs4_index.cache_info().currsize == 0
-    find.find("GSM9000005")
-    find.find("GSM9000006")
+    find.find("GSE5000")
+    find.find("GSE5001")
     assert find._archs4_index.cache_info().currsize == 1
     assert find._archs4_index.cache_info().hits >= 1
 
 
 def test_the_index_keys_are_narrow_enough_to_be_cheap(corpus):
-    """Measured on the real corpus: int32 keys and int32 rows are 15.0 MB,
-    against 96.8 MB for the pandas Index this replaced, on an app whose whole
-    working set is 80.8 MB."""
+    """Measured on the real corpus when this index also carried the per-sample
+    GSM keys: int32 throughout was 15.0 MB against 96.8 MB for the pandas Index
+    it replaced, on an app whose whole working set is 80.8 MB. Dropping the GSM
+    half with the sample grammar halves it again."""
     idx = find._archs4_index()
-    for arr in (idx.gsm_keys, idx.gsm_rows, idx.gse_keys, idx.gse_rows):
+    for arr in (idx.gse_keys, idx.gse_rows):
         assert arr.dtype == np.int32, arr.dtype
-
-
-def test_a_well_formed_sample_key_the_map_lacks_is_absent_not_a_bad_shape(corpus):
-    """788 of the 2,896 OSDR samples the retrieval catalog lists were never
-    embedded and have no position here. Answering one of them with "that is not
-    an identifier, try the Tissue color-by" would be wrong twice over."""
-    for query in ("OSD-141|Mmus_C57-6J_SPL_cells_Rep1_SP1",
-                  "Mmus_C57-6J_SPL_cells_Rep1_SP1"):
-        got = find.find(query)
-        assert got["points"] == [], query
-        assert got["reason"] == "absent", query
 
 
 # --- The mark on the plot, and its key row -----------------------------------
@@ -273,13 +270,13 @@ def _found_traces_in(fig):
 
 def test_a_found_set_is_drawn_and_badged(corpus):
     from manifold import render
-    found = find.find("GSM9000005")
+    found = find.find(str(data.osdr_metadata()["study"].iloc[0]))
     fig, _, badges = render.build_figure(
         "pca", "2d", "tissue", ["archs4", "osdr"], 1500, None, found=found)
     traces = _found_traces_in(fig)
     assert len(traces) == 1
-    assert len(traces[0].x) == 1
-    assert any("GSM9000005" in b for b in badges)
+    assert len(traces[0].x) == len(found["points"])
+    assert any(found["label"] in b for b in badges)
 
 
 def test_nothing_is_drawn_or_badged_without_a_find(corpus):
@@ -364,16 +361,16 @@ def test_several_marks_are_drawn_smaller_than_a_lone_one(corpus):
 
 
 def test_the_status_says_something_different_for_each_kind_of_miss(corpus):
-    """Answering "liver" and "GSM999999999" with one sentence tells the first
-    user their search is broken and the second nothing about whether this
-    machine could have looked it up."""
+    """Answering "liver" and "GSE999999" with one sentence tells the first user
+    their search is broken and the second nothing about whether this machine
+    could have looked it up."""
     from manifold import callbacks
 
     def text(query):
         return str(callbacks.find_status_children(find.find(query)))
 
     shape = text("liver")
-    absent = text("GSM123456789")
+    absent = text("GSE999999")
     assert "Color by" in shape and "not on this map" not in shape
     assert "not on this map" in absent and "Color by" not in absent
     assert shape != absent
@@ -387,7 +384,7 @@ def test_the_no_metadata_status_names_the_command_the_color_by_names(
     optional join and they must not send the user after two commands."""
     from manifold import callbacks, colorby
 
-    text = str(callbacks.find_status_children(find.find("GSM9000005")))
+    text = str(callbacks.find_status_children(find.find("GSE5000")))
     assert colorby.ARCHS4_META_HINT in text
 
 
@@ -449,8 +446,11 @@ def test_the_find_store_is_declared_in_the_view_not_only_as_output():
 
 # --- The shared record panel -------------------------------------------------
 
-def test_an_archs4_sample_is_described_with_its_geo_record(corpus):
-    record = find.describe(find.find("GSM9000005"))
+def test_a_one_sample_series_is_described_with_its_geo_record(corpus):
+    """A series of one resolves to one point, so the single-sample record is
+    still reachable from the study grammar. Built by hand because the fixture's
+    series all carry many samples."""
+    record = find.describe({"points": [5], "label": "GSE5000", "kind": "gse"})
     assert record["kind"] == "archs4"
     assert record["title"] == "GSM9000005"
     assert record["geo"] == "GSM9000005"
@@ -460,7 +460,7 @@ def test_an_archs4_sample_is_described_with_its_geo_record(corpus):
 
 def test_an_osdr_sample_is_described_with_its_retrieval_key(corpus):
     key = str(data.osdr_metadata()["sample_key"].iloc[7])
-    record = find.describe(find.find(key))
+    record = find.describe(find.osdr_sample(key))
     assert record["kind"] == "osdr"
     assert record["title"] == key.split("|", 1)[1]
     assert record["sample_key"] == key
@@ -497,7 +497,8 @@ def test_an_external_record_is_an_anchor_and_a_retrieval_is_a_dash_link(corpus):
     from dash import dcc, html
     from manifold import layout
 
-    external = layout.selected_panel_children(find.describe(find.find("GSM9000005")))
+    external = layout.selected_panel_children(find.describe(
+        {"points": [5], "label": "GSE5000", "kind": "gse"}))
     anchors = [c for c in external if isinstance(c, html.A)]
     assert len(anchors) == 1
     assert anchors[0].href.startswith(find.GEO_ACC_URL)
@@ -505,7 +506,7 @@ def test_an_external_record_is_an_anchor_and_a_retrieval_is_a_dash_link(corpus):
     assert not [c for c in external if isinstance(c, dcc.Link)]
 
     key = str(data.osdr_metadata()["sample_key"].iloc[0])
-    internal = layout.selected_panel_children(find.describe(find.find(key)))
+    internal = layout.selected_panel_children(find.describe(find.osdr_sample(key)))
     links = [c for c in internal if isinstance(c, dcc.Link)]
     assert len(links) == 1
     assert links[0].href.startswith("/?q=")
@@ -526,16 +527,16 @@ def _labels(query, **kw):
 def test_a_partial_accession_is_completed(corpus):
     """The index holds numbers, not strings, so a prefix is a union of decade
     ranges rather than a string compare - and it has to actually work."""
-    labels = _labels("GSM90000")
+    labels = _labels("GSE500")
     assert labels, "a real accession prefix offered nothing"
-    assert all(label.startswith("GSM90000") for label in labels), labels
-    assert len(labels) == len(set(labels)), "a sample was offered twice"
+    assert all(label.startswith("GSE500") for label in labels), labels
+    assert len(labels) == len(set(labels)), "a series was offered twice"
 
 
 def test_a_completed_prefix_offers_the_exact_match_first(corpus):
     """Typing a whole accession must put that accession at the top, not bury it
     under the longer numbers that happen to start with it."""
-    assert _labels("GSM9000005")[0] == "GSM9000005"
+    assert _labels("GSE5000")[0] == "GSE5000"
 
 
 def test_every_suggested_value_resolves_through_find(corpus):
@@ -543,7 +544,7 @@ def test_every_suggested_value_resolves_through_find(corpus):
     its `value` in the box, so a value `find()` cannot resolve would be a row
     that silently does nothing.
     """
-    for query in ("GSM90000", "GSE500", "OSD-1", "SAMPLE_00"):
+    for query in ("GSE500", "OSD-1"):
         items = find.suggest(query)["items"]
         assert items, f"{query} offered nothing to check"
         for item in items:
@@ -562,27 +563,23 @@ def test_a_series_suggestion_counts_its_samples(corpus):
     assert f"{expected:,}" in item["detail"]
 
 
-def test_an_osdr_sample_is_matched_anywhere_in_its_name(corpus):
-    """A substring rather than a prefix, and deliberately: a sample name is
-    itself an identifier, there are 2,108 of them rather than 940,455, and
-    nobody remembers which end of one they are sure of."""
-    key = str(data.osdr_metadata()["sample_key"].iloc[3])
-    name = key.split("|", 1)[1]
-    items = find.suggest(name[-6:])["items"]
-    assert key in [i["value"] for i in items]
-    chosen = next(i for i in items if i["value"] == key)
-    assert chosen["label"] == name, "the row shows the name, not the 39-char key"
-    assert chosen["value"] == key, "but commits the key, which is unambiguous"
-
-
-def test_a_study_prefix_offers_studies_before_their_samples(corpus):
-    """"OSD-100" is far more often the whole intent than a step towards one of
-    its twelve samples, and the samples are one keystroke away."""
+def test_a_study_prefix_offers_only_studies(corpus):
+    """The narrowing, seen from the dropdown: an OSD prefix used to offer that
+    study's own samples in whatever room was left, and a sample is no longer
+    something the box can commit to."""
     items = find.suggest("OSD-1")["items"]
-    kinds = [i["kind"] for i in items]
-    assert "osd" in kinds
-    assert kinds.index("osd") == 0
-    assert "osdr_sample" not in kinds[:kinds.count("osd")]
+    assert items
+    assert {i["kind"] for i in items} == {"osd"}
+
+
+def test_a_study_suggestion_counts_its_samples(corpus):
+    """Size is the one thing that distinguishes two adjacent studies, and it is
+    also what says whether framing this will show a neighbourhood or a dot."""
+    osdr = data.osdr_metadata()
+    study = str(osdr["study"].iloc[0])
+    expected = int((osdr["study"].astype(str) == study).sum())
+    item = next(i for i in find.suggest(study)["items"] if i["label"] == study)
+    assert f"{expected:,}" in item["detail"]
 
 
 def test_free_text_is_refused_here_exactly_as_it_is_in_find(corpus):
@@ -603,20 +600,15 @@ def test_a_miss_says_which_kind_of_miss_it_was(corpus):
     with the same constants."""
     assert find.suggest("")["reason"] == find.EMPTY
     assert find.suggest("   ")["reason"] == find.EMPTY
-    assert find.suggest("GSM99999999")["reason"] == find.ABSENT
+    assert find.suggest("GSE999999")["reason"] == find.ABSENT
     assert find.suggest("OSD-99999")["reason"] == find.ABSENT
     assert find.suggest("liver")["reason"] == find.SHAPE
 
 
-def test_one_letter_suggests_nothing(corpus):
-    """A single character matches most of the corpus and completes nothing."""
-    assert find.suggest("M")["items"] == []
-
-
 def test_the_limit_is_honoured_and_a_zero_limit_offers_nothing(corpus):
-    assert len(find.suggest("GSM9", limit=3)["items"]) == 3
-    assert find.suggest("GSM9", limit=0)["items"] == []
-    assert len(find.suggest("GSM9")["items"]) <= find.SUGGESTION_LIMIT
+    assert len(find.suggest("GSE5", limit=3)["items"]) == 3
+    assert find.suggest("GSE5", limit=0)["items"] == []
+    assert len(find.suggest("GSE5")["items"]) <= find.SUGGESTION_LIMIT
 
 
 def test_geo_suggestions_say_so_when_the_join_is_missing(corpus,
@@ -624,7 +616,6 @@ def test_geo_suggestions_say_so_when_the_join_is_missing(corpus,
     """Reporting a GEO accession as absent on a machine that cannot look one up
     would be invariant 5 by another route - and it is the reason `searchable()`
     reads the availability predicate rather than re-deriving a path."""
-    assert find.suggest("GSM90000")["reason"] == find.NO_GEO_METADATA
     assert find.suggest("GSE5000")["reason"] == find.NO_GEO_METADATA
     # OSDR needs only the label table, which the app cannot start without.
     assert find.suggest("OSD-1")["items"], "OSDR stopped being suggestible"
@@ -648,9 +639,9 @@ def test_a_suggestion_row_carries_its_own_identifier_in_its_id(corpus):
     the click and the callback reading it."""
     from manifold import layout
 
-    rows = layout.suggestion_children(find.suggest("GSM90000"))
+    rows = layout.suggestion_children(find.suggest("GSE500"))
     values = [r.id["value"] for r in rows]
-    assert values == [i["value"] for i in find.suggest("GSM90000")["items"]]
+    assert values == [i["value"] for i in find.suggest("GSE500")["items"]]
     assert all(r.id["type"] == "find-suggestion" for r in rows)
     assert all(getattr(r, "role", None) == "option" for r in rows)
 
@@ -661,7 +652,7 @@ def test_a_well_formed_miss_gets_a_row_and_free_text_gets_silence(corpus):
     control takes."""
     from manifold import layout
 
-    absent = layout.suggestion_children(find.suggest("GSM99999999"))
+    absent = layout.suggestion_children(find.suggest("GSE999999"))
     assert len(absent) == 1
     assert absent[0].className == "bm-suggest-empty"
     assert getattr(absent[0], "role", None) != "option", (

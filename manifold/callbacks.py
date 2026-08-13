@@ -294,9 +294,9 @@ def find_status_children(found: dict | None):
                 f"{n_archs4:,} GEO samples and the {n_osdr:,} OSDR samples "
                 "that were embedded."]
     # find.SHAPE
-    return ["Not an identifier. Type a GEO sample (GSM…), a series (GSE…), an "
-            "OSDR study (OSD-100), or an OSDR sample name. To find a tissue or "
-            "a condition instead, use ", html.B("Color by"), " above."]
+    return ["Not a study identifier. Type a GEO series (GSE143281) or an OSDR "
+            "study (OSD-100). To find a tissue or a condition instead, use ",
+            html.B("Color by"), " above."]
 
 
 def chosen_suggestion(clicks, values) -> dict | None:
@@ -648,11 +648,17 @@ def register(app):
         sample are the same question - what is this - so they share a panel
         rather than growing a second one beside it.
 
-        A click is turned into a find rather than handled separately: the
-        overlay's customdata already carries the sample key, and
-        `find.find(key)` resolves exactly that to exactly that point. So the
-        click path is a special case of the find path and there is one lookup,
-        one record builder and one panel, instead of two of each drifting apart.
+        A click and a find end in the same record builder: the overlay's
+        customdata already carries the sample key, and `find.osdr_sample(key)`
+        resolves exactly that to exactly that point, in the shape `find.find`
+        returns. So there is one record builder and one panel instead of two of
+        each drifting apart.
+
+        It is `osdr_sample` rather than `find` because the box takes studies
+        only. A diamond on screen is an unambiguous reference to one sample, so
+        clicking it is not the free-text problem the typed grammar refuses - but
+        it is not something the box offers either, and the two entry points
+        should not pretend otherwise.
 
         Only the OSDR overlay carries customdata - the ARCHS4 cloud has none,
         deliberately, because 940,455 rows of it cost about 600 KB of dead
@@ -667,7 +673,7 @@ def register(app):
             key = str(custom[0]) if custom else ""
             # An OSDR key is "<accession>|<sample name>". Anything else is not
             # one, and a click on the cloud is not a selection at all.
-            found = find.find(key) if "|" in key else None
+            found = find.osdr_sample(key) if "|" in key else None
             if found is None:
                 return no_update, no_update
 
