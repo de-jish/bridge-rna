@@ -857,7 +857,7 @@ def register(app):
         return list(vp)
 
     @app.callback(
-        Output("reset-view", "style"),
+        Output("view-group", "style"),
         Input("viewport-store", "data"),
         Input("dims", "value"),
     )

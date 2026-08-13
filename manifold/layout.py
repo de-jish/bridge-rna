@@ -430,6 +430,38 @@ def control_rail() -> html.Aside:
                 # to go and read a tooltip. The sentence is pinned in
                 # `tests/test_app.py::REMOVED_COPY`, hence described not quoted.
             ]),
+            # Every viewport action on one rail, in the order they are reached:
+            # frame a find, frame a retrieval, then undo whichever of them - or
+            # the reader's own scroll-zoom - narrowed the map.
+            #
+            # **Reset view used to sit on the plot**, on the argument that it
+            # qualifies the viewport and the viewport belongs to the plot. That
+            # argument was true and still split one feature across two surfaces:
+            # the button that framed the map was on the rail and the button that
+            # unframed it was most of a screen away on the canvas, so the two
+            # could not be read as a pair and the reader who framed something had
+            # to go looking for the way back. Undoing an action belongs beside
+            # the action.
+            #
+            # There is still exactly one of it, for the reason there always was:
+            # framing a find, framing a retrieval and a plain scroll-zoom all
+            # write the same `viewport-store` and are the same state by the time
+            # they arrive, so one control reverses all three. A button per frame
+            # button would be two writers for one piece of state and neither
+            # would answer a scroll-zoom.
+            #
+            # Declared here and hidden rather than created by a callback, for the
+            # reason the legend's parts are: Dash validates its callback graph
+            # against the initial layout, and an id that only ever exists as
+            # callback output fails silently in the browser rather than loudly at
+            # startup.
+            html.Div(id="view-group", className="bm-group",
+                     style={"display": "none"}, children=[
+                html.Div("View", className="bm-group-label"),
+                html.Button("Reset view", id="reset-view", n_clicks=0,
+                            className="bm-button",
+                            title="Return to the whole map"),
+            ]),
         ],
     )
 
@@ -776,12 +808,12 @@ def build_view() -> html.Div:
         html.Div(className="bm-body", children=[
             control_rail(),
             html.Main(className="bm-plot-wrap", **{"aria-label": "Embedding map"}, children=[
+                # The strip across the top of the canvas: what is drawn right
+                # now. Nothing else. "Reset view" used to share it and moved to
+                # the rail on 2026-08-13, next to the two buttons that frame -
+                # see the `view-group` comment in `control_rail` for why.
                 html.Div(className="bm-plot-badges", children=[
                     html.Div(id="plot-badges", className="bm-badges"),
-                    html.Button("Reset view", id="reset-view", n_clicks=0,
-                                className="bm-reset-view",
-                                title="Return to the whole map",
-                                style={"display": "none"}),
                 ]),
                 legend_panel(),
                 # dcc.Loading wraps its children in two nested divs of its own.

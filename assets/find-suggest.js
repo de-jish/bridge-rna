@@ -177,12 +177,22 @@
         /* Stop the event here, in the capture phase, so Dash's own Enter
          * handler never sees it: `n_submit` would commit the half-typed text
          * the reader is in the middle of replacing. With no row active it is
-         * deliberately left alone, and Enter means what it always did. */
+         * deliberately let through below, and Enter means what it always did. */
         e.preventDefault();
         e.stopPropagation();
         active.click();
-        close();
       }
+      /* Either way the list closes, and the "either way" is the point. Enter
+       * with no active row falls through to Dash's `n_submit`, which commits a
+       * real search - and used to leave the completions for that same query
+       * hanging open underneath. The list is inline and pushes the rest of the
+       * rail down, so the next mousedown anywhere below it collapsed 57 px of
+       * rail between press and release, the two landed on different elements,
+       * and no `click` event fired at all. That is what broke "Reset view" the
+       * day it moved onto the rail: it is the first control below the box that
+       * a reader reaches while the box still has focus. A committed search has
+       * no pending completion to offer, so there is nothing to keep open. */
+      close();
     } else if (e.key === "Escape") {
       /* Swallowed, so it cannot reach anything else on the page that treats
        * Escape as "close me" - and so a first Escape closes the list rather
@@ -206,12 +216,22 @@
       e.preventDefault();
       return;
     }
-    var g = group();
-    if (g && !g.contains(e.target)) { close(); }
   }
 
   function onClick(e) {
     var l = list();
+    var g = group();
+    if (g && !g.contains(e.target)) {
+      /* Dismissed by clicking elsewhere - and on `click`, not on `mousedown`.
+       * Closing the list retracts an inline block that the whole lower rail
+       * sits below, so doing it on mousedown moved the reader's target out
+       * from under the press: the mouseup landed on a different element and
+       * the browser dispatched no `click` at all. On click the reflow happens
+       * after the event has been delivered, so the control the reader aimed at
+       * still gets it. */
+      close();
+      return;
+    }
     if (l && l.contains(e.target)) {
       /* The row's own Dash callback still runs - nothing is stopped here. The
        * list is closed because the question has been answered; the server is

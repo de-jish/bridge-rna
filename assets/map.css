@@ -346,43 +346,18 @@
    canvas on every control change. */
 .bm-plot-wrap .dash-loading-callback, .bm-plot-wrap ._dash-loading-callback { background: transparent !important; }
 
-/* The strip across the top of the canvas. It holds two things now: the badges,
-   which report what is drawn right now, and the reset, which is the one action
-   that changes what is drawn. They share a wrapping flex row so the button
-   travels with the badges instead of being pinned to a coordinate the badges
-   can wrap into.
+/* The strip across the top of the canvas: what is drawn right now, and nothing
+   else. "Reset view" shared it until 2026-08-13 and now sits on the rail beside
+   the two buttons that frame.
 
-   `pointer-events: none` on the strip is what keeps the badges from eating
-   drags meant for the plot underneath; the button turns it back on for itself
-   alone. */
+   `pointer-events: none` is what keeps the badges from eating drags meant for
+   the plot underneath. */
 .bm-plot-badges {
   position: absolute; top: 12px; left: 14px; z-index: 6;
   display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
   pointer-events: none;
 }
 .bm-badges { display: contents; }
-/* Badge-shaped so it belongs to the strip, but outlined in the accent and
-   raised on hover so it does not read as one more thing to be read. */
-.bm-reset-view {
-  pointer-events: auto;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #dbe9ff;
-  background: rgba(14, 29, 52, 0.82);
-  border: 1px solid rgba(120, 170, 255, 0.75);
-  border-radius: 20px;
-  padding: 4px 12px;
-  cursor: pointer;
-  backdrop-filter: blur(3px);
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-.bm-reset-view:hover {
-  background: rgba(43, 127, 255, 0.28);
-  border-color: #7db0ff;
-  color: #fff;
-}
-.bm-reset-view:focus-visible { outline: 2px solid #7db0ff; outline-offset: 2px; }
 .bm-badge {
   background: rgba(14, 29, 52, 0.82);
   color: #cfe0f7;
