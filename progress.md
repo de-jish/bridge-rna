@@ -6,6 +6,31 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-13 (point-selection merged to main, pushed, and hosted locally)
+
+`point-selection` went to `main` as a fast-forward, nine commits, no conflicts and no merge commit, and `main` is pushed to `origin` at `14698a1`.
+The gate before the merge was the full unit suite: 401 passed in 29.08 s.
+
+The local host was already occupied.
+A stale `app.py` from the *system* Python 3.11, not the venv, held port 8050 and was serving pre-merge code, so it was stopped and replaced by `.venv/bin/python app.py`.
+Worth remembering as a failure mode: the port being busy looks like the app is up, and it is, but it is the wrong build, and nothing on screen says so.
+
+Hosting was then verified in a browser against the running server rather than by reading the diff, and the whole merged feature was exercised end to end.
+Fifteen checks pass: both routes paint their own view, the map draws its WebGL canvas and badges the real corpus (`ARCHS4 live: 940,455`, `OSDR: 2,108`), the find box completes `GSM4256` to ten well-formed rows, choosing one resolves to `GSM4256019 · 1 sample.`, `liver` still yields no completions, "Frame it" moves the viewport and "Reset view" returns it to `autorange`, header navigation returns to the retrieval view, and the console is clean.
+
+Two things about that verification are worth recording, because both cost a cycle and both will recur.
+
+**`curl` cannot check which view the router painted.**
+`serve_layout` keys off `flask.request.path`, and the path on the layout fetch is `/_dash-layout`, never `/` or `/map`, so both routes return the same 29,343-byte default layout to a command-line probe while the browser is served correctly.
+The HTML shell is identical for both routes by design too.
+A route check has to be a browser check.
+
+**Every failure in the first three smoke runs was an invented selector, not a defect.**
+`.bm-find-suggestion`, `.bm-find-status` and `#find-frame` do not exist; the real ones are `.bm-suggest-row`, `#find-status` and `#frame-find`.
+`page.fill` also does not drive this control, because the suggestions are built from real keystrokes, which is exactly why `tests/e2e_check.py` uses `page.type(..., delay=...)`.
+And Plotly writes its computed autorange back into `layout.xaxis.range`, so a populated range is not evidence of a moved viewport; `layout.xaxis.autorange` is the property that answers "did finding something move the map", and it is `True` before "Frame it" and `True` again after "Reset view".
+Read the selector out of the source before asserting on it, and prefer the property the existing suite asserts.
+
 ## 2026-08-12 (two color-bys, a completing find box, and one reset for every framing)
 
 Five changes, worked as a dependency graph rather than five patches, because three of them meet in the same place: the find box's control group, the `viewport-store` that framing writes, and the rail copy around both.
