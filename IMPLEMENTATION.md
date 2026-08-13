@@ -378,7 +378,7 @@ See section 7.4 for the full argument.
 Level of detail: on zoom (`relayout`), the new x/y bounds become a viewport and the server re-runs stratified sampling over the full 940k coordinates restricted to that window, so zooming reveals fine structure instead of enlarging sparse dots.
 A relayout that is not a zoom (a hover, a legend click, a drag-mode switch) returns a sentinel that leaves the current sample alone rather than triggering a resample.
 Config: `displaylogo` off, `scrollZoom` on, `dragmode="pan"`, and `uirevision` set so zoom survives a color-by change.
-That last one cuts both ways and is worth knowing before touching the viewport: `uirevision="keep"` preserves the reader's zoom unless the incoming figure *changes* the attribute, so releasing a framed view has to say `autorange` outright rather than omitting the range - see [`docs/design-notes.md`](docs/design-notes.md#reset-view).
+That last one cuts both ways and is worth knowing before touching the viewport: `uirevision="keep"` preserves the reader's zoom unless the incoming figure *changes* the attribute, so releasing a framed view has to say `autorange` outright rather than omitting the range - see [`docs/design-notes.md`](docs/design-notes.md#finding-a-study-on-the-map).
 Both selection tools are removed from the modebar (`select2d` and `lasso2d`), because no selection feature exists and a marquee that does nothing is a promise the app does not keep.
 The first version of this config removed `select2d` but not `lasso2d`, so the lasso button was in fact still on the modebar after the feature was gone.
 

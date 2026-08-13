@@ -101,14 +101,17 @@ And it separates the two corpora more than UMAP does, which makes it the worst o
 Vectors are L2-normalised before any reduction.
 Without that step the first principal component is really a magnitude axis and holds 57.8% of the variance, swamping the rest; normalised, it drops to 41.3% and the biology comes through.
 
-### Finding one sample among 942,563
+### Finding one study among 942,563 points
 
-Type an accession into **Find a sample** on the rail and the matching points are marked with a white X.
-A GEO sample (`GSM…`) marks one point, a GEO series (`GSE…`) marks all of its samples, an OSDR study (`OSD-###`) marks all of that study's, and an OSDR sample resolves by its name or its full key.
-Suggestions appear as you type - `OSD-13` offers the studies it could become, with how many samples each holds, and `Mmus_C57` offers the samples whose names contain it, with their study and tissue.
+Type a study identifier into **Find a study** on the rail and the matching points are marked with a white X.
+A GEO series (`GSE…`) marks all of its samples and an OSDR study (`OSD-###`) marks all of that study's.
+Suggestions appear as you type - `OSD-13` offers the studies it could become, with how many samples each holds.
 The list is bounded and scrolls; arrow keys walk it, Enter takes the highlighted row, Escape closes it.
-A button then offers to frame what it found; it is a button rather than something the search does for you, because a set can span the map, and because being zoomed into a region invites reading the points around your sample as its neighbours when a 2-D projection does not preserve who those are.
-Once the view is framed - by a search, by a retrieval, or by your own scroll - a **Reset view** chip appears on the plot and takes you back to the whole map without losing what you searched for.
+A button then offers to frame what it found; it is a button rather than something the search does for you, because a set can span the map, and because being zoomed into a region invites reading the points around a study as its neighbours when a 2-D projection does not preserve who those are.
+Once the view is framed - by a search, by a retrieval, or by your own scroll - a **Reset view** button appears on the rail beside them and takes you back to the whole map without losing what you searched for.
+
+Individual samples are still reachable by clicking an OSDR diamond on the map, which opens that sample's record.
+The box asks about studies: one glyph in a million is a dot, where a study's samples are a neighbourhood with a shape you can read.
 
 The box searches identifiers and not free text, and so do the suggestions.
 Typing "liver" offers nothing, tells you so, and points at the Tissue color-by, which is the control that actually answers it across both collections.
@@ -257,7 +260,7 @@ The test tooling is a separate install, because running Bridge RNA does not need
 ```
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 401 tests, about twenty-seven seconds
+.venv/bin/python -m pytest tests/ -q             # 399 tests, about twenty-seven seconds
 .venv/bin/python tests/e2e_check.py              # 129 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
 .venv/bin/python tests/e2e_cohort_check.py       # 164 checks of cohort retrieval
@@ -309,7 +312,7 @@ The second one is the demanding test, and its result is reported in the docs rat
 Beyond this file there are three kinds of document, and it is worth knowing which one answers your question.
 [`IMPLEMENTATION.md`](IMPLEMENTATION.md) is the map's design record and the longest one: the offline/online split, the three projections, the color-by system, and every candidate that was measured and cut.
 [`REFERENCE.md`](REFERENCE.md) is the numbers - model config read out of the checkpoint, embedding statistics, measured timings, interface signatures with line numbers - and it is the one to trust when two documents disagree.
-`docs/design-notes.md` is every design decision that needed more than a code comment, in one file: [cohort retrieval](docs/design-notes.md#cohort-retrieval) and the [pooling measurement](docs/design-notes.md#cohort-pooling) behind it, [live stability](docs/design-notes.md#live-stability), the [even split](docs/design-notes.md#stability-panel-even-split) of a comparison's two arms, the [map's key](docs/design-notes.md#map-key), [finding a sample](docs/design-notes.md#finding-a-sample-on-the-map), [file ingestion](docs/design-notes.md#file-ingestion), and the [README screenshots](docs/design-notes.md#readme-screenshots).
+`docs/design-notes.md` is every design decision that needed more than a code comment, in one file: [cohort retrieval](docs/design-notes.md#cohort-retrieval) and the [pooling measurement](docs/design-notes.md#cohort-pooling) behind it, [live stability](docs/design-notes.md#live-stability), the [even split](docs/design-notes.md#stability-panel-even-split) of a comparison's two arms, the [map's key](docs/design-notes.md#map-key), [finding a study](docs/design-notes.md#finding-a-study-on-the-map), [file ingestion](docs/design-notes.md#file-ingestion), and the [README screenshots](docs/design-notes.md#readme-screenshots).
 
 ## Licensing
 

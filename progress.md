@@ -6,6 +6,32 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-08-13 (the box asks about studies, and one control frames and unframes on the rail)
+
+Two simplifications asked for together, plus one real defect the second one exposed.
+
+**The find box takes studies only.** `GSE…` and `OSD-###` resolve; the two sample grammars - `GSM…`, and an OSDR sample by its full `<study>|<name>` key or its bare name - are gone. The question a reader brings to a 942,563-point map is "where did this experiment land", not "where is replicate 3": one glyph in a million is a dot, and its siblings are a neighbourhood with a shape. The two removed grammars also carried most of `find.py`'s weight for the least of its value - a second suggestion ranker with its own substring rule and its own ranking buckets, the GSM half of the accession index, and a 39-character identifier nobody types correctly twice. `find.py` is 565 lines to 437.
+
+Clicking an OSDR diamond still selects that one sample, now through `find.osdr_sample` rather than `find.find`. A mark on screen is an unambiguous reference to one point; the box is not, and the two entry points no longer pretend otherwise. `find.describe` is untouched and a series of one still renders that sample's full GEO record.
+
+The label is **Find a study**, the placeholder is `GSE143281 or OSD-100` (144 px in a 215 px field, measured in the browser), and the `shape` sentence names the two grammars it now takes.
+
+**One bug found by the narrowing.** `_gse_suggestions` appended a row before checking the limit, so `limit=0` returned one suggestion. It was unreachable while the GSM path handled the zero case with a slice; it stopped being unreachable the moment that path went.
+
+**Reset view moved from the plot to the rail.** It sat on the badge strip on the argument that a control's qualifier belongs with the thing it qualifies, and the viewport belongs to the plot. That argument is true and it still split one feature across two surfaces: the button that framed the map was on the rail and the button that unframed it was most of a screen away, so the pair could not be read as a pair. It is now a `View` group at the foot of the rail, shown only while the map is framed. There is still exactly one of it - framing a find, framing a retrieval and a plain scroll-zoom are the same state by the time they reach `viewport-store`.
+
+**And that move exposed a real defect in the combobox, which is the interesting part.** Enter with no active row falls through to Dash's `n_submit` and commits a search - and used to leave the completions for that same query hanging open underneath. The suggestion list is inline and the whole lower rail sits below it, so the next mousedown outside the find group closed it and retracted **57 px** between press and release. The two landed on different elements and the browser dispatched no `click` at all. Measured in the browser: mousedown at y=897.75, mouseup at y=840.25, zero click events on the button, while `element.click()` from the console worked perfectly. "Reset view" is the first control below the box that a reader reaches while the box still has focus, so moving it there is what made a long-standing layout-shift bug fatal instead of merely annoying.
+
+Two fixes, both structural. Enter now closes the list either way - a committed search has no pending completion to offer. And the outside-dismiss moved from `mousedown` to `click`, so the reflow happens after the event has been delivered and the control the reader aimed at still gets it.
+
+**Docs.** Three design-notes sections - "Finding a sample on the map", "Completing an identifier", "One reset for every framing" - became one, `#finding-a-study-on-the-map`, with the sample-grammar material cut rather than reworded and the surviving measurements kept. The contents table lost two rows; `CLAUDE.md`, `README.md` and `IMPLEMENTATION.md` follow. design-notes.md is 1789 lines to 1715.
+
+**Tests.** 399 pytest (from 401) and 363 browser checks, all green: `e2e_check.py` 129, `e2e_upload_check.py` 70, `e2e_cohort_check.py` 164. `test_find.py` lost the four-grammar tests and gained `test_the_box_takes_studies_and_not_samples`, `test_a_clicked_diamond_still_selects_its_own_sample` and `test_a_study_prefix_offers_only_studies`. The e2e find section now asserts a series marks its samples *and* that a GSM is refused as a shape.
+
+The upload suite failed once on "no console errors (2 seen)" and passed clean on a rerun; treated as a flake, not investigated further.
+
+---
+
 ## 2026-08-13 (point-selection merged to main, pushed, and hosted locally)
 
 `point-selection` went to `main` as a fast-forward, nine commits, no conflicts and no merge commit, and `main` is pushed to `origin` at `14698a1`.
@@ -43,7 +69,7 @@ Five changes, worked as a dependency graph rather than five patches, because thr
 
 *Verified in the browser:* two options offered, none of the nine present, and both survivors drawing 942,563 glyphs with a correct non-stale legend across UMAP x t-SNE x PCA, cycling projection and coloring repeatedly. Nothing can restore a removed mode - there is no persistence, no color-by in the URL, and `colorby.get()` already falls back for an unknown key.
 
-**The find box completes an identifier as it is typed.** A bounded 196 px scrollable listbox with real combobox semantics: `role="combobox"` / `aria-autocomplete` / `aria-controls` / `aria-expanded` / `aria-activedescendant` over `role="option"` rows, driven by mouse, touch and keyboard (Up/Down with wrap, Enter, Escape, scroll-active-into-view, click-outside). Design: `docs/design-notes.md#find-autocomplete`.
+**The find box completes an identifier as it is typed.** A bounded 196 px scrollable listbox with real combobox semantics: `role="combobox"` / `aria-autocomplete` / `aria-controls` / `aria-expanded` / `aria-activedescendant` over `role="option"` rows, driven by mouse, touch and keyboard (Up/Down with wrap, Enter, Escape, scroll-active-into-view, click-outside). Design: `docs/design-notes.md#finding-a-study-on-the-map`.
 
 *The rule that shaped it:* every suggestion is a prefix of one of the four grammars `find()` already resolves, so this could not become the free-text search the module deliberately refused. "liver" produces no list and still points at the Tissue color-by. `find.suggest()` opens no embedding and imports no Dash; 20 unit tests against the fixture corpus, including the contract that **every suggested value resolves through `find()`**.
 
@@ -68,7 +94,7 @@ Five changes, worked as a dependency graph rather than five patches, because thr
 **The map draws 942,563 glyphs and had no way to ask about a specific one.**
 `manifold/find.py` resolves an identifier to the points it names - a GEO sample, a GEO series, an OSDR study, or an OSDR sample by full key or bare name - and the matches are marked with a white X, with a button offering to frame them.
 It opens no embedding, builds no figure and imports nothing from Dash, so all 35 of its unit tests run against the fixture corpus.
-Design, every measurement and the rejected alternatives: `docs/design-notes.md#finding-a-sample-on-the-map`.
+Design, every measurement and the rejected alternatives: `docs/design-notes.md#finding-a-study-on-the-map`.
 
 **The plan went through a design review before any of it was built, and the review changed four things.**
 Each of the four was then verified against the real corpus rather than taken on the reviewer's word.
