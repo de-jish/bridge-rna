@@ -50,6 +50,7 @@ from .config import (
     UPLOAD_EMBED_SCRIPT_PATH,
 )
 from .geo import _enrich_hits_from_ncbi_eutils
+from .neighborhoods import NEIGHBORHOOD_DEPTH
 from .preflight import preflight_retrieval_requirements
 from .util import (
     RetrievalError,
@@ -761,15 +762,37 @@ def run_uploaded_retrieval(
     same schema - gse / title / tissue / species and a map position - as a
     precomputed OSDR sample's.
     """
+    hits, _ = run_uploaded_retrieval_with_neighborhood(
+        counts_path,
+        sample_column,
+        topk,
+        neighborhood_depth=topk,
+        entrez_email=entrez_email,
+        enable_biopython_metadata=enable_biopython_metadata,
+    )
+    return hits
+
+
+def run_uploaded_retrieval_with_neighborhood(
+    counts_path: str | Path,
+    sample_column: str | None,
+    topk: int,
+    *,
+    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
+    entrez_email: str | None = None,
+    enable_biopython_metadata: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return requested upload hits and their evidence neighborhood in one scan."""
     q_vec = embed_uploaded_counts(counts_path, sample_column)
     index_vecs, _, _ = _load_archs4_index()
-    idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk)
-    hits = _annotate_from_cache(idx, score)
-    hits["archs4_index"] = idx.astype(int)
-    hits = hits.sort_values("score", ascending=False).reset_index(drop=True)
+    scan_k = max(int(topk), int(neighborhood_depth))
+    idx, score = _topk_cosine_from_memmap(index_vecs, q_vec, scan_k)
+    ranked = _annotate_from_cache(idx, score)
+    ranked["archs4_index"] = idx.astype(int)
+    hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
     if enable_biopython_metadata and _safe_str(entrez_email):
         hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
-    return hits
+    return hits, neighborhood
 
 
 # --- The fifth query-vector source: a whole experimental group ---------------
@@ -886,6 +909,52 @@ def search_hits(
         ),
         "demo",
     )
+
+
+def split_ranked_hits(
+    ranked: pd.DataFrame,
+    requested_k: int,
+    neighborhood_depth: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split one ranked scan into the requested prefix and evidence prefix."""
+    ordered = ranked.sort_values("score", ascending=False).reset_index(drop=True)
+    requested = ordered.head(max(1, int(requested_k))).copy().reset_index(drop=True)
+    neighborhood = (
+        ordered.head(max(1, int(neighborhood_depth))).copy().reset_index(drop=True)
+    )
+    return requested, neighborhood
+
+
+def search_hits_with_neighborhood(
+    samples_df: pd.DataFrame,
+    sample_id: str,
+    topk: int,
+    *,
+    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
+    entrez_email: str | None = None,
+    enable_biopython_metadata: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame | None, str]:
+    """Retrieve requested hits plus a locatable evidence prefix when available."""
+    row = samples_df.loc[samples_df["sample_id"] == sample_id]
+    if row.empty:
+        raise ValueError(f"Unknown sample_id: {sample_id}")
+
+    scan_k = max(int(topk), int(neighborhood_depth))
+    if cached_query_vector(sample_id) is not None:
+        ranked = run_cached_query_retrieval(sample_id, scan_k)
+        hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
+        if enable_biopython_metadata and _safe_str(entrez_email):
+            hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
+        return hits, neighborhood, "cached"
+
+    hits, mode = search_hits(
+        samples_df,
+        sample_id,
+        topk,
+        entrez_email,
+        enable_biopython_metadata,
+    )
+    return hits, None, mode
 
 
 

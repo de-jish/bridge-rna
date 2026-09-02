@@ -97,6 +97,33 @@ def test_uploaded_path_returns_the_true_topk_with_full_annotation(
     assert hits["gsm"].str.startswith("GSM").all()
 
 
+def test_uploaded_search_keeps_top_250_in_the_same_scan(
+    monkeypatch, corpus, _point_at_fixture
+):
+    key = str(corpus["osdr_metadata"]["sample_key"].iloc[2])
+    qvec = retrieval.cached_query_vector(key).astype(np.float32)
+    monkeypatch.setattr(retrieval, "embed_uploaded_counts", lambda *a, **k: qvec)
+
+    calls = []
+    real = retrieval._topk_cosine_from_memmap
+
+    def counted(index_vecs, q_vec, k):
+        calls.append(k)
+        return real(index_vecs, q_vec, k)
+
+    monkeypatch.setattr(retrieval, "_topk_cosine_from_memmap", counted)
+    hits, neighborhood = retrieval.run_uploaded_retrieval_with_neighborhood(
+        counts_path="ignored.csv", sample_column="s", topk=5,
+        neighborhood_depth=250, enable_biopython_metadata=False,
+    )
+
+    assert calls == [250]
+    assert len(hits) == 5
+    assert len(neighborhood) == 250
+    assert hits["archs4_index"].tolist() == neighborhood.head(5)["archs4_index"].tolist()
+    assert hits["score"].tolist() == neighborhood.head(5)["score"].tolist()
+
+
 def test_uploaded_retrieval_errors_cleanly_on_a_missing_file(monkeypatch):
     """A missing counts file surfaces as a clean RetrievalError, not a traceback."""
     fake = {k: REPO / "nope"

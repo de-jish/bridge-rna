@@ -157,6 +157,57 @@ def test_search_hits_rejects_an_unknown_sample(corpus):
         retrieval.search_hits(_samples_frame(corpus), "nope", topk=3)
 
 
+def test_sample_search_keeps_top_250_in_the_same_scan(monkeypatch, corpus):
+    calls = []
+    real = retrieval._topk_cosine_from_memmap
+
+    def counted(index_vecs, q_vec, k):
+        calls.append(k)
+        return real(index_vecs, q_vec, k)
+
+    monkeypatch.setattr(retrieval, "_topk_cosine_from_memmap", counted)
+    samples = _samples_frame(corpus)
+    hits, neighborhood, mode = retrieval.search_hits_with_neighborhood(
+        samples, str(samples["sample_id"].iloc[0]), topk=5,
+        neighborhood_depth=250, enable_biopython_metadata=False)
+
+    assert mode == "cached"
+    assert calls == [250]
+    assert len(hits) == 5
+    assert len(neighborhood) == 250
+    assert hits["archs4_index"].tolist() == neighborhood.head(5)["archs4_index"].tolist()
+    assert hits["score"].tolist() == neighborhood.head(5)["score"].tolist()
+
+
+def test_existing_search_interface_still_scans_only_requested_depth(monkeypatch,
+                                                                     corpus):
+    calls = []
+    real = retrieval._topk_cosine_from_memmap
+    monkeypatch.setattr(
+        retrieval, "_topk_cosine_from_memmap",
+        lambda index_vecs, q_vec, k: (calls.append(k) or real(index_vecs, q_vec, k)))
+    samples = _samples_frame(corpus)
+    hits, mode = retrieval.search_hits(
+        samples, str(samples["sample_id"].iloc[0]), topk=4,
+        enable_biopython_metadata=False)
+    assert mode == "cached" and len(hits) == 4
+    assert calls == [4]
+
+
+def test_only_requested_hits_are_sent_for_network_enrichment(monkeypatch, corpus):
+    seen = []
+    monkeypatch.setattr(
+        retrieval, "_enrich_hits_from_ncbi_eutils",
+        lambda frame, _email: (seen.append(len(frame)) or frame))
+    samples = _samples_frame(corpus)
+    hits, neighborhood, _ = retrieval.search_hits_with_neighborhood(
+        samples, str(samples["sample_id"].iloc[0]), topk=5,
+        neighborhood_depth=250, entrez_email="test@example.org",
+        enable_biopython_metadata=True)
+    assert seen == [5]
+    assert len(hits) == 5 and len(neighborhood) == 250
+
+
 # --- The guards -------------------------------------------------------------
 
 def test_a_positional_length_mismatch_refuses_the_cached_path(monkeypatch, corpus,
