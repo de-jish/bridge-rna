@@ -19,6 +19,7 @@ __pycache__/
 .serena/
 .vscode/
 .idea/
+.worktrees/
 
 # Operating-system metadata
 .DS_Store
