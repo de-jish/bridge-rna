@@ -35,14 +35,17 @@ def _text(value: Any) -> str:
 def build_payload(frame: pd.DataFrame | None, *, label: str = "",
                   depth_requested: int = NEIGHBORHOOD_DEPTH) -> dict:
     """Serialize ranked retrieval rows into a small JSON-safe payload."""
+    if depth_requested != NEIGHBORHOOD_DEPTH:
+        raise ValueError(f"Neighborhood depth is fixed at {NEIGHBORHOOD_DEPTH}.")
     rows = []
     source = frame if frame is not None else pd.DataFrame()
-    for rank, (_, raw) in enumerate(source.reset_index(drop=True).iterrows(), 1):
+    source = source.iloc[:NEIGHBORHOOD_DEPTH].reset_index(drop=True)
+    for rank, (_, raw) in enumerate(source.iterrows(), 1):
         row = {field: _text(raw.get(field)) for field in ROW_TEXT_FIELDS}
         score = pd.to_numeric(raw.get("score"), errors="coerce")
         row.update({
             "rank": rank,
-            "score": None if pd.isna(score) else float(score),
+            "score": None if pd.isna(score) or not np.isfinite(score) else float(score),
             "archs4_index": _index(raw.get("archs4_index")),
         })
         rows.append(row)

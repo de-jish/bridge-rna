@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import pandas as pd
+import pytest
 
 from bridge_rna import neighborhoods as N
 
@@ -44,6 +45,27 @@ def test_payload_treats_pandas_nullable_text_as_missing_metadata():
 
     assert payload["hits"][0]["gsm"] == ""
     assert N.summarize(payload)["tissue"] == {"covered": 0, "items": []}
+
+
+def test_payload_caps_hits_at_the_fixed_evidence_neighborhood_depth():
+    frame = pd.DataFrame({"gsm": [f"GSM{i}" for i in range(251)]})
+
+    payload = N.build_payload(frame)
+
+    assert payload["depth_requested"] == N.NEIGHBORHOOD_DEPTH
+    assert payload["depth_returned"] == N.NEIGHBORHOOD_DEPTH
+    assert payload["hits"][-1]["gsm"] == "GSM249"
+    assert payload["hits"][-1]["rank"] == N.NEIGHBORHOOD_DEPTH
+    with pytest.raises(ValueError, match="fixed at 250"):
+        N.build_payload(frame, depth_requested=10)
+
+
+def test_payload_replaces_non_finite_scores_with_none():
+    payload = N.build_payload(pd.DataFrame({
+        "score": [float("inf"), float("-inf"), float("nan"), 0.5],
+    }))
+
+    assert [row["score"] for row in payload["hits"]] == [None, None, None, 0.5]
 
 
 def test_summary_uses_metadata_coverage_as_the_denominator():
