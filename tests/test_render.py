@@ -78,8 +78,13 @@ def test_evidence_neighborhood_is_one_uniform_open_trace_with_optional_focus(
         trace for trace in render._retrieval_traces(coords, is_3d, _COMPARISON)
         if trace.name == "retrieved hit"
     ]
-    assert focus.marker.size > max(trace.marker.size for trace in hit_rings), (
-        "the focus ring must sit outside every requested-hit ring")
+    required_diameter = max(
+        trace.marker.size * (np.sqrt(2) if "square" in trace.marker.symbol else 1)
+        for trace in hit_rings
+    )
+    assert focus.marker.size > required_diameter, (
+        "the focus circle must enclose every requested-hit ring, including "
+        "the comparison square's diagonal")
 
 
 def test_evidence_neighborhood_omits_stale_indices_without_changing_counts():
