@@ -200,11 +200,14 @@ RETRIEVAL_MAX_NUMERALS = 25
 # not in a visual ramp: the projection does not preserve the cosine distances
 # that produced the ordering. A selected study or sample receives a larger
 # amber outline around the same point without replacing any requested-hit ring.
+# 32 px is the smallest clear step above the 27 px comparison-B square: the
+# resulting 2.5 px inset keeps both strokes legible, and both halve together in
+# 3-D so the focus remains outside there too.
 NEIGHBORHOOD_COLOR = "#61ddd3"
 NEIGHBORHOOD_SIZE = 7.0
 NEIGHBORHOOD_OPACITY = 0.78
 NEIGHBORHOOD_FOCUS_COLOR = "#d9791b"
-NEIGHBORHOOD_FOCUS_SIZE = 15.0
+NEIGHBORHOOD_FOCUS_SIZE = 32.0
 NEIGHBORHOOD_FOCUS_LINE = 2.0
 
 

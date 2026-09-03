@@ -1513,8 +1513,39 @@ def test_drawn_evidence_neighborhood_adds_its_open_dot_to_the_key(corpus):
     assert theme.NEIGHBORHOOD_COLOR in str(neighborhood_glyph.style)
 
     without_marks = layout.retrieval_key_children(
-        retrieval, ("a",), "2d", neighborhood={**neighborhood, "points": []})
+        retrieval, ("a",), "2d",
+        neighborhood={**neighborhood, "points": [], "locatable": 0})
     assert "neighborhood" not in _key_shapes(without_marks)
+
+
+def test_evidence_key_counts_only_indices_the_current_map_can_draw(corpus):
+    payload = _neighborhood_payload()
+    payload["hits"][1]["archs4_index"] = corpus["n_archs4"] + 10
+    neighborhood = callbacks._neighborhood_overlay(
+        {"neighborhood": payload}, "a", None)
+
+    children = layout.retrieval_key_children(
+        None, ("a",), "2d", neighborhood=neighborhood)
+    row = next(
+        c for child in children for c in _walk(child)
+        if getattr(c, "className", "") == "bm-key-row")
+
+    assert neighborhood["locatable"] == 1
+    assert _text(row).strip() == "512-D evidence neighbor 1"
+
+
+def test_all_stale_evidence_indices_draw_no_key(corpus):
+    payload = _neighborhood_payload()
+    payload["hits"][0]["archs4_index"] = corpus["n_archs4"] + 10
+    payload["hits"][1]["archs4_index"] = corpus["n_archs4"] + 11
+    neighborhood = callbacks._neighborhood_overlay(
+        {"neighborhood": payload}, "a", None)
+
+    children = layout.retrieval_key_children(
+        None, ("a",), "2d", neighborhood=neighborhood)
+
+    assert neighborhood["locatable"] == 0
+    assert children == []
 
 
 def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):

@@ -772,10 +772,10 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
         if len(evidence.x):
             fig.add_trace(evidence)
         returned = int(neighborhood.get("returned") or 0)
-        locatable = int(neighborhood.get("locatable") or 0)
-        if locatable != returned:
+        drawn_evidence = len(evidence.x)
+        if drawn_evidence != returned:
             badges.append(
-                f"Evidence neighborhood: <b>{locatable:,}</b> of "
+                f"Evidence neighborhood: <b>{drawn_evidence:,}</b> of "
                 f"{returned:,} locatable")
         else:
             badges.append(f"Evidence neighborhood: <b>{returned:,}</b>")

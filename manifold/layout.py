@@ -557,10 +557,10 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     two rows and no headings, because with one query on screen there is nothing
     for a name or a group to distinguish it from.
     """
+    n_evidence = int((neighborhood or {}).get("locatable") or 0)
     evidence_row = (_key_row(
-        "neighborhood", "512-D evidence neighbor",
-        len(neighborhood.get("points") or []), theme.NEIGHBORHOOD_COLOR)
-                    if neighborhood and neighborhood.get("points") else None)
+        "neighborhood", "512-D evidence neighbor", n_evidence,
+        theme.NEIGHBORHOOD_COLOR) if n_evidence else None)
     if not overlay or not overlay.get("cohorts"):
         rows = [evidence_row] if evidence_row is not None else []
         return ([html.Div(className="bm-key bm-key--retrieval", children=rows)]

@@ -74,6 +74,12 @@ def test_evidence_neighborhood_is_one_uniform_open_trace_with_optional_focus(
     assert focus.name == "focused evidence neighbor"
     assert len(focus.x) == 1
     assert focus.customdata is None, "only the capped evidence trace carries metadata"
+    hit_rings = [
+        trace for trace in render._retrieval_traces(coords, is_3d, _COMPARISON)
+        if trace.name == "retrieved hit"
+    ]
+    assert focus.marker.size > max(trace.marker.size for trace in hit_rings), (
+        "the focus ring must sit outside every requested-hit ring")
 
 
 def test_evidence_neighborhood_omits_stale_indices_without_changing_counts():
@@ -103,9 +109,9 @@ def test_evidence_sits_behind_requested_hits_and_focus_sits_above_them(corpus):
 
     neighborhood = {
         **_NEIGHBORHOOD,
-        "points": [1, 2, 999999],
-        "rows": _NEIGHBORHOOD["rows"],
-        "focus_points": [2],
+        "points": [1, 999999],
+        "rows": _NEIGHBORHOOD["rows"][:2],
+        "focus_points": [1],
         "returned": 3,
         "locatable": 2,
     }
@@ -120,7 +126,7 @@ def test_evidence_sits_behind_requested_hits_and_focus_sits_above_them(corpus):
     assert hit_positions
     assert evidence_at < min(hit_positions)
     assert focus_at > max(hit_positions)
-    assert "Evidence neighborhood: <b>2</b> of 3 locatable" in badges
+    assert "Evidence neighborhood: <b>1</b> of 3 locatable" in badges
 
 
 @pytest.mark.parametrize("dims,is_3d", [("2d", False), ("3d", True)])

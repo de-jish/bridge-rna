@@ -168,6 +168,7 @@ def _neighborhood_overlay(hits_payload: dict | None, arm: str,
     selected = focus or {}
     focus_field = {"study": "gse", "sample": "gsm"}.get(selected.get("kind"))
     focus_value = str(selected.get("value") or "")
+    n_archs4, _n_osdr, _total = data.counts()
     points: list[int] = []
     rows: list[dict] = []
     focus_points: list[int] = []
@@ -177,7 +178,8 @@ def _neighborhood_overlay(hits_payload: dict | None, arm: str,
         point = row.get("archs4_index")
         # JSON has one integer number type for these indices. Numeric strings,
         # floats, and booleans are malformed rather than coordinates to coerce.
-        if not isinstance(point, int) or isinstance(point, bool):
+        if (not isinstance(point, int) or isinstance(point, bool)
+                or not 0 <= point < n_archs4):
             continue
         points.append(point)
         rows.append(row)
