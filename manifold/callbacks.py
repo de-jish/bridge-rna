@@ -157,14 +157,26 @@ def _neighborhood_payload_for_arm(hits_payload: dict | None,
 def next_neighborhood_open_state(trigger: str | None, previous: dict | None,
                                  has_retrieval: bool) -> dict:
     """Apply one open/close event without giving the store another writer."""
-    old = previous or {"open": False, "opener": "explore-neighborhood"}
+    old = previous if isinstance(previous, dict) else {}
+    opened = bool(old.get("open"))
+    opener = str(old.get("opener") or "explore-neighborhood")
+    if opener not in ("frame-retrieval", "explore-neighborhood"):
+        opener = "explore-neighborhood"
     if trigger == "hits-store":
-        return {"open": False, "opener": old["opener"]}
+        return {"open": False, "opener": opener, "focus_target": None}
     if trigger == "neighborhood-close":
-        return {"open": False, "opener": old["opener"]}
+        return {
+            "open": False,
+            "opener": opener,
+            "focus_target": opener if opened else None,
+        }
     if trigger in ("frame-retrieval", "explore-neighborhood") and has_retrieval:
-        return {"open": True, "opener": trigger}
-    return old
+        return {
+            "open": True,
+            "opener": trigger,
+            "focus_target": "neighborhood-heading",
+        }
+    return {"open": opened, "opener": opener, "focus_target": None}
 
 
 def _neighborhood_arm_label(hits_payload: dict | None, arm: str) -> str:
@@ -219,6 +231,16 @@ def next_neighborhood_focus(trigger, value):
     return {"kind": "sample", "value": str(custom[2])}
 
 
+def next_neighborhood_interaction(trigger, value):
+    """Return the single-owner focus/tab/arm/search transition."""
+    focus = next_neighborhood_focus(trigger, value)
+    if trigger == "hits-store":
+        return focus, "overview", ROLE_A, ""
+    if trigger == "manifold-graph" and focus is not no_update:
+        return focus, "samples", no_update, no_update
+    return focus, no_update, no_update, no_update
+
+
 def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
                               tab: str, search: str | None,
                               focus: dict | None) -> dict:
@@ -228,7 +250,12 @@ def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
     available = bool(payload.get("available"))
     summary = neighborhoods.summarize(payload)
     groups = neighborhoods.study_groups(payload)
+    all_rows = neighborhoods.sample_rows(payload)
     rows = neighborhoods.sample_rows(payload, search or "")
+    selected_gsm = (str(focus.get("value") or "")
+                    if (focus or {}).get("kind") == "sample" else "")
+    detail_row = next((row for row in all_rows
+                       if str(row.get("gsm") or "") == selected_gsm), None)
     summary["leading_studies"] = groups[:3]
     depth = int(summary.get("depth") or 0)
     study_count = int(summary.get("study_count") or 0)
@@ -241,7 +268,8 @@ def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
         builders = {
             "overview": lambda: layout.neighborhood_overview_children(summary),
             "studies": lambda: layout.neighborhood_studies_children(groups, focus),
-            "samples": lambda: layout.neighborhood_samples_children(rows, focus),
+            "samples": lambda: layout.neighborhood_samples_children(
+                rows, focus, detail_row=detail_row),
         }
         body = builders.get(tab, builders["overview"])()
         meta = (f"{depth:,} nearest sample{'s' if depth != 1 else ''} · "
@@ -294,8 +322,11 @@ def _neighborhood_overlay(hits_payload: dict | None, arm: str,
             continue
         points.append(point)
         rows.append(row)
+        row_focus_value = str(row.get(focus_field) or "")
+        if focus_field == "gse" and not row_focus_value:
+            row_focus_value = layout.NO_GSE_FOCUS_VALUE
         if (focus_field and focus_value
-                and str(row.get(focus_field) or "") == focus_value):
+                and row_focus_value == focus_value):
             focus_points.append(point)
 
     returned = payload.get("depth_returned")
@@ -943,9 +974,10 @@ def register(app):
         """
         function(state) {
             const opened = !!(state && state.open);
-            const targetId = opened
-                ? "neighborhood-heading"
-                : ((state && state.opener) || "explore-neighborhood");
+            const targetId = state && state.focus_target;
+            if (!targetId) {
+                return window.dash_clientside.no_update;
+            }
             let attempts = 0;
             const focusWhenReady = function() {
                 const target = document.getElementById(targetId);
@@ -975,16 +1007,6 @@ def register(app):
     )
 
     @app.callback(
-        Output("neighborhood-tab", "value"),
-        Output("neighborhood-arm", "value"),
-        Output("neighborhood-search", "value"),
-        Input("hits-store", "data"),
-        prevent_initial_call=True,
-    )
-    def reset_neighborhood_controls(_hits_payload):
-        return "overview", ROLE_A, ""
-
-    @app.callback(
         Output("neighborhood-heading", "children"),
         Output("neighborhood-meta", "children"),
         Output("neighborhood-arm", "options"),
@@ -1007,22 +1029,26 @@ def register(app):
 
     @app.callback(
         Output("neighborhood-focus-store", "data"),
+        Output("neighborhood-tab", "value"),
+        Output("neighborhood-arm", "value"),
+        Output("neighborhood-search", "value"),
         Input({"type": "neighborhood-study", "value": ALL}, "n_clicks"),
         Input({"type": "neighborhood-sample", "value": ALL}, "n_clicks"),
         Input("manifold-graph", "clickData"),
         Input("hits-store", "data"),
         prevent_initial_call=True,
     )
-    def focus_neighborhood(_study_clicks, _sample_clicks, click_data,
-                           hits_payload):
+    def select_neighborhood(_study_clicks, _sample_clicks, click_data,
+                            hits_payload):
         trigger = ctx.triggered_id
         if trigger == "hits-store":
-            return next_neighborhood_focus(trigger, hits_payload)
-        if trigger == "manifold-graph":
-            return next_neighborhood_focus(trigger, click_data)
-        changed = next((item.get("value") for item in (ctx.triggered or [])
-                        if item.get("value") is not None), None)
-        return next_neighborhood_focus(trigger, changed)
+            changed = hits_payload
+        elif trigger == "manifold-graph":
+            changed = click_data
+        else:
+            changed = next((item.get("value") for item in (ctx.triggered or [])
+                            if item.get("value") is not None), None)
+        return next_neighborhood_interaction(trigger, changed)
 
     @app.callback(
         Output("retrieval-summary", "children"),

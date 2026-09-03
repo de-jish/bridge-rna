@@ -818,6 +818,13 @@ def _neighborhood_empty(message: str) -> list:
     return [html.Div(message, className="bm-neighborhood-empty", role="status")]
 
 
+# A pattern-matching id cannot use the empty string as an actionable identity:
+# the focus callback correctly treats an empty value as no selection. Keep the
+# display copy human-readable while giving the one unassigned-study group a
+# stable identity shared with the map overlay.
+NO_GSE_FOCUS_VALUE = "__neighborhood_no_gse__"
+
+
 def _neighborhood_row(kind: str, value: str, primary: str,
                       secondary: str, trailing: str, selected: bool,
                       disabled: bool = False) -> html.Button:
@@ -966,14 +973,15 @@ def neighborhood_studies_children(groups: list[dict],
     for group in groups:
         gse = str(group.get("gse") or "")
         display_gse = str(group.get("display_gse") or "No GSE recorded")
+        focus_value = gse or NO_GSE_FOCUS_VALUE
         count = int(group.get("sample_count") or 0)
         rank = int(group.get("best_rank") or 0)
         tissue = str(group.get("dominant_tissue") or "Tissue not recorded")
         button = _neighborhood_row(
-            "study", display_gse, display_gse, tissue,
+            "study", focus_value, display_gse, tissue,
             f"{count:,} sample{'s' if count != 1 else ''} · best rank {rank:,}",
             selected.get("kind") == "study"
-            and str(selected.get("value") or "") == display_gse,
+            and str(selected.get("value") or "") == focus_value,
         )
         row_children = [button]
         if gse:
@@ -1008,16 +1016,21 @@ def _sample_detail(row: dict) -> html.Div:
 
 
 def neighborhood_samples_children(rows: list[dict],
-                                   focus: dict | None) -> list:
+                                   focus: dict | None, *,
+                                   detail_row: dict | None = None) -> list:
     """Render every filtered evidence sample and its cached selected detail."""
-    if not rows:
-        return _neighborhood_empty("No samples match this search.")
     selected = focus or {}
     selected_gsm = (str(selected.get("value") or "")
                     if selected.get("kind") == "sample" else "")
-    detail = next((row for row in rows
-                   if str(row.get("gsm") or "") == selected_gsm), None)
+    detail = (detail_row if detail_row is not None
+              and str(detail_row.get("gsm") or "") == selected_gsm
+              else next((row for row in rows
+                         if str(row.get("gsm") or "") == selected_gsm), None))
+    if not rows and detail is None:
+        return _neighborhood_empty("No samples match this search.")
     children = [_sample_detail(detail)] if detail is not None else []
+    if not rows:
+        children.extend(_neighborhood_empty("No samples match this search."))
     for row in rows:
         gsm = str(row.get("gsm") or "GSM not recorded")
         gse = str(row.get("gse") or "No GSE")
@@ -1179,7 +1192,8 @@ def build_view() -> html.Div:
         dcc.Store(id="find-chosen"),
         dcc.Store(
             id="neighborhood-open-store",
-            data={"open": False, "opener": "explore-neighborhood"},
+            data={"open": False, "opener": "explore-neighborhood",
+                  "focus_target": None},
         ),
         dcc.Store(id="neighborhood-focus-store"),
         dcc.Store(id="neighborhood-focus-sink"),

@@ -519,17 +519,30 @@ def test_tab_and_search_changes_do_not_redraw_the_map(app):
     "trigger,previous,has_retrieval,expected",
     [
         (None, None, False,
-         {"open": False, "opener": "explore-neighborhood"}),
+         {"open": False, "opener": "explore-neighborhood",
+          "focus_target": None}),
         ("frame-retrieval", None, True,
-         {"open": True, "opener": "frame-retrieval"}),
+         {"open": True, "opener": "frame-retrieval",
+          "focus_target": "neighborhood-heading"}),
         ("explore-neighborhood", {"open": False, "opener": "frame-retrieval"},
-         True, {"open": True, "opener": "explore-neighborhood"}),
+         True, {"open": True, "opener": "explore-neighborhood",
+                "focus_target": "neighborhood-heading"}),
         ("neighborhood-close", {"open": True, "opener": "frame-retrieval"},
-         True, {"open": False, "opener": "frame-retrieval"}),
+         True, {"open": False, "opener": "frame-retrieval",
+                "focus_target": "frame-retrieval"}),
+        ("neighborhood-close", {"open": False,
+                                "opener": "frame-retrieval"},
+         True, {"open": False, "opener": "frame-retrieval",
+                "focus_target": None}),
         ("hits-store", {"open": True, "opener": "explore-neighborhood"},
-         True, {"open": False, "opener": "explore-neighborhood"}),
+         True, {"open": False, "opener": "explore-neighborhood",
+                "focus_target": None}),
+        ("hits-store", {"open": False, "opener": "frame-retrieval"},
+         True, {"open": False, "opener": "frame-retrieval",
+                "focus_target": None}),
         ("frame-retrieval", {"open": False, "opener": "explore-neighborhood"},
-         False, {"open": False, "opener": "explore-neighborhood"}),
+         False, {"open": False, "opener": "explore-neighborhood",
+                 "focus_target": None}),
     ],
 )
 def test_neighborhood_open_state_has_one_deterministic_transition(
@@ -591,7 +604,8 @@ def test_neighborhood_studies_use_separate_buttons_and_geo_links():
 
     assert [button.id for button in buttons] == [
         {"type": "neighborhood-study", "value": "GSE10"},
-        {"type": "neighborhood-study", "value": "No GSE recorded"},
+        {"type": "neighborhood-study",
+         "value": layout.NO_GSE_FOCUS_VALUE},
     ]
     assert "is-selected" in buttons[0].className
     assert getattr(buttons[0], "aria-pressed") == "true"
@@ -600,6 +614,27 @@ def test_neighborhood_studies_use_separate_buttons_and_geo_links():
     assert len(links) == 1
     assert links[0].href.endswith("?acc=GSE10")
     assert not any(type(c).__name__ == "A" for c in _walk(buttons[0]))
+
+
+def test_unassigned_study_button_focuses_rows_with_blank_gse():
+    groups = [
+        {"gse": "", "display_gse": "No GSE recorded", "sample_count": 1,
+         "best_rank": 1, "dominant_tissue": "Eye"},
+    ]
+    button = next(c for c in _walk(html.Div(
+        layout.neighborhood_studies_children(groups, None)
+    )) if type(c).__name__ == "Button")
+
+    focus = callbacks.next_neighborhood_focus(button.id, 1)
+    payload = {"neighborhood": {
+        "available": True, "label": "A", "depth_returned": 1,
+        "hits": [{"rank": 1, "gsm": "GSM1", "gse": "",
+                  "score": 0.99, "archs4_index": 4}],
+    }}
+    overlay = callbacks._neighborhood_overlay(payload, "a", focus)
+
+    assert "No GSE recorded" in _text(button)
+    assert overlay["focus_points"] == [4]
 
 
 def test_neighborhood_samples_keep_unlocatable_rows_selectable_and_show_detail():
@@ -746,6 +781,73 @@ def test_one_callback_owns_neighborhood_focus_state(app):
                for component_id, _property in inputs)
     assert any("neighborhood-sample" in component_id
                for component_id, _property in inputs)
+
+
+def test_one_callback_owns_focus_and_map_selected_tab_transition(app):
+    focus_writer = next(k for k in app.callback_map
+                        if "neighborhood-focus-store.data" in k)
+    tab_writer = next(k for k in app.callback_map
+                      if "neighborhood-tab.value" in k)
+
+    assert focus_writer == tab_writer
+
+
+def test_map_neighborhood_click_reveals_samples_without_clearing_controls():
+    click = {"points": [{"customdata": [
+        "neighborhood", 2, "GSM2", "GSE10", 0.98, "Eye", "mouse",
+    ]}]}
+
+    focus, tab, arm, search = callbacks.next_neighborhood_interaction(
+        "manifold-graph", click)
+
+    assert focus == {"kind": "sample", "value": "GSM2"}
+    assert tab == "samples"
+    assert arm is callbacks.no_update
+    assert search is callbacks.no_update
+
+
+def test_selected_sample_detail_ignores_filter_but_list_keeps_filter():
+    payload = {"neighborhood": {
+        "available": True, "label": "A", "depth_returned": 2,
+        "hits": [
+            {"rank": 1, "gsm": "GSM1", "gse": "GSE1",
+             "title": "Retina sample", "tissue": "Eye",
+             "species": "mouse", "score": 0.99, "archs4_index": 1},
+            {"rank": 2, "gsm": "GSM2", "gse": "GSE2",
+             "title": "Brain sample", "tissue": "Brain",
+             "species": "mouse", "score": 0.98, "archs4_index": 2},
+        ],
+    }}
+
+    state = callbacks.neighborhood_drawer_state(
+        payload, "a", "samples", "GSM1",
+        {"kind": "sample", "value": "GSM2"})
+    tree = html.Div(state["body"])
+    buttons = [c for c in _walk(tree) if type(c).__name__ == "Button"]
+    detail_links = [c for c in _walk(tree)
+                    if getattr(c, "className", None) == "bm-neighborhood-geo"]
+
+    assert [button.id["value"] for button in buttons] == ["GSM1"]
+    assert "Brain sample" in _text(tree)
+    assert any(link.href.endswith("?acc=GSM2") for link in detail_links)
+
+
+def test_selected_sample_detail_survives_an_empty_filtered_list():
+    payload = {"neighborhood": {
+        "available": True, "label": "A", "depth_returned": 1,
+        "hits": [
+            {"rank": 1, "gsm": "GSM2", "gse": "GSE2",
+             "title": "Brain sample", "tissue": "Brain",
+             "species": "mouse", "score": 0.98, "archs4_index": 2},
+        ],
+    }}
+
+    state = callbacks.neighborhood_drawer_state(
+        payload, "a", "samples", "no matches",
+        {"kind": "sample", "value": "GSM2"})
+
+    assert "Brain sample" in _text(state["body"])
+    assert "No samples match this search" in _text(state["body"])
 
 
 def test_budget_tiers_follow_dimensionality(corpus):
