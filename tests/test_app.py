@@ -161,7 +161,7 @@ def test_evidence_payload_is_json_safe_and_uses_the_fixed_depth():
     assert json.loads(json.dumps(payload)) == payload
 
 
-def test_missing_evidence_payload_requires_rerunning_the_retrieval():
+def test_missing_supported_evidence_payload_requires_rerunning_the_retrieval():
     from bridge_rna import callbacks as retrieval_callbacks
 
     payload = retrieval_callbacks._evidence_payload(None, label="ignored")
@@ -169,9 +169,22 @@ def test_missing_evidence_payload_requires_rerunning_the_retrieval():
     assert payload["available"] is False
     assert payload["depth_requested"] == 250
     assert payload["depth_returned"] == 0
-    assert payload["reason"] == (
-        "Run this retrieval again to build its 250-sample evidence neighborhood."
-    )
+    assert "saved retrieval predates evidence neighborhoods" in payload["reason"]
+    assert "Run this supported retrieval again" in payload["reason"]
+
+
+@pytest.mark.parametrize("mode", ["demo", "precomputed"])
+def test_fresh_unsupported_evidence_payload_does_not_invite_the_same_rerun(mode):
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    payload = retrieval_callbacks._evidence_payload(
+        None, label="ignored", mode=mode)
+
+    assert payload["available"] is False
+    assert f"{mode} mode cannot provide" in payload["reason"]
+    assert "Rerunning that same mode will not add it" in payload["reason"]
+    assert "cached OSDR sample, uploaded counts, or cohort retrieval" \
+        in payload["reason"]
 
 
 def _callback_for(app, trigger_id):
@@ -260,7 +273,9 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
     assert network["requested_count"] == 2
     assert [row["gsm"] for row in payload["hits"]] == ["GSM-D-0", "GSM-D-1"]
     assert payload["neighborhood"]["available"] is False
-    assert "Run this retrieval again" in payload["neighborhood"]["reason"]
+    assert "demo mode cannot provide" in payload["neighborhood"]["reason"]
+    assert "Rerunning that same mode will not add it" \
+        in payload["neighborhood"]["reason"]
 
 
 def test_upload_callback_carries_evidence_without_expanding_the_network(
@@ -592,9 +607,11 @@ def test_neighborhood_overview_renders_metrics_coverage_and_ranked_groups():
 def test_neighborhood_studies_use_separate_buttons_and_geo_links():
     groups = [
         {"gse": "GSE10", "display_gse": "GSE10", "sample_count": 2,
-         "best_rank": 1, "dominant_tissue": "Eye"},
+         "best_rank": 1, "title": "Retina study", "dominant_tissue": "Eye",
+         "dominant_tissue_count": 2, "tissue_covered": 2},
         {"gse": "", "display_gse": "No GSE recorded", "sample_count": 1,
-         "best_rank": 4, "dominant_tissue": ""},
+         "best_rank": 4, "title": "", "dominant_tissue": "",
+         "dominant_tissue_count": 0, "tissue_covered": 0},
     ]
     children = layout.neighborhood_studies_children(
         groups, {"kind": "study", "value": "GSE10"})
@@ -611,6 +628,9 @@ def test_neighborhood_studies_use_separate_buttons_and_geo_links():
     assert getattr(buttons[0], "aria-pressed") == "true"
     assert getattr(buttons[1], "aria-pressed") == "false"
     assert buttons[1].disabled is False
+    assert "Retina study · Eye · 2 of 2 with tissue metadata" in _text(buttons[0])
+    assert "Study title not recorded · Tissue not recorded · 0 of 0 with tissue metadata" \
+        in _text(buttons[1])
     assert len(links) == 1
     assert links[0].href.endswith("?acc=GSE10")
     assert not any(type(c).__name__ == "A" for c in _walk(buttons[0]))
@@ -699,20 +719,62 @@ def test_drawer_state_reads_only_the_selected_comparison_arm():
     arm_b["hits"] = arm_b["hits"][:1]
     arm_b["depth_returned"] = 1
     payload = {
+        "hits": list(arm_a["hits"]),
         "neighborhood": arm_a,
-        "comparison": {"neighborhood_b": arm_b},
+        "comparison": {"hits_b": list(arm_b["hits"]),
+                       "neighborhood_b": arm_b},
     }
 
     state = callbacks.neighborhood_drawer_state(
         payload, "b", "samples", "", None)
 
     assert state["heading"] == "Ground"
+    assert state["meta"] == (
+        "1 requested hit · 1 returned · "
+        "exact top-250 cosine neighborhood in 512-D"
+    )
     assert state["tabs"][1]["label"] == "Studies 1"
     assert state["tabs"][2]["label"] == "Samples 1"
     buttons = [c for c in _walk(html.Div(state["body"]))
                if type(c).__name__ == "Button"]
     assert [button.id["value"] for button in buttons] == ["GSM1"]
     assert state["search_style"] == {}
+
+
+def test_single_drawer_meta_names_requested_hits_and_exact_cosine_context():
+    payload = {
+        "hits": [{"gsm": "GSM1"}, {"gsm": "GSM2"}],
+        "neighborhood": _neighborhood_payload("Sample 1"),
+    }
+
+    state = callbacks.neighborhood_drawer_state(
+        payload, "a", "overview", "", None)
+
+    assert state["meta"] == (
+        "2 requested hits · 3 returned · "
+        "exact top-250 cosine neighborhood in 512-D"
+    )
+
+
+def test_comparison_drawer_meta_reads_requested_count_from_each_active_arm():
+    payload = {
+        "hits": [{"gsm": "A1"}, {"gsm": "A2"}],
+        "neighborhood": _neighborhood_payload("Flight"),
+        "comparison": {
+            "hits_b": [{"gsm": "B1"}],
+            "neighborhood_b": _neighborhood_payload("Ground", 10),
+        },
+    }
+
+    meta_a = callbacks.neighborhood_drawer_state(
+        payload, "a", "overview", "", None)["meta"]
+    meta_b = callbacks.neighborhood_drawer_state(
+        payload, "b", "overview", "", None)["meta"]
+
+    assert meta_a.startswith("2 requested hits · 3 returned")
+    assert meta_b.startswith("1 requested hit · 3 returned")
+    assert meta_a.endswith("exact top-250 cosine neighborhood in 512-D")
+    assert meta_b.endswith("exact top-250 cosine neighborhood in 512-D")
 
 
 def test_drawer_state_explains_an_unavailable_neighborhood():
@@ -722,6 +784,29 @@ def test_drawer_state_explains_an_unavailable_neighborhood():
         "a", "overview", "", None)
     assert reason in _text(state["body"])
     assert state["search_style"] == {"display": "none"}
+
+
+def test_drawer_distinguishes_stale_supported_from_fresh_unsupported_results():
+    stale = callbacks.neighborhood_drawer_state(
+        {"mode": "cached", "hits": [{"gsm": "GSM1"}]},
+        "a", "overview", "", None)
+    unsupported_reason = (
+        "The demo mode cannot provide an exact top-250 cosine neighborhood in "
+        "512-D. Rerunning that same mode will not add it. Use a cached OSDR "
+        "sample, uploaded counts, or cohort retrieval instead."
+    )
+    unsupported = callbacks.neighborhood_drawer_state(
+        {"mode": "demo", "hits": [{"gsm": "GSM1"}],
+         "neighborhood": {"available": False, "reason": unsupported_reason}},
+        "a", "overview", "", None)
+
+    stale_text = _text(stale["body"])
+    unsupported_text = _text(unsupported["body"])
+    assert "saved retrieval predates evidence neighborhoods" in stale_text
+    assert "Run this supported retrieval again" in stale_text
+    assert "demo mode cannot provide" in unsupported_text
+    assert "Rerunning that same mode will not add it" in unsupported_text
+    assert stale_text != unsupported_text
 
 
 def test_unavailable_comparison_arm_keeps_its_cohort_name():
@@ -758,6 +843,37 @@ def test_neighborhood_focus_accepts_only_explicit_evidence_actions(
     assert callbacks.next_neighborhood_focus(trigger, value) == expected
 
 
+@pytest.mark.parametrize(
+    "trigger,current",
+    [
+        ({"type": "neighborhood-study", "value": "GSE10"},
+         {"kind": "study", "value": "GSE10"}),
+        ({"type": "neighborhood-sample", "value": "GSM2"},
+         {"kind": "sample", "value": "GSM2"}),
+    ],
+)
+def test_activating_the_focused_row_again_clears_focus(trigger, current):
+    assert callbacks.next_neighborhood_focus(trigger, 2, current) is None
+
+
+def test_cleared_row_focus_renders_aria_pressed_false():
+    trigger = {"type": "neighborhood-study", "value": "GSE10"}
+    focus = callbacks.next_neighborhood_focus(
+        trigger, 2, {"kind": "study", "value": "GSE10"})
+    group = {
+        "gse": "GSE10", "display_gse": "GSE10", "sample_count": 1,
+        "best_rank": 1, "title": "Study", "dominant_tissue": "Eye",
+        "dominant_tissue_count": 1, "tissue_covered": 1,
+    }
+
+    button = next(c for c in _walk(html.Div(
+        layout.neighborhood_studies_children([group], focus)
+    )) if type(c).__name__ == "Button")
+
+    assert getattr(button, "aria-pressed") == "false"
+    assert "is-selected" not in button.className
+
+
 def test_neighborhood_focus_ignores_mounts_and_non_evidence_map_clicks():
     assert callbacks.next_neighborhood_focus(
         {"type": "neighborhood-study", "value": "GSE10"}, 0
@@ -781,6 +897,9 @@ def test_one_callback_owns_neighborhood_focus_state(app):
                for component_id, _property in inputs)
     assert any("neighborhood-sample" in component_id
                for component_id, _property in inputs)
+    states = {(str(item["id"]), item["property"])
+              for item in app.callback_map[writers[0]]["state"]}
+    assert ("neighborhood-focus-store", "data") in states
 
 
 def test_one_callback_owns_focus_and_map_selected_tab_transition(app):

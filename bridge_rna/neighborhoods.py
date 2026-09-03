@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import Counter
+import math
+import re
 from typing import Any
 
 import numpy as np
@@ -15,12 +17,30 @@ ROW_TEXT_FIELDS = (
     "gsm", "gse", "title", "source_name", "characteristics",
     "tissue", "species",
 )
+STALE_EVIDENCE_REASON = (
+    "This saved retrieval predates evidence neighborhoods. Run this supported "
+    "retrieval again to build its exact top-250 cosine neighborhood in 512-D."
+)
+UNSUPPORTED_EVIDENCE_MODES = frozenset(("demo", "precomputed"))
 
 
 def _index(value: Any) -> int | None:
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not re.fullmatch(r"[+-]?\d+", text):
+            return None
+        try:
+            return int(text)
+        except (TypeError, ValueError, OverflowError):
+            return None
     try:
-        return None if pd.isna(value) else int(value)
-    except (TypeError, ValueError):
+        if pd.isna(value) or not math.isfinite(value):
+            return None
+        integer = int(value)
+        return integer if value == integer else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -68,6 +88,19 @@ def unavailable_payload(reason: str) -> dict:
         "depth_requested": NEIGHBORHOOD_DEPTH, "depth_returned": 0,
         "metric": "cosine", "space": "embedding-512d", "hits": [],
     }
+
+
+def evidence_unavailable_reason(mode: str = "") -> str:
+    """Explain whether another run can produce exact evidence for this mode."""
+    normalized = _safe_str(mode).lower()
+    if normalized in UNSUPPORTED_EVIDENCE_MODES:
+        return (
+            f"The {normalized} mode cannot provide an exact top-250 cosine "
+            "neighborhood in 512-D. Rerunning that same mode will not add it. "
+            "Use a cached OSDR sample, uploaded counts, or cohort retrieval "
+            "instead."
+        )
+    return STALE_EVIDENCE_REASON
 
 
 def _hits(payload: dict | None) -> list[dict]:
@@ -135,11 +168,6 @@ def summarize(payload: dict | None) -> dict:
     }
 
 
-def _dominant_category(rows: list[dict], field: str) -> str:
-    items = _categories(rows, field)["items"]
-    return items[0]["label"] if items else ""
-
-
 def study_groups(payload: dict | None) -> list[dict]:
     """Group returned rows by study, retaining blank GSE rows as one group."""
     groups: dict[str, list[dict]] = {}
@@ -150,17 +178,26 @@ def study_groups(payload: dict | None) -> list[dict]:
     for gse, rows in groups.items():
         best_rank = min(int(row.get("rank", 0)) for row in rows)
         display_gse = gse or "No GSE recorded"
+        tissue = _categories(rows, "tissue")
+        leading_tissue = tissue["items"][0] if tissue["items"] else None
+        title = next((_safe_str(row.get("title")) for row in rows
+                      if _safe_str(row.get("title"))), "")
         summaries.append({
             "gse": gse,
             "display_gse": display_gse,
             "sample_count": len(rows),
             "best_rank": best_rank,
-            "dominant_tissue": _dominant_category(rows, "tissue"),
+            "title": title,
+            "dominant_tissue": (leading_tissue["label"]
+                                if leading_tissue else ""),
+            "dominant_tissue_count": (leading_tissue["count"]
+                                      if leading_tissue else 0),
+            "tissue_covered": tissue["covered"],
         })
     return sorted(
         summaries,
-        key=lambda group: (not group["gse"], -group["sample_count"],
-                           group["best_rank"], group["display_gse"]),
+        key=lambda group: (-group["sample_count"], group["best_rank"],
+                           group["display_gse"]),
     )
 
 

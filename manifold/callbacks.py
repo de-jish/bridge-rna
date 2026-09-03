@@ -210,7 +210,7 @@ def neighborhood_arm_options(hits_payload: dict | None) -> tuple[list[dict], dic
     ], {}
 
 
-def next_neighborhood_focus(trigger, value):
+def next_neighborhood_focus(trigger, value, current: dict | None = None):
     """Translate an explicit row/map click into the explorer's focus shape."""
     if trigger == "hits-store":
         return None
@@ -219,7 +219,12 @@ def next_neighborhood_focus(trigger, value):
                 "neighborhood-sample": "sample"}.get(trigger.get("type"))
         selected = str(trigger.get("value") or "")
         if kind and selected and value:
-            return {"kind": kind, "value": selected}
+            candidate = {"kind": kind, "value": selected}
+            if (isinstance(current, dict)
+                    and current.get("kind") == kind
+                    and str(current.get("value") or "") == selected):
+                return None
+            return candidate
         return no_update
     if trigger != "manifold-graph" or not value:
         return no_update
@@ -231,9 +236,10 @@ def next_neighborhood_focus(trigger, value):
     return {"kind": "sample", "value": str(custom[2])}
 
 
-def next_neighborhood_interaction(trigger, value):
+def next_neighborhood_interaction(trigger, value,
+                                  current: dict | None = None):
     """Return the single-owner focus/tab/arm/search transition."""
-    focus = next_neighborhood_focus(trigger, value)
+    focus = next_neighborhood_focus(trigger, value, current)
     if trigger == "hits-store":
         return focus, "overview", ROLE_A, ""
     if trigger == "manifold-graph" and focus is not no_update:
@@ -258,6 +264,10 @@ def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
                        if str(row.get("gsm") or "") == selected_gsm), None)
     summary["leading_studies"] = groups[:3]
     depth = int(summary.get("depth") or 0)
+    root = hits_payload or {}
+    requested_hits = ((root.get("comparison") or {}).get("hits_b")
+                      if arm == ROLE_B else root.get("hits"))
+    requested = len(requested_hits) if isinstance(requested_hits, list) else 0
     study_count = int(summary.get("study_count") or 0)
     tabs = [
         {"label": "Overview", "value": "overview"},
@@ -272,13 +282,20 @@ def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
                 rows, focus, detail_row=detail_row),
         }
         body = builders.get(tab, builders["overview"])()
-        meta = (f"{depth:,} nearest sample{'s' if depth != 1 else ''} · "
-                "cosine in 512-D")
+        meta = (
+            f"{requested:,} requested hit{'s' if requested != 1 else ''} · "
+            f"{depth:,} returned · exact top-{neighborhoods.NEIGHBORHOOD_DEPTH} "
+            "cosine neighborhood in 512-D"
+        )
     else:
         body = layout.neighborhood_unavailable_children(
             str(payload.get("reason") or
-                "Run this retrieval again to build its evidence neighborhood."))
-        meta = "Evidence neighborhood unavailable"
+                neighborhoods.evidence_unavailable_reason(
+                    str((hits_payload or {}).get("mode") or ""))))
+        meta = (
+            f"{requested:,} requested hit{'s' if requested != 1 else ''} · "
+            "Evidence neighborhood unavailable"
+        )
     return {
         "heading": _neighborhood_arm_label(hits_payload, arm or ROLE_A),
         "meta": meta,
@@ -1046,10 +1063,11 @@ def register(app):
         Input({"type": "neighborhood-sample", "value": ALL}, "n_clicks"),
         Input("manifold-graph", "clickData"),
         Input("hits-store", "data"),
+        State("neighborhood-focus-store", "data"),
         prevent_initial_call=True,
     )
     def select_neighborhood(_study_clicks, _sample_clicks, click_data,
-                            hits_payload):
+                            hits_payload, current_focus):
         trigger = ctx.triggered_id
         if trigger == "hits-store":
             changed = hits_payload
@@ -1058,7 +1076,7 @@ def register(app):
         else:
             changed = next((item.get("value") for item in (ctx.triggered or [])
                             if item.get("value") is not None), None)
-        return next_neighborhood_interaction(trigger, changed)
+        return next_neighborhood_interaction(trigger, changed, current_focus)
 
     @app.callback(
         Output("retrieval-summary", "children"),

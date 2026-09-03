@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -85,8 +86,29 @@ def test_studies_group_unassigned_rows_and_sort_deterministically():
     assert [g["gse"] for g in groups] == ["GSE10", "GSE20", ""]
     assert groups[0]["sample_count"] == 2
     assert groups[0]["best_rank"] == 1
+    assert groups[0]["title"] == "Retina A"
     assert groups[0]["dominant_tissue"] == "Eye / retina"
-    assert groups[-1]["display_gse"] == "No GSE recorded"
+    assert groups[0]["dominant_tissue_count"] == 2
+    assert groups[0]["tissue_covered"] == 2
+    unassigned = next(group for group in groups if not group["gse"])
+    assert unassigned["display_gse"] == "No GSE recorded"
+
+
+def test_study_title_and_tissue_coverage_ignore_missing_metadata():
+    frame = pd.DataFrame([
+        {"gsm": "GSM1", "gse": "GSE10", "title": "", "tissue": None},
+        {"gsm": "GSM2", "gse": "GSE10", "title": "Retina study",
+         "tissue": "Eye"},
+        {"gsm": "GSM3", "gse": "GSE10", "title": "Later title",
+         "tissue": "Eye"},
+    ])
+
+    group = N.study_groups(N.build_payload(frame))[0]
+
+    assert group["title"] == "Retina study"
+    assert group["dominant_tissue"] == "Eye"
+    assert group["dominant_tissue_count"] == 2
+    assert group["tissue_covered"] == 2
 
 
 def test_sample_filter_matches_accession_study_tissue_species_and_title():
@@ -132,7 +154,7 @@ def test_summary_and_study_ties_are_sorted_by_label_and_rank():
         "GSE2", "GSE1", "GSE3"]
 
 
-def test_unassigned_study_group_is_final_even_when_it_has_more_samples():
+def test_unassigned_study_group_obeys_the_same_count_first_ordering():
     frame = pd.DataFrame([
         {"gsm": "GSM1", "gse": "", "score": 0.9},
         {"gsm": "GSM2", "gse": "", "score": 0.8},
@@ -140,4 +162,21 @@ def test_unassigned_study_group_is_final_even_when_it_has_more_samples():
     ])
 
     assert [group["gse"] for group in N.study_groups(N.build_payload(frame))] == [
-        "GSE1", ""]
+        "", "GSE1"]
+
+
+@pytest.mark.parametrize("value", [True, 1.5, float("inf"), float("-inf")])
+def test_payload_rejects_malformed_map_indices_without_raising(value):
+    payload = N.build_payload(pd.DataFrame([{"archs4_index": value}]))
+
+    assert payload["hits"][0]["archs4_index"] is None
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(7, 7), (7.0, 7), ("8", 8), (" -9 ", -9), (np.int64(10), 10)],
+)
+def test_payload_accepts_integer_valued_finite_map_indices(value, expected):
+    payload = N.build_payload(pd.DataFrame([{"archs4_index": value}]))
+
+    assert payload["hits"][0]["archs4_index"] == expected

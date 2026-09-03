@@ -976,9 +976,14 @@ def neighborhood_studies_children(groups: list[dict],
         focus_value = gse or NO_GSE_FOCUS_VALUE
         count = int(group.get("sample_count") or 0)
         rank = int(group.get("best_rank") or 0)
+        title = str(group.get("title") or "Study title not recorded")
         tissue = str(group.get("dominant_tissue") or "Tissue not recorded")
+        tissue_count = int(group.get("dominant_tissue_count") or 0)
+        tissue_covered = int(group.get("tissue_covered") or 0)
         button = _neighborhood_row(
-            "study", focus_value, display_gse, tissue,
+            "study", focus_value, display_gse,
+            f"{title} · {tissue} · {tissue_count:,} of {tissue_covered:,} "
+            "with tissue metadata",
             f"{count:,} sample{'s' if count != 1 else ''} · best rank {rank:,}",
             selected.get("kind") == "study"
             and str(selected.get("value") or "") == focus_value,

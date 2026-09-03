@@ -23,8 +23,8 @@ A permanent OSD-137 comparison path switches from `Liver · Basal Control` to `L
 
 At 1440 and 1024 px the 390 px drawer docked beside the canvas; at 768 and 320 px it became a bounded bottom sheet.
 All four layouts kept Close, tabs and search inside the drawer, kept the Plotly modebar clear and had no horizontal page overflow.
-Keyboard verification uses real Tab/Shift+Tab traversal and keyboard activation to cover Explore, the focused drawer heading, Close, all three radio tabs, the named searchbox, and named button roles for study/sample rows.
-Fresh final-run timings on the real artifacts were **1.9 s to the first interactive full-corpus frame** and **0.32 s from the first Explore click to the rendered evidence trace**; the two-arm comparison scan took 2.29 s.
+Keyboard verification uses real Tab/Shift+Tab traversal and keyboard activation to cover Explore, the focused drawer heading, Close, all three radio tabs, the named searchbox, and named button roles for study/sample rows. A second activation of the focused study clears it without another retrieval; Close returns actual browser focus to Explore or Frame, with Explore as the 3-D fallback when Frame is hidden.
+Fresh final restored-code timings on the real artifacts were **2.0 s to the first interactive full-corpus frame** and **0.47 s from the first Explore click to the rendered evidence trace**. The earlier task-6 comparison run recorded a 2.29 s two-arm scan.
 Screenshots are outside the tree at `/tmp/bridge-rna-task6-e2e/10-neighborhood-{320,768,1024,1440}.png` and `11-neighborhood-comparison.png`; the shipped README map image was not changed.
 
 **Two real browser defects, both fixed with focused regressions.** Docking first changed the UMAP x range because Plotly's equal-scale axes handled the narrower canvas by constraining ranges; Cartesian axes now use `constrain="domain"` so the axis domains, not the data window, absorb the resize.
@@ -32,7 +32,7 @@ The remaining small shift came from restating `autorange` during a neighborhood-
 
 **Task 6 files.** `tests/e2e_check.py` carries the single-query browser assertions and optional system-Chrome path; `tests/e2e_cohort_check.py` now carries the permanent comparison-arm assertions and the same optional browser path; `manifold/theme.py`, `manifold/callbacks.py` and `tests/test_app.py` carry the two reproduced viewport corrections and regressions; `README.md`, `docs/design-notes.md` and this log carry the user/design/verification record.
 
-**Verification.** 464 pytest passed and 1 real-counts availability test skipped in 14.44 s; 192 primary and 177 cohort real-browser checks passed against the read-only artifact cache, with zero console errors, failed requests or HTTP errors.
+**Final restored-code verification.** 482 pytest passed and 1 real-counts availability test skipped in 14.45 s; 201 primary and 179 cohort/comparison real-browser checks passed against the read-only artifact cache, with zero console errors, failed requests or HTTP errors. The drawer reported `5 requested hits · 250 returned · exact top-250 cosine neighborhood in 512-D` for the primary retrieval and independently for both comparison arms.
 Chrome DevTools Axi 0.1.29 could launch an isolated system-Chrome page but its wrapper did not pass the `pageId` required by the installed MCP backend to snapshot/evaluate it, so DOM, accessibility, network and console assertions were completed in an isolated Playwright system-Chrome context instead.
 Every temporary server was terminated after its run.
 

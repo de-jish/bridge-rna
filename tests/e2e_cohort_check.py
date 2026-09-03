@@ -878,12 +878,16 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     arm_label_a = arm_a.inner_text().strip()
     arm_label_b = arm_b.inner_text().strip()
     heading_a = page.locator("#neighborhood-heading").inner_text().strip()
+    meta_a = page.locator("#neighborhood-meta").inner_text().strip()
     c.ok(arm_label_a.startswith("A · ") and arm_label_b.startswith("B · ")
          and arm_label_a != arm_label_b,
          f"the explorer names two distinct comparison arms: "
          f"{arm_label_a!r}, {arm_label_b!r}")
     c.ok(page.get_by_role("radio", name=re.compile(r"^A · ")).is_checked(),
          "the comparison explorer opens on arm A")
+    c.ok(f"{depth} requested hits" in meta_a
+         and "exact top-250 cosine neighborhood in 512-D" in meta_a,
+         f"arm A states its requested depth and exact evidence context: {meta_a!r}")
     c.ok(evidence_a["sourceTraces"] == 1
          and evidence_a["renderedTraces"] == 1
          and evidence_a["marks"] == 250
@@ -924,10 +928,14 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         }""", arg={"heading": heading_a, "gsms": evidence_gsms_b},
         timeout=30_000)
     heading_b = page.locator("#neighborhood-heading").inner_text().strip()
+    meta_b = page.locator("#neighborhood-meta").inner_text().strip()
     rows_b = page.locator(
         ".bm-neighborhood-sample .bm-neighborhood-row-primary").all_inner_texts()
     c.ok(page.get_by_role("radio", name=re.compile(r"^B · ")).is_checked(),
          "switching A to B updates the selected arm's radio state")
+    c.ok(f"{depth} requested hits" in meta_b
+         and "exact top-250 cosine neighborhood in 512-D" in meta_b,
+         f"arm B states its requested depth and exact evidence context: {meta_b!r}")
     c.ok(heading_a != heading_b,
          f"switching A to B changes the active arm heading: "
          f"{heading_a!r} -> {heading_b!r}")

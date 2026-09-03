@@ -17,7 +17,7 @@
 - Requested hits are the exact ranked prefix of the evidence neighborhood for the same query.
 - The wider map marks use one uniform size, opacity, and color and never draw a line, hull, enclosing ring, or rank ramp.
 - Summary percentages state both coverage and denominator; missing metadata is not folded silently into “Other.”
-- Cached OSDR, upload, cohort, and comparison paths are supported. Unsupported stale/demo payloads degrade without breaking the existing overlay.
+- Cached OSDR, upload, cohort, and comparison paths are supported. A stale supported payload may invite a rerun; a fresh demo/precomputed payload says that rerunning the same unsupported mode cannot add exact evidence and points to a supported cached/upload/cohort route. Both degrade without breaking the existing overlay.
 - The million-point ARCHS4 cloud keeps no hover payload; only the capped 250-point evidence trace gains metadata.
 - No new runtime dependency, configurable depth, export, AI-written summary, viewport statistics, or new route is added.
 - Preserve and do not stage the pre-existing local changes in `.env.example`, `app.py`, `requirements.txt`, and `wsgi.py` unless the user separately asks to include them.
@@ -110,8 +110,22 @@ def test_studies_group_unassigned_rows_and_sort_deterministically():
     assert [g["gse"] for g in groups] == ["GSE10", "GSE20", ""]
     assert groups[0]["sample_count"] == 2
     assert groups[0]["best_rank"] == 1
+    assert groups[0]["title"] == "Retina A"
     assert groups[0]["dominant_tissue"] == "Eye / retina"
-    assert groups[-1]["display_gse"] == "No GSE recorded"
+    assert groups[0]["dominant_tissue_count"] == 2
+    assert groups[0]["tissue_covered"] == 2
+    unassigned = next(group for group in groups if not group["gse"])
+    assert unassigned["display_gse"] == "No GSE recorded"
+
+
+def test_unassigned_study_group_obeys_the_same_count_first_ordering():
+    frame = pd.DataFrame([
+        {"gsm": "GSM1", "gse": ""},
+        {"gsm": "GSM2", "gse": ""},
+        {"gsm": "GSM3", "gse": "GSE1"},
+    ])
+    groups = N.study_groups(N.build_payload(frame))
+    assert [group["gse"] for group in groups] == ["", "GSE1"]
 
 
 def test_sample_filter_matches_accession_study_tissue_species_and_title():
@@ -146,6 +160,8 @@ Create the module with a deliberately small serialization schema and pure aggreg
 from __future__ import annotations
 
 from collections import Counter
+import math
+import re
 from typing import Any
 
 import numpy as np
@@ -161,9 +177,22 @@ ROW_TEXT_FIELDS = (
 
 
 def _index(value: Any) -> int | None:
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not re.fullmatch(r"[+-]?\d+", text):
+            return None
+        try:
+            return int(text)
+        except (TypeError, ValueError, OverflowError):
+            return None
     try:
-        return None if pd.isna(value) else int(value)
-    except (TypeError, ValueError):
+        if pd.isna(value) or not math.isfinite(value):
+            return None
+        integer = int(value)
+        return integer if value == integer else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -200,14 +229,16 @@ def unavailable_payload(reason: str) -> dict:
     }
 ```
 
-Implement category counts so the denominator contains only non-empty values,
-study groups so blank GSEs form one explicit final group, score statistics with
-`numpy.median/min/max`, and sample filtering over the concatenated lowercase
-text fields. Sort category rows by `(-count, label)`, studies by
-`(-sample_count, best_rank, display_gse)`, and samples by stored rank. Construct
-the summary sentence from the leading tissue only when tissue coverage is
-nonzero; otherwise state that no tissue metadata is available for the returned
-depth.
+Implement category counts so the denominator contains only non-empty values.
+Every study group, including the explicit blank/unassigned group, carries the
+first ranked non-missing title plus dominant tissue, dominant-tissue count, and
+tissue-covered denominator. Sort category rows by `(-count, label)`, every
+study by `(-sample_count, best_rank, display_gse)`, and samples by stored rank;
+never force the unassigned group last. Compute score statistics with
+`numpy.median/min/max` and filter samples over the concatenated lowercase text
+fields. Construct the summary sentence from the leading tissue only when
+tissue coverage is nonzero; otherwise state that no tissue metadata is
+available for the returned depth.
 
 - [ ] **Step 4: Run the pure tests**
 
@@ -493,16 +524,18 @@ At module scope in `bridge_rna/callbacks.py`, add one serializer used by all
 three search callbacks:
 
 ```python
-def _evidence_payload(frame: pd.DataFrame | None, label: str = "") -> dict:
+def _evidence_payload(frame: pd.DataFrame | None, label: str = "", *,
+                      mode: str = "") -> dict:
     if frame is None:
-        return unavailable_payload(
-            "Run this retrieval again to build its 250-sample evidence neighborhood.")
+        return unavailable_payload(evidence_unavailable_reason(mode))
     return build_payload(frame, label=label)
 ```
 
 Add tests in `tests/test_app.py` that call this helper with a two-row frame and
-with `None`, asserting JSON-safe ranks, the fixed requested depth, and the rerun
-reason.
+with `None`, asserting JSON-safe ranks and the fixed requested depth. Cover the
+two distinct unavailable truths: a legacy supported payload can be rerun, while
+fresh `demo` and `precomputed` modes explicitly say another run of that mode
+cannot provide exact evidence and name cached OSDR, upload, and cohort routes.
 
 - [ ] **Step 5: Wire every search callback to the new evidence result**
 
@@ -846,6 +879,7 @@ def _neighborhood_row(kind: str, value: str, primary: str,
         id={"type": f"neighborhood-{kind}", "value": value},
         n_clicks=0,
         disabled=disabled,
+        **{"aria-pressed": "true" if selected else "false"},
         className=("bm-neighborhood-row "
                    f"bm-neighborhood-{kind}"
                    + (" is-selected" if selected else "")),
@@ -859,10 +893,12 @@ def _neighborhood_row(kind: str, value: str, primary: str,
 
 The Overview builder renders the summary sentence, coverage line, three metric
 cells, tissue/species bars, and leading studies. The Studies builder emits
-keyboard-native `html.Button` rows with ids
-`{"type": "neighborhood-study", "value": display_gse}`. Wrap each study
-button and its optional GEO `html.A` in a non-interactive row container; never
-nest the link inside the button. Link real GSE accessions to
+keyboard-native `html.Button` rows whose text includes the available study
+title and `dominant count of tissue-covered rows` (for example, `Eye · 2 of 3
+with tissue metadata`). Use the real GSE as its focus identity and one canonical
+sentinel for the unassigned group. Wrap each study button and its optional GEO
+`html.A` in a non-interactive row container; never nest the link inside the
+button. Link only real GSE accessions to
 `https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=<GSE>`. The Samples builder emits every filtered row
 as an `html.Button` with id
 `{"type": "neighborhood-sample", "value": gsm}`. An unlocatable row can still
@@ -872,9 +908,11 @@ GSM above the list and links it through the same GEO accession route. Each
 builder has an explicit empty state.
 
 One drawer callback consumes payload, arm, tab, search, and focus. Search is
-shown only on Samples. Comparison arm options name the two cohort labels; the
-single-arm control is hidden. Tabs include live counts: `Studies 41`,
-`Samples 250`. A separate single-writer control callback resets tab to Overview,
+shown only on Samples. The header derives requested-hit count from `hits` for A
+or `comparison.hits_b` for B and identifies the returned rows as the exact
+top-250 cosine neighborhood in 512-D. Comparison arm options name the two
+cohort labels; the single-arm control is hidden. Tabs include live counts:
+`Studies 41`, `Samples 250`. A separate single-writer control callback resets tab to Overview,
 arm to A, and search to empty whenever `hits-store` changes; the focus callback
 in Step 6 resets focus to `None`. Ordinary open/close actions preserve the
 active tab and search.
@@ -882,9 +920,12 @@ active tab and search.
 - [ ] **Step 6: Implement one owner for study/sample focus and wire the figure**
 
 Use one callback with pattern-matching `ALL` inputs for study/sample row
-buttons, `manifold-graph.clickData`, and `hits-store`. Reset on new retrieval;
-otherwise accept only a changed click whose triggered id is one of the two
-row families or a map customdata row beginning with `"neighborhood"`.
+buttons, `manifold-graph.clickData`, `hits-store`, and current focus as `State`.
+Reset on new retrieval; otherwise accept only a changed click whose triggered
+id is one of the two row families or a map customdata row beginning with
+`"neighborhood"`. Activating the row already represented by current focus
+returns `None`, so its map trace clears and its rerendered `aria-pressed` is
+`false` without introducing another focus-state writer.
 Study focus stores the displayed GSE value; sample focus stores its GSM, and a
 map click reads the GSM from `customdata[2]`.
 
@@ -974,8 +1015,10 @@ real OSDR query and check:
 page.click("#explore-neighborhood")
 c.ok(page.locator("#neighborhood-drawer").is_visible(),
      "the evidence drawer opens from the map")
-c.ok("250 nearest" in page.locator("#neighborhood-meta").inner_text(),
-     "the drawer names its exact evidence depth")
+meta = page.locator("#neighborhood-meta").inner_text()
+c.ok("5 requested hits" in meta
+     and "exact top-250 cosine neighborhood in 512-D" in meta,
+     "the drawer distinguishes requested depth from exact evidence")
 evidence_traces = page.evaluate("""() => {
   const plot = document.querySelector('#manifold-graph .js-plotly-plot');
   return (plot && plot.data || []).filter(t => t.name === '512-D evidence neighbor').length;
@@ -990,12 +1033,15 @@ c.ok(page.locator(".bm-neighborhood-sample").count() > 0,
      "the complete sample list is searchable")
 ```
 
-Also check: selecting a study produces a focus trace without rerunning search;
-Close hides drawer/evidence but not white requested hits; Frame reopens in 2-D;
-Explore remains visible and opens in 3-D; comparison arm switching changes the
-drawer label; at 768 and 320 px the drawer is a bottom sheet within viewport;
-Tab reaches close/tabs/search/rows; Escape is not claimed unless implemented;
-browser console contains no errors.
+Also check: selecting a study produces a focus trace without rerunning search,
+and activating that focused row again clears the trace without a retrieval;
+Close hides drawer/evidence but not white requested hits and restores actual
+focus to Explore or Frame, with Explore as the 3-D fallback when Frame is
+hidden; Frame reopens in 2-D; Explore remains visible and opens in 3-D;
+comparison arm switching changes the drawer label/evidence and each arm's
+header states its requested-hit count; at 768 and 320 px the drawer is a bottom
+sheet within viewport; Tab reaches close/tabs/search/rows; Escape is not claimed
+unless implemented; browser console contains no errors.
 
 - [ ] **Step 2: Run the browser suite and fix only reproduced failures**
 

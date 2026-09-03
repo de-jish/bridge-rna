@@ -282,8 +282,9 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.ok(page.get_by_role("button", name="Close neighborhood explorer").count() == 1,
          "Close is a named button")
     meta = page.locator("#neighborhood-meta").inner_text()
-    c.ok("250 nearest" in meta and "512-D" in meta,
-         f"the drawer names its exact evidence depth and space: {meta!r}")
+    c.ok("5 requested hits" in meta
+         and "exact top-250 cosine neighborhood in 512-D" in meta,
+         f"the drawer distinguishes requested depth from exact evidence: {meta!r}")
     c.ok(traces["evidenceTraces"] == 1,
          "the exact evidence neighborhood is drawn once")
     c.ok(traces["evidenceMarks"] == 250,
@@ -350,6 +351,37 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.ok(dash_changes.count("search-button.n_clicks") == runs_before_focus,
          "study focus does not rerun retrieval")
 
+    page.wait_for_function(
+        "() => document.querySelector('.bm-neighborhood-study')"
+        ".getAttribute('aria-pressed') === 'true'",
+        timeout=30_000)
+    if not page.evaluate(
+            "() => document.activeElement.classList.contains('bm-neighborhood-study')"):
+        reached_focused_study = _tab_until(
+            page,
+            "() => document.activeElement.classList.contains('bm-neighborhood-study')",
+            max_presses=220)
+        if not c.ok(reached_focused_study,
+                    "Tab returns to the focused study row after its update"):
+            return
+    with page.expect_response(
+            _figure_response_for("neighborhood-focus-store.data"),
+            timeout=90_000):
+        page.keyboard.press("Enter")
+    page.wait_for_function(
+        """() => {
+          const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+          const row = document.querySelector('.bm-neighborhood-study');
+          return gd && row && row.getAttribute('aria-pressed') === 'false'
+            && !(gd._fullData || []).some(
+              t => t.name === 'focused evidence neighbor');
+        }""", timeout=90_000)
+    cleared = _trace_state(page)
+    c.ok(cleared["focusTraces"] == 0,
+         "deselecting the study removes its focus trace")
+    c.ok(dash_changes.count("search-button.n_clicks") == runs_before_focus,
+         "study deselection does not rerun retrieval")
+
     reached_studies = _tab_until(page, """() => {
       const active = document.activeElement;
       return active && active.type === 'radio' && active.value === 'studies'
@@ -393,12 +425,21 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
          f"the complete list is searchable to one exact GSM ({first_gsm})")
 
     print("\n=== 7c. close, reopen, frame, and 3-D ===")
+    reached_close = _tab_until(
+        page, "() => document.activeElement.id === 'neighborhood-close'",
+        reverse=True, max_presses=8)
+    if not c.ok(reached_close,
+                "keyboard traversal reaches Close from the sample search"):
+        return
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
-        page.get_by_role("button", name="Close neighborhood explorer").click()
+        page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
     page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(
+        "() => document.activeElement.id === 'explore-neighborhood'",
+        timeout=30_000)
     closed = _trace_state(page)
     white = {"#fff", "#ffffff", "rgb(255, 255, 255)", "white"}
     c.ok(closed["evidenceTraces"] == 0 and closed["focusTraces"] == 0,
@@ -407,6 +448,8 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
          and all(str(colour).lower() in white
                  for colour in closed["requestedColours"]),
          "Close preserves the requested white hit rings")
+    c.ok(page.evaluate("() => document.activeElement.id") == "explore-neighborhood",
+         "Close after Explore returns focus to Explore")
 
     before_reopen = _map_x_range(page)
     with page.expect_response(
@@ -435,25 +478,61 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     framed = _map_x_range(page)
     c.ok(abs(framed[1] - framed[0]) < before_frame_span,
          f"Frame opens the drawer and narrows the 2-D view ({framed})")
+    reached_frame_close = _tab_until(
+        page, "() => document.activeElement.id === 'neighborhood-close'",
+        reverse=True, max_presses=4)
+    if not c.ok(reached_frame_close,
+                "Shift+Tab reaches Close after Frame opens the drawer"):
+        return
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
-        page.get_by_role("button", name="Close neighborhood explorer").click()
+        page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
     page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(
+        "() => document.activeElement.id === 'frame-retrieval'", timeout=30_000)
+    c.ok(page.evaluate("() => document.activeElement.id") == "frame-retrieval",
+         "Close after Frame returns focus to Frame in 2-D")
+
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.keyboard.press("Enter")
+    page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
+    _wait_for_evidence(page, "scattergl")
 
     set_segment(page, "Dimensions", "3D")
     page.wait_for_function(
         "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
         " return gd && (gd._fullData || []).some(t => t.name === 'query'"
         " && t.type === 'scatter3d'); }", timeout=90_000)
+    _wait_for_evidence(page, "scatter3d")
     c.ok(not page.get_by_role("button", name="Frame the retrieval").is_visible(),
          "3-D hides Frame, whose 2-D ranges its camera would ignore")
     c.ok(explore.is_visible(), "Explore remains visible in 3-D")
+    reached_fallback_close = _tab_until(
+        page, "() => document.activeElement.id === 'neighborhood-close'",
+        max_presses=220)
+    if not c.ok(reached_fallback_close,
+                "Tab reaches Close after the framed drawer moves to 3-D"):
+        return
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
-        explore.click()
+        page.keyboard.press("Enter")
+    page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(
+        "() => document.activeElement.id === 'explore-neighborhood'",
+        timeout=30_000)
+    c.ok(page.evaluate("() => document.activeElement.id") == "explore-neighborhood",
+         "3-D fallback returns focus to Explore when Frame is hidden")
+
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
     three_d = _wait_for_evidence(page, "scatter3d")
     c.ok(three_d["evidenceTraces"] == 1

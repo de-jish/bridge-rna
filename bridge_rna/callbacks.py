@@ -43,7 +43,11 @@ from .layout import (
     build_graph_legend,
     samples_df,
 )
-from .neighborhoods import build_payload, unavailable_payload
+from .neighborhoods import (
+    build_payload,
+    evidence_unavailable_reason,
+    unavailable_payload,
+)
 from .panels import (
     _details_head,
     build_cohort_card,
@@ -66,11 +70,10 @@ from .retrieval import (
 from .util import _format_count, _last_nonempty_line, _safe_str
 
 
-def _evidence_payload(frame: pd.DataFrame | None, label: str = "") -> dict:
+def _evidence_payload(frame: pd.DataFrame | None, label: str = "", *,
+                      mode: str = "") -> dict:
     if frame is None:
-        return unavailable_payload(
-            "Run this retrieval again to build its 250-sample evidence neighborhood."
-        )
+        return unavailable_payload(evidence_unavailable_reason(mode))
     return build_payload(frame, label=label)
 
 
@@ -540,7 +543,8 @@ def register(app) -> None:
             "hits": hits_df.to_dict(orient="records"),
             "query": _query_dict(q_row),
             "neighborhood": _evidence_payload(
-                neighborhood_df, label=_safe_str(q_row.get("sample_name"))
+                neighborhood_df, label=_safe_str(q_row.get("sample_name")),
+                mode=mode,
             ),
         }
         return network, payload, status
