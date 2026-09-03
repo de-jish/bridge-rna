@@ -262,10 +262,10 @@ The test tooling is a separate install, because running Bridge RNA does not need
 ```
 
 ```bash
-.venv/bin/python -m pytest tests/ -q             # 399 tests, about twenty-seven seconds
-.venv/bin/python tests/e2e_check.py              # 129 browser checks; needs the built cache
+.venv/bin/python -m pytest tests/ -q             # 464 pass + 1 skip, about fifteen seconds
+.venv/bin/python tests/e2e_check.py              # 192 browser checks; needs the built cache
 .venv/bin/python tests/e2e_upload_check.py       # 70 checks of the upload path
-.venv/bin/python tests/e2e_cohort_check.py       # 164 checks of cohort retrieval
+.venv/bin/python tests/e2e_cohort_check.py       # 177 checks of cohort retrieval
 ```
 
 The pytest suite builds its own synthetic corpus in a temp directory and never touches the model checkpoint or the 963 MB memmap, so it runs on a machine that has neither.

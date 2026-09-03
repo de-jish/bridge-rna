@@ -100,10 +100,121 @@ MAP_RETRIEVAL_READY_JS = """() => {
 }"""
 
 
+STABLE_MAP_X_RANGE_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  const range = gd && gd._fullLayout && gd._fullLayout.xaxis
+    && gd._fullLayout.xaxis.range;
+  if (!range || range.length !== 2) return null;
+  const value = JSON.stringify(Array.from(range));
+  const now = performance.now();
+  const prior = window.__bmE2ERangeStability;
+  if (!prior || prior.value !== value) {
+    window.__bmE2ERangeStability = {value, since: now};
+    return null;
+  }
+  return now - prior.since >= 750 ? Array.from(range) : null;
+}"""
+
+
+EVIDENCE_ABSENT_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  return !!(gd && gd._fullData && !gd._fullData.some(t =>
+    ['512-D evidence neighbor', 'focused evidence neighbor'].includes(t.name)));
+}"""
+
+
+STABLE_DRAWER_GEOMETRY_JS = """expectedWidth => {
+  const read = () => {
+    const rect = selector => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return {left: +r.left.toFixed(1), right: +r.right.toFixed(1),
+              top: +r.top.toFixed(1), bottom: +r.bottom.toFixed(1),
+              width: +r.width.toFixed(1), height: +r.height.toFixed(1)};
+    };
+    const overlaps = (a, b) => !!(a && b && a.left < b.right &&
+      a.right > b.left && a.top < b.bottom && a.bottom > b.top);
+    const drawer = rect('#neighborhood-drawer');
+    const plot = rect('.bm-plot-wrap');
+    const modebar = rect('.bm-plot-wrap .modebar');
+    const close = rect('#neighborhood-close');
+    const tabs = rect('#neighborhood-tab');
+    const search = rect('#neighborhood-search');
+    const inside = child => !!(child && drawer &&
+      child.left >= drawer.left - 1 && child.right <= drawer.right + 1 &&
+      child.top >= drawer.top - 1 && child.bottom <= drawer.bottom + 1);
+    return {
+      viewport: {width: innerWidth, height: innerHeight},
+      drawer, plot, modebar,
+      horizontalOverflow: document.scrollingElement.scrollWidth > innerWidth + 1,
+      controlsInside: inside(close) && inside(tabs) && inside(search),
+      modebarObscured: overlaps(modebar, drawer),
+    };
+  };
+  const current = read();
+  if (!current.drawer || !current.plot
+      || current.viewport.width !== expectedWidth) return null;
+  const value = JSON.stringify(current);
+  const now = performance.now();
+  const prior = window.__bmE2EGeometryStability;
+  if (!prior || prior.value !== value) {
+    window.__bmE2EGeometryStability = {value, since: now};
+    return null;
+  }
+  return now - prior.since >= 250 ? {...current, stable: true} : null;
+}"""
+
+
+def _figure_response_for(changed_prop: str):
+    """Match the completed Dash figure callback caused by one interaction."""
+    def matches(response) -> bool:
+        if (response.request.method != "POST"
+                or "/_dash-update-component" not in response.url):
+            return False
+        try:
+            payload = response.request.post_data_json
+        except Exception:
+            return False
+        output = str(payload.get("output", ""))
+        return ("manifold-graph.figure" in output
+                and changed_prop in payload.get("changedPropIds", []))
+
+    return matches
+
+
 def _map_x_range(page) -> list[float]:
-    return page.evaluate(
-        "() => document.querySelector('#manifold-graph .js-plotly-plot')"
-        "._fullLayout.xaxis.range.slice()")
+    page.evaluate("() => { delete window.__bmE2ERangeStability; }")
+    return page.wait_for_function(
+        STABLE_MAP_X_RANGE_JS, timeout=90_000).json_value()
+
+
+def _wait_for_evidence(page, trace_type: str | None = None) -> dict:
+    """Wait for one complete source trace and Plotly's decoded render."""
+    page.wait_for_function(
+        """expectedType => {
+          const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+          const raw = (gd && gd.data || []).filter(
+            t => t.name === '512-D evidence neighbor');
+          const full = (gd && gd._fullData || []).filter(
+            t => t.name === '512-D evidence neighbor');
+          return raw.length === 1 && full.length === 1
+            && full[0].x && full[0].x.length === 250
+            && (!expectedType || full[0].type === expectedType);
+        }""",
+        arg=trace_type, timeout=90_000)
+    return _trace_state(page)
+
+
+def _tab_until(page, predicate_js: str, *, reverse: bool = False,
+               max_presses: int = 200) -> bool:
+    """Reach a control with genuine Tab presses, never synthetic focus."""
+    key = "Shift+Tab" if reverse else "Tab"
+    for _ in range(max_presses):
+        page.keyboard.press(key)
+        if page.evaluate(predicate_js):
+            return True
+    return False
 
 
 def _trace_state(page) -> dict:
@@ -128,38 +239,11 @@ def _trace_state(page) -> dict:
     }""")
 
 
-def _drawer_geometry(page) -> dict:
-    """Measure the drawer, its controls, and the Plotly modebar in the viewport."""
-    return page.evaluate("""() => {
-      const rect = selector => {
-        const el = document.querySelector(selector);
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return {left: +r.left.toFixed(1), right: +r.right.toFixed(1),
-                top: +r.top.toFixed(1), bottom: +r.bottom.toFixed(1),
-                width: +r.width.toFixed(1), height: +r.height.toFixed(1)};
-      };
-      const overlaps = (a, b) => !!(a && b && a.left < b.right &&
-        a.right > b.left && a.top < b.bottom && a.bottom > b.top);
-      const drawer = rect('#neighborhood-drawer');
-      const plot = rect('.bm-plot-wrap');
-      const modebar = rect('.bm-plot-wrap .modebar');
-      const close = rect('#neighborhood-close');
-      const tabs = rect('#neighborhood-tab');
-      const search = rect('#neighborhood-search');
-      const inside = child => !!(child && drawer &&
-        child.left >= drawer.left - 1 && child.right <= drawer.right + 1 &&
-        child.top >= drawer.top - 1 && child.bottom <= drawer.bottom + 1);
-      return {
-        viewport: {width: innerWidth, height: innerHeight},
-        drawer, plot, modebar,
-        position: getComputedStyle(document.querySelector('#neighborhood-drawer')).position,
-        horizontalOverflow:
-          document.scrollingElement.scrollWidth > innerWidth + 1,
-        controlsInside: inside(close) && inside(tabs) && inside(search),
-        modebarObscured: overlaps(modebar, drawer),
-      };
-    }""")
+def _drawer_geometry(page, width: int) -> dict:
+    """Wait until responsive layout settles, then measure its behavior."""
+    page.evaluate("() => { delete window.__bmE2EGeometryStability; }")
+    return page.wait_for_function(
+        STABLE_DRAWER_GEOMETRY_JS, arg=width, timeout=30_000).json_value()
 
 
 def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> None:
@@ -167,20 +251,24 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.locator("#see-on-map").click()
     page.wait_for_url(re.compile(r"/map$"), timeout=30_000)
     page.wait_for_function(MAP_RETRIEVAL_READY_JS, timeout=180_000)
-    page.wait_for_timeout(2500)
 
     print("\n=== 7b. exact retrieval neighborhood explorer ===")
     explore = page.get_by_role("button", name="Explore neighborhood")
     c.ok(explore.is_visible(), "Explore neighborhood is offered for a real retrieval")
+    reached_explore = _tab_until(
+        page, "() => document.activeElement.id === 'explore-neighborhood'")
+    if not c.ok(reached_explore,
+                "Tab reaches Explore neighborhood without synthetic focus"):
+        return
     before = _map_x_range(page)
     retrieval_runs = dash_changes.count("search-button.n_clicks")
     t0 = time.perf_counter()
-    explore.click()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    page.wait_for_function(
-        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
-        " return gd && (gd._fullData || []).some("
-        "t => t.name === '512-D evidence neighbor'); }", timeout=90_000)
+    traces = _wait_for_evidence(page, "scattergl")
     first_open = time.perf_counter() - t0
     c.note(f"first neighborhood open and evidence render in {first_open:.2f}s")
 
@@ -196,7 +284,6 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     meta = page.locator("#neighborhood-meta").inner_text()
     c.ok("250 nearest" in meta and "512-D" in meta,
          f"the drawer names its exact evidence depth and space: {meta!r}")
-    traces = _trace_state(page)
     c.ok(traces["evidenceTraces"] == 1,
          "the exact evidence neighborhood is drawn once")
     c.ok(traces["evidenceMarks"] == 250,
@@ -208,9 +295,12 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     # contract rather than three redundant Tab stops.
     c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-heading",
          "opening focuses the drawer heading for announcement")
-    page.keyboard.press("Shift+Tab")
-    c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-close",
-         "Shift+Tab reaches Close")
+    reached_close = _tab_until(
+        page, "() => document.activeElement.id === 'neighborhood-close'",
+        reverse=True, max_presses=4)
+    if not c.ok(reached_close,
+                "Shift+Tab reaches Close without synthetic focus"):
+        return
     page.keyboard.press("Tab")
     active_radio = page.evaluate("""() => ({
       type: document.activeElement.type,
@@ -218,6 +308,9 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     })""")
     c.ok(active_radio == {"type": "radio", "value": "overview"},
          f"Tab reaches the explorer tabs at Overview ({active_radio})")
+    overview_radio = page.get_by_role("radio", name="Overview", exact=True)
+    c.ok(overview_radio.count() == 1 and overview_radio.is_checked(),
+         "Overview has its accessible name and selected radio state")
 
     page.keyboard.press("ArrowRight")
     page.wait_for_selector(".bm-neighborhood-study", timeout=30_000)
@@ -240,10 +333,13 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.keyboard.press("Tab")
     c.ok(page.evaluate(
         "() => document.activeElement.classList.contains('bm-neighborhood-study')"),
-        "Tab reaches the first study row")
+         "Tab reaches the first study row")
 
     runs_before_focus = dash_changes.count("search-button.n_clicks")
-    page.keyboard.press("Enter")
+    with page.expect_response(
+            _figure_response_for("neighborhood-focus-store.data"),
+            timeout=90_000):
+        page.keyboard.press("Enter")
     page.wait_for_function(
         "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
         " return gd && (gd._fullData || []).some("
@@ -254,11 +350,20 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.ok(dash_changes.count("search-button.n_clicks") == runs_before_focus,
          "study focus does not rerun retrieval")
 
+    reached_studies = _tab_until(page, """() => {
+      const active = document.activeElement;
+      return active && active.type === 'radio' && active.value === 'studies'
+        && !!active.closest('#neighborhood-tab');
+    }""", max_presses=220)
+    if not c.ok(
+            reached_studies,
+            "Tab traversal returns from study rows to the selected Studies tab"):
+        return
+    page.keyboard.press("ArrowRight")
     samples_radio = page.get_by_role("radio", name=re.compile(r"^Samples\s+250$"))
-    page.get_by_text(re.compile(r"^Samples\s+250$"), exact=True).click()
     page.wait_for_selector(".bm-neighborhood-sample", timeout=30_000)
     c.ok(samples_radio.count() == 1 and samples_radio.is_checked(),
-         "the Samples tab has a radio role and exact count-bearing name")
+         "the Samples tab has a radio role, exact count-bearing name, and keyboard state")
     sample_rows = page.locator(".bm-neighborhood-sample")
     c.ok(sample_rows.count() == 250,
          f"the complete evidence list contains 250 samples ({sample_rows.count()})")
@@ -270,15 +375,17 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     search = page.get_by_role("searchbox", name="Search neighborhood samples")
     c.ok(search.count() == 1 and search.is_visible(),
          "the sample search is a named searchbox")
-    samples_radio.focus()
     page.keyboard.press("Tab")
     c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-search",
-         "Tab reaches sample search")
+         "Tab reaches sample search from Samples")
     page.keyboard.press("Tab")
     c.ok(page.evaluate(
         "() => document.activeElement.classList.contains('bm-neighborhood-sample')"),
-        "Tab reaches the first sample row")
-    search.fill(first_gsm)
+         "Tab reaches the first sample row")
+    page.keyboard.press("Shift+Tab")
+    c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-search",
+         "Shift+Tab returns to sample search")
+    page.keyboard.type(first_gsm)
     page.wait_for_function(
         "() => document.querySelectorAll('.bm-neighborhood-sample').length === 1",
         timeout=30_000)
@@ -286,13 +393,12 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
          f"the complete list is searchable to one exact GSM ({first_gsm})")
 
     print("\n=== 7c. close, reopen, frame, and 3-D ===")
-    page.get_by_role("button", name="Close neighborhood explorer").click()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.get_by_role("button", name="Close neighborhood explorer").click()
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
-    page.wait_for_function(
-        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
-        " return gd && !(gd._fullData || []).some(t => "
-        "['512-D evidence neighbor', 'focused evidence neighbor'].includes(t.name)); }",
-        timeout=90_000)
+    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
     closed = _trace_state(page)
     white = {"#fff", "#ffffff", "rgb(255, 255, 255)", "white"}
     c.ok(closed["evidenceTraces"] == 0 and closed["focusTraces"] == 0,
@@ -303,24 +409,38 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
          "Close preserves the requested white hit rings")
 
     before_reopen = _map_x_range(page)
-    explore.click()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        explore.click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    page.wait_for_timeout(2000)
+    _wait_for_evidence(page, "scattergl")
     after_reopen = _map_x_range(page)
     c.ok(max(abs(a - b) for a, b in zip(before_reopen, after_reopen)) < 0.05,
          "Explore reopens without changing the viewport")
-    page.get_by_role("button", name="Close neighborhood explorer").click()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.get_by_role("button", name="Close neighborhood explorer").click()
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
 
     before_frame = _map_x_range(page)
-    page.get_by_role("button", name="Frame the retrieval").click()
+    with page.expect_response(
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.get_by_role("button", name="Frame the retrieval").click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    page.wait_for_timeout(3000)
+    _wait_for_evidence(page, "scattergl")
+    before_frame_span = abs(before_frame[1] - before_frame[0])
     framed = _map_x_range(page)
-    c.ok(abs(framed[1] - framed[0]) < abs(before_frame[1] - before_frame[0]),
+    c.ok(abs(framed[1] - framed[0]) < before_frame_span,
          f"Frame opens the drawer and narrows the 2-D view ({framed})")
-    page.get_by_role("button", name="Close neighborhood explorer").click()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.get_by_role("button", name="Close neighborhood explorer").click()
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
 
     set_segment(page, "Dimensions", "3D")
     page.wait_for_function(
@@ -330,10 +450,12 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.ok(not page.get_by_role("button", name="Frame the retrieval").is_visible(),
          "3-D hides Frame, whose 2-D ranges its camera would ignore")
     c.ok(explore.is_visible(), "Explore remains visible in 3-D")
-    explore.click()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        explore.click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    page.wait_for_timeout(2500)
-    three_d = _trace_state(page)
+    three_d = _wait_for_evidence(page, "scatter3d")
     c.ok(three_d["evidenceTraces"] == 1
          and three_d["evidenceTypes"] == ["scatter3d"],
          f"Explore draws the evidence once in 3-D ({three_d['evidenceTypes']})")
@@ -352,26 +474,26 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     for width, height in ((1440, 1000), (1024, 900), (768, 900), (320, 780)):
         page.set_viewport_size({"width": width, "height": height})
         page.locator("#neighborhood-drawer").scroll_into_view_if_needed()
-        page.wait_for_timeout(1200)
-        geom = _drawer_geometry(page)
+        geom = _drawer_geometry(page, width)
         narrow = width <= 900
-        expected_position = "absolute" if narrow else "static"
-        c.ok(geom["position"] == expected_position,
-             f"{width}px uses the {'bottom sheet' if narrow else 'docked drawer'}")
+        c.ok(geom["stable"], f"{width}px responsive geometry settles")
         c.ok(not geom["horizontalOverflow"],
              f"{width}px has no horizontal page overflow")
         c.ok(geom["controlsInside"],
              f"{width}px keeps Close, tabs, and search inside the drawer")
-        c.ok(not geom["modebarObscured"],
+        c.ok(geom["modebar"] is not None and not geom["modebarObscured"],
              f"{width}px leaves the Plotly modebar unobscured")
+        d = geom["drawer"]
+        v = geom["viewport"]
+        c.ok(d["left"] >= -1 and d["right"] <= v["width"] + 1
+             and d["top"] >= -1 and d["bottom"] <= v["height"] + 1,
+             f"the {width}px drawer stays within the viewport ({d})")
         if narrow:
-            d = geom["drawer"]
-            v = geom["viewport"]
-            c.ok(d["left"] >= -1 and d["right"] <= v["width"] + 1
-                 and d["top"] >= -1 and d["bottom"] <= v["height"] + 1,
-                 f"the {width}px bottom sheet stays within the viewport ({d})")
+            c.ok(abs(d["left"]) <= 1 and abs(d["right"] - width) <= 1
+                 and geom["plot"]["top"] < d["top"] < geom["plot"]["bottom"],
+                 f"the {width}px drawer behaves as a full-width bottom sheet")
         else:
-            c.ok(geom["drawer"]["left"] >= geom["plot"]["right"] - 1,
+            c.ok(d["left"] >= geom["plot"]["right"] - 1,
                  f"the {width}px drawer docks beside, not over, the map")
         page.screenshot(path=str(SHOTS / f"10-neighborhood-{width}.png"))
 

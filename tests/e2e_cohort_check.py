@@ -34,6 +34,7 @@ from playwright.sync_api import sync_playwright
 
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
+CHROME = os.environ.get("MANIFOLD_CHROME")
 SHOTS = Path(os.environ.get("MANIFOLD_E2E_SHOTS",
                             Path(tempfile.gettempdir()) / "bm-cohort-shots"))
 
@@ -172,6 +173,93 @@ MAP_OVERLAY_JS = """() => {
   }
   return out;
 }"""
+
+
+NEIGHBORHOOD_EVIDENCE_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  const raw = (gd && gd.data || []).filter(
+    t => t.name === '512-D evidence neighbor');
+  const full = (gd && gd._fullData || []).filter(
+    t => t.name === '512-D evidence neighbor');
+  return {
+    sourceTraces: raw.length,
+    renderedTraces: full.length,
+    marks: full.length === 1 && full[0].x ? full[0].x.length : 0,
+  };
+}"""
+
+
+STABLE_MAP_RANGE_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  const x = gd && gd._fullLayout && gd._fullLayout.xaxis
+    && gd._fullLayout.xaxis.range;
+  const y = gd && gd._fullLayout && gd._fullLayout.yaxis
+    && gd._fullLayout.yaxis.range;
+  if (!x || !y || x.length !== 2 || y.length !== 2) return null;
+  const ranges = {x: Array.from(x), y: Array.from(y)};
+  const value = JSON.stringify(ranges);
+  const now = performance.now();
+  const prior = window.__bmCohortRangeStability;
+  if (!prior || prior.value !== value) {
+    window.__bmCohortRangeStability = {value, since: now};
+    return null;
+  }
+  return now - prior.since >= 750 ? ranges : null;
+}"""
+
+
+def _figure_response_for(changed_prop: str):
+    """Match the completed map-figure callback for one Dash interaction."""
+    def matches(response) -> bool:
+        if (response.request.method != "POST"
+                or "/_dash-update-component" not in response.url):
+            return False
+        try:
+            payload = response.request.post_data_json
+        except Exception:
+            return False
+        return ("manifold-graph.figure" in str(payload.get("output", ""))
+                and changed_prop in payload.get("changedPropIds", []))
+
+    return matches
+
+
+def _response_evidence_gsms(response) -> list[str]:
+    """Read the exact evidence identity from the response being awaited."""
+    figure = response.json()["response"]["manifold-graph"]["figure"]
+    traces = [trace for trace in figure.get("data", [])
+              if trace.get("name") == "512-D evidence neighbor"]
+    if len(traces) != 1:
+        raise AssertionError(
+            f"figure response contained {len(traces)} evidence traces")
+    return [str(row[2] or "") for row in traces[0].get("customdata", [])]
+
+
+def _wait_for_evidence_gsms(page, expected: list[str]) -> dict:
+    """Wait until Plotly rendered the response's exact 250-sample identity."""
+    page.wait_for_function(
+        """expected => {
+          const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+          const raw = (gd && gd.data || []).filter(
+            t => t.name === '512-D evidence neighbor');
+          const full = (gd && gd._fullData || []).filter(
+            t => t.name === '512-D evidence neighbor');
+          const rows = raw.length === 1 && Array.isArray(raw[0].customdata)
+            ? raw[0].customdata : [];
+          return raw.length === 1 && full.length === 1
+            && full[0].x && full[0].x.length === 250
+            && rows.length === expected.length
+            && rows.every((row, index) => String(row[2] || '') === expected[index]);
+        }""", arg=expected, timeout=90_000)
+    return page.evaluate(NEIGHBORHOOD_EVIDENCE_JS)
+
+
+def _stable_map_span(page) -> float:
+    """Read the x span only after Plotly's responsive relayout has settled."""
+    page.evaluate("() => { delete window.__bmCohortRangeStability; }")
+    ranges = page.wait_for_function(
+        STABLE_MAP_RANGE_JS, timeout=90_000).json_value()
+    return float(ranges["x"][1] - ranges["x"][0])
 
 
 class Checks:
@@ -314,7 +402,8 @@ def run_cohort_search(page, timeout: int = 180_000) -> float:
     return time.time() - t0
 
 
-def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
+def run_checks(page, c: "Checks", base: str, console_errors: list[str],
+               network_errors: list[str], dash_changes: list[str]) -> None:
     """Every check, against one page. Extracted so `--loops` can repeat it.
 
     One pass proves the feature works. Repeating it is what catches the class of
@@ -760,6 +849,122 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
          f"each cohort is named in both of its rows: {names}")
     shot(page, "07-cohort-on-map")
 
+    # ---- 8a. each comparison arm owns its evidence neighborhood -----
+    #
+    # Wait for the *figure response caused by the arm input*, then require the
+    # browser's raw source trace to carry that response's exact GSM ordering.
+    # A generic "one trace exists" wait can succeed on arm A while arm B is
+    # still in flight; tying both sides to the response prevents that stale
+    # Plotly read from turning a label-only switch into a passing check.
+    print("\n=== 8a. comparison evidence switches independently ===")
+    requested_before = page.evaluate(MAP_OVERLAY_JS) or {}
+    runs_before_neighborhood = {
+        prop: dash_changes.count(prop)
+        for prop in ("cohort-search-button.n_clicks", "search-button.n_clicks")
+    }
+
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000) as response_info:
+        page.get_by_role("button", name="Explore neighborhood").click()
+    page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
+    evidence_gsms_a = _response_evidence_gsms(response_info.value)
+    evidence_a = _wait_for_evidence_gsms(page, evidence_gsms_a)
+    page.wait_for_selector("#neighborhood-arm input[value='b']", timeout=30_000)
+    arm_a = page.locator(
+        "#neighborhood-arm .dash-options-list-option:has(input[value='a'])")
+    arm_b = page.locator(
+        "#neighborhood-arm .dash-options-list-option:has(input[value='b'])")
+    arm_label_a = arm_a.inner_text().strip()
+    arm_label_b = arm_b.inner_text().strip()
+    heading_a = page.locator("#neighborhood-heading").inner_text().strip()
+    c.ok(arm_label_a.startswith("A · ") and arm_label_b.startswith("B · ")
+         and arm_label_a != arm_label_b,
+         f"the explorer names two distinct comparison arms: "
+         f"{arm_label_a!r}, {arm_label_b!r}")
+    c.ok(page.get_by_role("radio", name=re.compile(r"^A · ")).is_checked(),
+         "the comparison explorer opens on arm A")
+    c.ok(evidence_a["sourceTraces"] == 1
+         and evidence_a["renderedTraces"] == 1
+         and evidence_a["marks"] == 250
+         and len(evidence_gsms_a) == 250,
+         "arm A owns exactly one complete 250-point evidence trace "
+         f"({evidence_a['sourceTraces']} source, "
+         f"{evidence_a['renderedTraces']} rendered, {evidence_a['marks']} marks)")
+
+    page.locator(
+        "#neighborhood-tab .dash-options-list-option:has(input[value='samples'])"
+    ).click()
+    page.wait_for_function(
+        """expected => {
+          const rows = [...document.querySelectorAll(
+            '.bm-neighborhood-sample .bm-neighborhood-row-primary')]
+            .map(row => row.textContent.trim());
+          return rows.length === expected.length
+            && rows.every((gsm, index) => gsm === expected[index]);
+        }""", arg=evidence_gsms_a, timeout=30_000)
+    rows_a = page.locator(
+        ".bm-neighborhood-sample .bm-neighborhood-row-primary").all_inner_texts()
+
+    with page.expect_response(
+            _figure_response_for("neighborhood-arm.value"),
+            timeout=90_000) as response_info:
+        arm_b.click()
+    evidence_gsms_b = _response_evidence_gsms(response_info.value)
+    evidence_b = _wait_for_evidence_gsms(page, evidence_gsms_b)
+    page.wait_for_function(
+        """state => {
+          const heading = document.querySelector('#neighborhood-heading');
+          const rows = [...document.querySelectorAll(
+            '.bm-neighborhood-sample .bm-neighborhood-row-primary')]
+            .map(row => row.textContent.trim());
+          return heading && heading.textContent.trim() !== state.heading
+            && rows.length === state.gsms.length
+            && rows.every((gsm, index) => gsm === state.gsms[index]);
+        }""", arg={"heading": heading_a, "gsms": evidence_gsms_b},
+        timeout=30_000)
+    heading_b = page.locator("#neighborhood-heading").inner_text().strip()
+    rows_b = page.locator(
+        ".bm-neighborhood-sample .bm-neighborhood-row-primary").all_inner_texts()
+    c.ok(page.get_by_role("radio", name=re.compile(r"^B · ")).is_checked(),
+         "switching A to B updates the selected arm's radio state")
+    c.ok(heading_a != heading_b,
+         f"switching A to B changes the active arm heading: "
+         f"{heading_a!r} -> {heading_b!r}")
+    c.ok(evidence_b["sourceTraces"] == 1
+         and evidence_b["renderedTraces"] == 1
+         and evidence_b["marks"] == 250
+         and len(evidence_gsms_b) == 250,
+         "arm B replaces A with one complete 250-point evidence trace "
+         f"({evidence_b['sourceTraces']} source, "
+         f"{evidence_b['renderedTraces']} rendered, {evidence_b['marks']} marks)")
+    c.ok(rows_a == evidence_gsms_a and rows_b == evidence_gsms_b
+         and rows_a != rows_b,
+         "the complete 250-row Samples list changes with the selected arm")
+    c.ok(set(evidence_gsms_a) != set(evidence_gsms_b),
+         f"the exact evidence point set changes with the arm "
+         f"({len(set(evidence_gsms_a) & set(evidence_gsms_b))} shared)")
+    c.ok((page.evaluate(MAP_OVERLAY_JS) or {}) == requested_before,
+         "arm switching preserves both cohorts' requested-hit traces")
+    c.ok({prop: dash_changes.count(prop) for prop in runs_before_neighborhood}
+         == runs_before_neighborhood,
+         "opening and switching evidence does not rerun either retrieval path")
+    shot(page, "11-neighborhood-comparison")
+
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.get_by_role("button", name="Close neighborhood explorer").click()
+    page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(
+        """() => {
+          const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+          return gd && !(gd._fullData || []).some(t =>
+            ['512-D evidence neighbor', 'focused evidence neighbor'].includes(t.name));
+        }""", timeout=90_000)
+    c.ok((page.evaluate(MAP_OVERLAY_JS) or {}) == requested_before,
+         "Close removes comparison evidence but preserves requested-hit traces")
+
     # The claim that dropping the rank numerals is safe because "the
     # hover says strictly more" was untrue: two traces at one coordinate
     # resolve to one tooltip, so a shared hit named one arm only.
@@ -887,26 +1092,33 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
     # pooled queries and twelve member marks with it.
     print("\n=== 8c. framing a comparison, and the reset that undoes it ===")
 
-    def map_span():
-        return page.evaluate(
-            "() => { const fl = document.querySelector"
-            "('#manifold-graph .js-plotly-plot')._fullLayout;"
-            " return fl.xaxis.range[1] - fl.xaxis.range[0]; }")
-
     drawn = page.evaluate(MAP_OVERLAY_JS) or {}
-    whole = map_span()
+    whole = _stable_map_span(page)
     c.ok(not page.locator("#reset-view").is_visible(),
          "the map is unframed until something frames it")
-    page.locator("#frame-retrieval").click()
-    page.wait_for_timeout(3000)
-    framed = map_span()
+    with page.expect_response(
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.locator("#frame-retrieval").click()
+    page.locator("#neighborhood-drawer").wait_for(
+        state="visible", timeout=30_000)
+    framed = _stable_map_span(page)
     c.ok(framed < whole * 0.9,
          f"framing a comparison narrows the view ({framed:.2f} of {whole:.2f})")
     c.ok(page.locator("#reset-view").is_visible(),
          "and the reset appears once it has")
-    page.locator("#reset-view").click()
-    page.wait_for_timeout(3000)
-    back = map_span()
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.get_by_role("button", name="Close neighborhood explorer").click()
+    page.locator("#neighborhood-drawer").wait_for(
+        state="hidden", timeout=30_000)
+    framed_closed = _stable_map_span(page)
+    c.ok(abs(framed_closed - framed) < max(framed * 0.02, 0.001),
+         f"closing the drawer preserves the explicit frame ({framed_closed:.2f})")
+    with page.expect_response(
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.locator("#reset-view").click()
+    back = _stable_map_span(page)
     c.ok(abs(back - whole) < whole * 0.02,
          f"the reset restores the whole map ({back:.2f})")
     c.ok(not page.locator("#reset-view").is_visible(),
@@ -916,12 +1128,24 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
          f"both cohorts survive the reset: {len(after.get('members', []))} arms")
     c.ok(len(after.get("hits", [])) == len(drawn.get("hits", [])),
          "and so does every hit they retrieved")
-    page.locator("#frame-retrieval").click()
-    page.wait_for_timeout(3000)
-    c.ok(abs(map_span() - framed) < max(framed * 0.02, 0.001),
-         f"re-framing gives the same window, not a stale one ({map_span():.2f})")
-    page.locator("#reset-view").click()
-    page.wait_for_timeout(2500)
+    with page.expect_response(
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.locator("#frame-retrieval").click()
+    page.locator("#neighborhood-drawer").wait_for(
+        state="visible", timeout=30_000)
+    reframed = _stable_map_span(page)
+    c.ok(abs(reframed - framed) < max(framed * 0.02, 0.001),
+         f"re-framing gives the same window, not a stale one ({reframed:.2f})")
+    with page.expect_response(
+            _figure_response_for("neighborhood-open-store.data"),
+            timeout=90_000):
+        page.get_by_role("button", name="Close neighborhood explorer").click()
+    page.locator("#neighborhood-drawer").wait_for(
+        state="hidden", timeout=30_000)
+    with page.expect_response(
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.locator("#reset-view").click()
+    _stable_map_span(page)
 
     # ---- 9. several cohorts, several depths -------------------------
     print("\n=== 9. other studies, cohorts and depths ===")
@@ -1005,6 +1229,9 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str]) -> None:
              if "favicon" not in e.lower()
              and "ResizeObserver" not in e]
     c.ok(not noise, f"no console errors ({len(noise)}): {noise[:2]}")
+    c.ok(not network_errors,
+         f"no failed requests or HTTP errors ({len(network_errors)}): "
+         f"{network_errors[:2]}")
 
 
 def main() -> int:
@@ -1039,7 +1266,8 @@ def main() -> int:
             return 1
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=not args.headed)
+            browser = p.chromium.launch(
+                headless=not args.headed, executable_path=CHROME)
             global _RUN
             for run in range(1, max(1, args.loops) + 1):
                 _RUN = run
@@ -1052,11 +1280,39 @@ def main() -> int:
                 # retrieval path holding whatever the previous pass left in it.
                 page = browser.new_page(viewport={"width": 1680, "height": 1010})
                 console_errors: list[str] = []
+                network_errors: list[str] = []
+                dash_changes: list[str] = []
                 page.on("console", lambda m: console_errors.append(m.text)
                         if m.type == "error" else None)
                 page.on("pageerror", lambda e: console_errors.append(str(e)))
+
+                def record_response(response):
+                    if response.status >= 400:
+                        network_errors.append(
+                            f"HTTP {response.status} {response.url}")
+
+                def record_failed_request(request):
+                    network_errors.append(
+                        f"{request.failure or 'request failed'} {request.url}")
+
+                def record_dash_changes(request):
+                    if (request.method != "POST"
+                            or "/_dash-update-component" not in request.url):
+                        return
+                    try:
+                        payload = request.post_data_json
+                    except Exception:
+                        return
+                    dash_changes.extend(
+                        str(change)
+                        for change in payload.get("changedPropIds", []))
+
+                page.on("response", record_response)
+                page.on("requestfailed", record_failed_request)
+                page.on("request", record_dash_changes)
                 try:
-                    run_checks(page, c, base, console_errors)
+                    run_checks(page, c, base, console_errors,
+                               network_errors, dash_changes)
                 finally:
                     page.close()
             browser.close()

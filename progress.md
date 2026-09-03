@@ -19,20 +19,20 @@ The footer states the boundary the marks depend on: nearest in 512-D is not ever
 
 **Real browser verification.** A cached OSDR query for `Mmus_C57-6J_EYE_FLT_Rep1_M23` produced exactly one `512-D evidence neighbor` trace with 250 marks and a complete `Samples 250` list; exact GSM search narrowed it to one row and the leading study focus drew 17 marks.
 Explore preserved the UMAP x range exactly on first open and reopen; Frame narrowed it; Explore remained available and produced one `scatter3d` evidence trace in 3-D.
-A real OSD-137 comparison switched from `Liver · Basal Control` to `Liver · Ground Control`: both arms had their own distinct 250-row evidence result, the requested-hit traces were unchanged, and the search callback still had run once.
+A permanent OSD-137 comparison path switches from `Liver · Basal Control` to `Liver · Ground Control`: both arms have their own distinct 250-row evidence result (157 shared), the requested-hit traces remain unchanged, and the search callback still runs only once.
 
 At 1440 and 1024 px the 390 px drawer docked beside the canvas; at 768 and 320 px it became a bounded bottom sheet.
 All four layouts kept Close, tabs and search inside the drawer, kept the Plotly modebar clear and had no horizontal page overflow.
-Keyboard verification covered the focused drawer heading, Close, radio-tab roles and count-bearing names, the named searchbox, and named button roles for study/sample rows.
+Keyboard verification uses real Tab/Shift+Tab traversal and keyboard activation to cover Explore, the focused drawer heading, Close, all three radio tabs, the named searchbox, and named button roles for study/sample rows.
 Fresh final-run timings on the real artifacts were **1.9 s to the first interactive full-corpus frame** and **0.32 s from the first Explore click to the rendered evidence trace**; the two-arm comparison scan took 2.29 s.
 Screenshots are outside the tree at `/tmp/bridge-rna-task6-e2e/10-neighborhood-{320,768,1024,1440}.png` and `11-neighborhood-comparison.png`; the shipped README map image was not changed.
 
 **Two real browser defects, both fixed with focused regressions.** Docking first changed the UMAP x range because Plotly's equal-scale axes handled the narrower canvas by constraining ranges; Cartesian axes now use `constrain="domain"` so the axis domains, not the data window, absorb the resize.
 The remaining small shift came from restating `autorange` during a neighborhood-only figure update; `viewport_axes(..., preserve=True)` now leaves unframed axes untouched for open, arm and focus updates while explicit reset/projection changes still request autorange.
 
-**Task 6 files.** `tests/e2e_check.py` gained the repeatable real-browser assertions and optional system-Chrome path; `manifold/theme.py`, `manifold/callbacks.py` and `tests/test_app.py` carry the two reproduced viewport corrections and regressions; `README.md`, `docs/design-notes.md` and this log carry the user/design/verification record.
+**Task 6 files.** `tests/e2e_check.py` carries the single-query browser assertions and optional system-Chrome path; `tests/e2e_cohort_check.py` now carries the permanent comparison-arm assertions and the same optional browser path; `manifold/theme.py`, `manifold/callbacks.py` and `tests/test_app.py` carry the two reproduced viewport corrections and regressions; `README.md`, `docs/design-notes.md` and this log carry the user/design/verification record.
 
-**Verification.** 464 pytest passed and 1 real-counts availability test skipped in 14.50 s; all 184 real-browser checks passed against the read-only artifact cache, with zero console errors, failed requests or HTTP errors.
+**Verification.** 464 pytest passed and 1 real-counts availability test skipped in 14.44 s; 192 primary and 177 cohort real-browser checks passed against the read-only artifact cache, with zero console errors, failed requests or HTTP errors.
 Chrome DevTools Axi 0.1.29 could launch an isolated system-Chrome page but its wrapper did not pass the `pageId` required by the installed MCP backend to snapshot/evaluate it, so DOM, accessibility, network and console assertions were completed in an isolated Playwright system-Chrome context instead.
 Every temporary server was terminated after its run.
 
