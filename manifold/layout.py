@@ -496,6 +496,13 @@ def _key_glyph(kind: str, color: str | None = None):
     `kind` selects the shape from the stylesheet; `color` is the fill for the
     shapes that have one, applied inline so it can come straight from `theme`.
     """
+    if kind == "neighborhood":
+        # A distinct open dot, with its hue sourced from the same theme token
+        # as Plotly rather than mirrored into the stylesheet.
+        return html.Span(
+            className="bm-key-glyph is-neighborhood",
+            style={"border": f"2px solid {color}", "borderRadius": "50%",
+                   "boxSizing": "border-box"})
     fill = ([html.Span(className="bm-key-glyph-fill",
                        style={"background": color})] if color else [])
     return html.Span(className=f"bm-key-glyph is-{kind}", children=fill)
@@ -527,7 +534,7 @@ def _member_shape(dims: str) -> str:
 
 
 def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
-                           dims: str) -> list:
+                           dims: str, neighborhood: dict | None = None) -> list:
     """The retrieval section of the key: every overlay mark, decoded.
 
     `overlay` is the **full** payload, including an arm the user has unticked,
@@ -550,8 +557,14 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     two rows and no headings, because with one query on screen there is nothing
     for a name or a group to distinguish it from.
     """
+    evidence_row = (_key_row(
+        "neighborhood", "512-D evidence neighbor",
+        len(neighborhood.get("points") or []), theme.NEIGHBORHOOD_COLOR)
+                    if neighborhood and neighborhood.get("points") else None)
     if not overlay or not overlay.get("cohorts"):
-        return []
+        rows = [evidence_row] if evidence_row is not None else []
+        return ([html.Div(className="bm-key bm-key--retrieval", children=rows)]
+                if rows else [])
 
     cohorts = overlay["cohorts"]
     shape = _member_shape(dims)
@@ -575,6 +588,8 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
                 shape, "pooled member" if n_members > 1 else "the query sample",
                 "hidden" if hidden else n_members, theme.RETRIEVAL_QUERY,
                 hidden=hidden))
+        if evidence_row is not None:
+            rows.append(evidence_row)
         rows.append(_key_row("hit-a", "retrieved hit",
                              "hidden" if hidden else len(c["hit_points"]),
                              hidden=hidden))
@@ -591,6 +606,8 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     rows = [html.Div("Pooled members", className="bm-key-head")]
     rows += [arm(c, shape, len(c["query_points"]), hues[c["role"]])
              for c in cohorts]
+    if evidence_row is not None:
+        rows.append(evidence_row)
     rows.append(html.Div("Retrieved hits", className="bm-key-head"))
     rows += [arm(c, hit_shapes[c["role"]], len(c["hit_points"]))
              for c in cohorts]

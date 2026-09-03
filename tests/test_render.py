@@ -27,6 +27,101 @@ _RETRIEVAL = {
     "query_label": "OSD-100|Mmus_EYE",
 }
 
+_NEIGHBORHOOD = {
+    "label": "OSD-100",
+    "points": [1, 2, 3],
+    "rows": [
+        {"rank": 1, "gsm": "GSM1", "gse": "GSE1", "score": .99,
+         "tissue": "Eye", "species": "mouse"},
+        {"rank": 2, "gsm": "GSM2", "gse": "GSE1", "score": .98,
+         "tissue": "Eye", "species": "mouse"},
+        {"rank": 3, "gsm": "GSM3", "gse": "GSE2", "score": .97,
+         "tissue": "Brain", "species": "human"},
+    ],
+    "focus_points": [2],
+    "returned": 3,
+    "locatable": 3,
+}
+
+
+@pytest.mark.parametrize("is_3d", [False, True])
+def test_evidence_neighborhood_is_one_uniform_open_trace_with_optional_focus(
+        is_3d):
+    """Evidence is rank metadata, not a rank ramp or projected boundary.
+
+    A scalar marker style and markers-only mode prevent color/size gradients,
+    connecting lines, and hull-like geometry.  The seven-field customdata row
+    is also the click/hover contract consumed by the explorer.
+    """
+    from manifold import render, theme
+
+    coords = np.random.default_rng(11).normal(
+        size=(50, 3 if is_3d else 2)).astype(np.float32)
+    base, focus = render._neighborhood_traces(coords, is_3d, _NEIGHBORHOOD)
+
+    expected_type = "scatter3d" if is_3d else "scattergl"
+    assert base.type == expected_type
+    assert base.name == "512-D evidence neighbor"
+    assert base.marker.symbol == "circle-open"
+    assert base.marker.size == theme.NEIGHBORHOOD_SIZE * (0.5 if is_3d else 1)
+    assert isinstance(base.marker.color, str)
+    assert "lines" not in (base.mode or "")
+    assert list(base.customdata[0]) == [
+        "neighborhood", 1, "GSM1", "GSE1", .99, "Eye", "mouse"]
+    assert len(base.customdata) == 3
+
+    assert focus is not None
+    assert focus.name == "focused evidence neighbor"
+    assert len(focus.x) == 1
+    assert focus.customdata is None, "only the capped evidence trace carries metadata"
+
+
+def test_evidence_neighborhood_omits_stale_indices_without_changing_counts():
+    """A stale map index cannot take down the figure or rewrite evidence totals."""
+    from manifold import render
+
+    overlay = {
+        **_NEIGHBORHOOD,
+        "points": [1, 999999],
+        "rows": [_NEIGHBORHOOD["rows"][0], _NEIGHBORHOOD["rows"][1]],
+        "focus_points": [999999],
+        "returned": 3,
+        "locatable": 2,
+    }
+    base, focus = render._neighborhood_traces(
+        np.zeros((5, 2), dtype=np.float32), False, overlay)
+
+    assert len(base.x) == 1
+    assert list(base.customdata[0])[2] == "GSM1"
+    assert focus is None
+    assert overlay["returned"] == 3 and overlay["locatable"] == 2
+
+
+def test_evidence_sits_behind_requested_hits_and_focus_sits_above_them(corpus):
+    """The wider context must not replace or cover the requested-hit rings."""
+    from manifold import render
+
+    neighborhood = {
+        **_NEIGHBORHOOD,
+        "points": [1, 2, 999999],
+        "rows": _NEIGHBORHOOD["rows"],
+        "focus_points": [2],
+        "returned": 3,
+        "locatable": 2,
+    }
+    fig, _, badges = render.build_figure(
+        "pca", "2d", "species", ["archs4"], 1000, None,
+        retrieval=_RETRIEVAL, neighborhood=neighborhood)
+    names = [trace.name for trace in fig.data]
+    evidence_at = names.index("512-D evidence neighbor")
+    focus_at = names.index("focused evidence neighbor")
+    hit_positions = [i for i, name in enumerate(names) if name == "retrieved hit"]
+
+    assert hit_positions
+    assert evidence_at < min(hit_positions)
+    assert focus_at > max(hit_positions)
+    assert "Evidence neighborhood: <b>2</b> of 3 locatable" in badges
+
 
 @pytest.mark.parametrize("dims,is_3d", [("2d", False), ("3d", True)])
 def test_the_overlay_builds_in_both_dimensionalities(dims, is_3d):

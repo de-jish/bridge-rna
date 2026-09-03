@@ -195,6 +195,19 @@ RETRIEVAL_DIM_OSDR = 0.30
 RETRIEVAL_MAX_NUMERALS = 25
 
 
+# --- The exact 512-D evidence neighborhood ---------------------------------
+# Every evidence neighbor uses the same open teal mark. Rank belongs in hover,
+# not in a visual ramp: the projection does not preserve the cosine distances
+# that produced the ordering. A selected study or sample receives a larger
+# amber outline around the same point without replacing any requested-hit ring.
+NEIGHBORHOOD_COLOR = "#61ddd3"
+NEIGHBORHOOD_SIZE = 7.0
+NEIGHBORHOOD_OPACITY = 0.78
+NEIGHBORHOOD_FOCUS_COLOR = "#d9791b"
+NEIGHBORHOOD_FOCUS_SIZE = 15.0
+NEIGHBORHOOD_FOCUS_LINE = 2.0
+
+
 # --- A found sample ----------------------------------------------------------
 #
 # What the find box marks. It is white for the reason the hit ring is white and

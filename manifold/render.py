@@ -325,6 +325,72 @@ def _osdr_customdata(codes: np.ndarray, legend: list[dict]) -> list[list]:
             for k, c in zip(keys, codes.tolist())]
 
 
+def _neighborhood_traces(coords, is_3d, neighborhood):
+    """Draw the exact 512-D evidence prefix and an optional map focus.
+
+    Rank is available in hover but never changes the mark. In particular this
+    is one markers-only open-dot trace, not a line, hull, enclosing ring, or
+    gradient that could be mistaken for geometry in the projection.
+    """
+    Scatter = go.Scatter3d if is_3d else go.Scattergl
+    scale = 0.5 if is_3d else 1.0
+    n = len(coords)
+
+    def valid(point):
+        return (isinstance(point, (int, np.integer))
+                and not isinstance(point, (bool, np.bool_))
+                and 0 <= int(point) < n)
+
+    located = [(int(point), row) for point, row in zip(
+        neighborhood.get("points") or [], neighborhood.get("rows") or [])
+               if valid(point)]
+    points = [point for point, _row in located]
+    customdata = [[
+        "neighborhood",
+        row.get("rank"),
+        str(row.get("gsm") or ""),
+        str(row.get("gse") or ""),
+        row.get("score"),
+        str(row.get("tissue") or ""),
+        str(row.get("species") or ""),
+    ] for _point, row in located]
+
+    def xyz(indices):
+        arr = np.asarray(indices, dtype=int)
+        result = {"x": coords[arr, 0], "y": coords[arr, 1]}
+        if is_3d:
+            result["z"] = coords[arr, 2]
+        return result
+
+    base = Scatter(
+        **xyz(points), mode="markers", name="512-D evidence neighbor",
+        marker=dict(size=theme.NEIGHBORHOOD_SIZE * scale,
+                    color=theme.NEIGHBORHOOD_COLOR,
+                    opacity=theme.NEIGHBORHOOD_OPACITY,
+                    symbol="circle-open"),
+        customdata=customdata,
+        hovertemplate=("<b>%{customdata[2]}</b> · %{customdata[3]}<br>"
+                       "512-d rank %{customdata[1]:,} · cosine %{customdata[4]:.4f}<br>"
+                       "%{customdata[5]} · %{customdata[6]}<extra></extra>"),
+        showlegend=False,
+    )
+
+    focus_points = [int(point) for point in neighborhood.get("focus_points") or []
+                    if valid(point)]
+    if not focus_points:
+        return base, None
+    focus = Scatter(
+        **xyz(focus_points), mode="markers", name="focused evidence neighbor",
+        marker=dict(size=theme.NEIGHBORHOOD_FOCUS_SIZE * scale,
+                    color=theme.NEIGHBORHOOD_FOCUS_COLOR,
+                    opacity=1.0, symbol="circle-open",
+                    line=dict(width=theme.NEIGHBORHOOD_FOCUS_LINE,
+                              color=theme.NEIGHBORHOOD_FOCUS_COLOR)),
+        hoverinfo="skip", showlegend=False,
+    )
+    return base, focus
+
+
 def _retrieval_traces(coords, is_3d, retrieval) -> list:
     """The query and its hits, drawn where they actually sit in the space.
 
@@ -608,7 +674,7 @@ def _map_ranks(coords, hits: list[int], members: list[int]) -> list:
 
 
 def build_figure(method, dims, color_by, layers, budget, viewport,
-                 retrieval=None, found=None):
+                 retrieval=None, neighborhood=None, found=None):
     is_3d = dims == "3d"
     coords = data.coords(method, dims)
     n_archs4, n_osdr, total = data.counts()
@@ -698,7 +764,23 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
     # whole-corpus tallies the color plan ranked with.
     legend_data["items"] = _legend_with_drawn_counts(legend, drawn)
 
-    # --- Layer 3: the retrieval, on top of everything ----------------------
+    # --- Layer 3: exact evidence, behind requested hits ---------------------
+    neighborhood_focus = None
+    if neighborhood:
+        evidence, neighborhood_focus = _neighborhood_traces(
+            coords, is_3d, neighborhood)
+        if len(evidence.x):
+            fig.add_trace(evidence)
+        returned = int(neighborhood.get("returned") or 0)
+        locatable = int(neighborhood.get("locatable") or 0)
+        if locatable != returned:
+            badges.append(
+                f"Evidence neighborhood: <b>{locatable:,}</b> of "
+                f"{returned:,} locatable")
+        else:
+            badges.append(f"Evidence neighborhood: <b>{returned:,}</b>")
+
+    # --- Layer 4: the retrieval, on top of its wider evidence --------------
     if showing_retrieval:
         for trace in _retrieval_traces(coords, is_3d, retrieval):
             fig.add_trace(trace)
@@ -722,7 +804,12 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
             badges.append(
                 f"Showing retrieval: <b>{n_hits}</b> hit{'s' if n_hits != 1 else ''}")
 
-    # --- Layer 4: a found identifier, above everything ----------------------
+    # Focus is a larger open outline added after every requested-hit trace so
+    # it surrounds rather than replaces the white ring at the same coordinate.
+    if neighborhood_focus is not None:
+        fig.add_trace(neighborhood_focus)
+
+    # --- Layer 5: a found identifier, above everything ----------------------
     #
     # Last because it is the thing the user asked for most recently. It is not
     # dimmed by a retrieval and does not dim one: the two answer different

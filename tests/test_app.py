@@ -1399,6 +1399,55 @@ def test_a_single_sample_retrieval_is_still_named_by_its_sample_key(corpus):
     assert len(overlay["cohorts"]) == 1
 
 
+def _neighborhood_payload(label="A", offset=0):
+    return {
+        "available": True, "label": label, "depth_requested": 250,
+        "depth_returned": 3, "metric": "cosine", "space": "embedding-512d",
+        "hits": [
+            {"rank": 1, "gsm": "GSM1", "gse": "GSE1", "tissue": "Eye",
+             "species": "mouse", "score": .99, "archs4_index": offset + 1},
+            {"rank": 2, "gsm": "GSM2", "gse": "GSE1", "tissue": "Eye",
+             "species": "mouse", "score": .98, "archs4_index": offset + 2},
+            {"rank": 3, "gsm": "GSM3", "gse": "GSE2", "tissue": "Brain",
+             "species": "human", "score": .97, "archs4_index": None},
+        ],
+    }
+
+
+def test_neighborhood_overlay_selects_an_arm_and_focus_points():
+    payload = {"neighborhood": _neighborhood_payload("A"),
+               "comparison": {"neighborhood_b": _neighborhood_payload("B", 10)}}
+    overlay = callbacks._neighborhood_overlay(
+        payload, "a", {"kind": "study", "value": "GSE1"})
+    assert overlay["label"] == "A"
+    assert overlay["points"] == [1, 2]
+    assert overlay["focus_points"] == [1, 2]
+    assert overlay["returned"] == 3 and overlay["locatable"] == 2
+    assert callbacks._neighborhood_overlay(payload, "b", None)["points"] == [11, 12]
+
+    sample = callbacks._neighborhood_overlay(
+        payload, "a", {"kind": "sample", "value": "GSM2"})
+    assert sample["focus_points"] == [2]
+
+
+def test_neighborhood_overlay_omits_non_integer_map_indices():
+    neighborhood = _neighborhood_payload()
+    neighborhood["hits"][0]["archs4_index"] = "1"
+    neighborhood["hits"][1]["archs4_index"] = 2.0
+
+    overlay = callbacks._neighborhood_overlay(
+        {"neighborhood": neighborhood}, "a", None)
+
+    assert overlay["points"] == []
+    assert overlay["rows"] == []
+    assert overlay["returned"] == 3 and overlay["locatable"] == 0
+
+
+def test_unavailable_neighborhood_draws_nothing():
+    assert callbacks._neighborhood_overlay(
+        {"neighborhood": {"available": False, "hits": []}}, "a", None) is None
+
+
 # --- The key on the plot -----------------------------------------------------
 #
 # The map draws four encodings at once - corpus tissue hue, member fill hue,
@@ -1443,6 +1492,29 @@ def test_a_plain_search_gets_a_two_row_key_and_no_headings(corpus):
     assert "the query sample" in _text(children)
     assert "pooled member" not in _text(children), (
         "one sample is not a pool; the phrase is earned by k >= 2")
+
+
+def test_drawn_evidence_neighborhood_adds_its_open_dot_to_the_key(corpus):
+    key = str(data.osdr_metadata()["sample_key"].iloc[0])
+    retrieval = callbacks._retrieval_overlay(
+        {"sample_id": key, "hits": [{"gsm": "GSM1", "score": 0.9,
+                                      "archs4_index": 0}]})
+    neighborhood = callbacks._neighborhood_overlay(
+        {"neighborhood": _neighborhood_payload()}, "a", None)
+
+    children = layout.retrieval_key_children(
+        retrieval, ("a",), "2d", neighborhood=neighborhood)
+
+    assert _key_shapes(children) == ["star", "neighborhood", "hit-a"]
+    assert "512-D evidence neighbor" in _text(children)
+    neighborhood_glyph = next(
+        c for child in children for c in _walk(child)
+        if getattr(c, "className", "") == "bm-key-glyph is-neighborhood")
+    assert theme.NEIGHBORHOOD_COLOR in str(neighborhood_glyph.style)
+
+    without_marks = layout.retrieval_key_children(
+        retrieval, ("a",), "2d", neighborhood={**neighborhood, "points": []})
+    assert "neighborhood" not in _key_shapes(without_marks)
 
 
 def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):

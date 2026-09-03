@@ -142,6 +142,62 @@ def _retrieval_overlay(hits_payload: dict | None,
             "query_label": query_label}
 
 
+def _neighborhood_payload_for_arm(hits_payload: dict | None,
+                                  arm: str) -> dict | None:
+    """Return the stored evidence payload for one comparison arm."""
+    if not hits_payload:
+        return None
+    if arm == ROLE_B:
+        return (hits_payload.get("comparison") or {}).get("neighborhood_b")
+    return hits_payload.get("neighborhood")
+
+
+def _neighborhood_overlay(hits_payload: dict | None, arm: str,
+                          focus: dict | None) -> dict | None:
+    """Normalize one stored evidence neighborhood for Plotly.
+
+    The stored payload remains the complete drawer record. This map view keeps
+    only rows with an integer ARCHS4 index, in their ranked order, and reports
+    both the returned and locatable totals so omitted metadata never becomes a
+    silent change in the evidence count.
+    """
+    payload = _neighborhood_payload_for_arm(hits_payload, arm)
+    if not isinstance(payload, dict) or not payload.get("available"):
+        return None
+
+    selected = focus or {}
+    focus_field = {"study": "gse", "sample": "gsm"}.get(selected.get("kind"))
+    focus_value = str(selected.get("value") or "")
+    points: list[int] = []
+    rows: list[dict] = []
+    focus_points: list[int] = []
+    for row in payload.get("hits") or []:
+        if not isinstance(row, dict):
+            continue
+        point = row.get("archs4_index")
+        # JSON has one integer number type for these indices. Numeric strings,
+        # floats, and booleans are malformed rather than coordinates to coerce.
+        if not isinstance(point, int) or isinstance(point, bool):
+            continue
+        points.append(point)
+        rows.append(row)
+        if (focus_field and focus_value
+                and str(row.get(focus_field) or "") == focus_value):
+            focus_points.append(point)
+
+    returned = payload.get("depth_returned")
+    if not isinstance(returned, int) or isinstance(returned, bool):
+        returned = len(payload.get("hits") or [])
+    return {
+        "label": str(payload.get("label") or ""),
+        "points": points,
+        "rows": rows,
+        "focus_points": focus_points,
+        "returned": returned,
+        "locatable": len(points),
+    }
+
+
 def _cohort_label(query: dict | None) -> str:
     """The cohort's own name, for the map key. Empty for a non-cohort query."""
     return str((query or {}).get("cohort_label") or "")
