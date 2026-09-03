@@ -541,7 +541,7 @@ def _fired(prop: str) -> bool:
                for t in (ctx.triggered or []))
 
 
-def viewport_axes(vp, dims: str) -> dict:
+def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
     """The axis layout that puts `vp` on screen, or the whole corpus back.
 
     **The `autorange` branch is not a no-op and must not be dropped.**
@@ -556,6 +556,10 @@ def viewport_axes(vp, dims: str) -> dict:
     button, a projection change and the modebar's own reset agree, since all
     three reach `update_figure` as `viewport = None`.
 
+    Explorer-only figure updates are different: an absent stored viewport means
+    "keep the whole-map range already on screen", not "calculate a new one".
+    For those, ``preserve`` omits both axes so ``uirevision`` can do its job.
+
     3-D contributes nothing: the viewport store does not drive a `Scatter3d`
     camera, so there is no axis to pin and none to release.
     """
@@ -564,6 +568,8 @@ def viewport_axes(vp, dims: str) -> dict:
     if vp:
         return {"xaxis": dict(range=[vp[0], vp[1]]),
                 "yaxis": dict(range=[vp[2], vp[3]])}
+    if preserve:
+        return {}
     return {"xaxis": dict(autorange=True), "yaxis": dict(autorange=True)}
 
 
@@ -671,7 +677,11 @@ def register(app):
             vp if dims == "2d" else None, retrieval=retrieval,
             neighborhood=neighborhood, found=found)
         legend_data["title"] = layout.color_by_label(color_by)
-        fig.update_layout(**viewport_axes(vp, dims))
+        preserve_view = ctx.triggered_id in {
+            "neighborhood-open-store", "neighborhood-arm",
+            "neighborhood-focus-store",
+        }
+        fig.update_layout(**viewport_axes(vp, dims, preserve=preserve_view))
         badge_children = [_badge(b) for b in badges]
         items = legend_data.get("items", [])
 

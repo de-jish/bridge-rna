@@ -24,6 +24,8 @@ Nothing in the pipeline was told the query was an eye; it found the retina on it
 The same space, seen all at once.
 Both collections - 2,108 NASA samples and 940,455 Earth samples - are placed in one shared projection and drawn as live points, colored by tissue.
 You can rotate it, switch between 2-D and 3-D, recolor it, and overlay a retrieval to see where a query and its matches sit.
+From that retrieval, **Explore neighborhood** opens its exact top-250 cosine neighbors with deterministic tissue and study summaries, plus complete GSE and GSM lists that can be searched and focused on the map.
+The subtle teal evidence marks are the nearest samples in the original 512-dimensional embedding; they are not a census of everything inside the framed 2-D or 3-D projection.
 
 ![The Bridge RNA map: all 942,563 samples from both collections in one 3-D UMAP projection, colored by tissue, with the 2,108 NASA samples drawn as diamonds over the Earth cloud](docs/bridge-rna-map.png)
 

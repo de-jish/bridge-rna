@@ -1195,6 +1195,23 @@ def test_the_reset_is_offered_only_when_the_map_is_framed():
     assert not callbacks.is_framed(window, "3d")
 
 
+def test_2d_aspect_constraint_preserves_ranges_when_the_canvas_resizes():
+    """Docking a drawer must not turn an Explore click into a hidden zoom.
+
+    The x/y scales remain equal, but Plotly must absorb a new canvas aspect
+    ratio in the axis domains.  Its default ``range`` constraint instead
+    changed the visible x range when the neighborhood drawer narrowed the map.
+    """
+    layout_2d = theme.base_figure_layout(False)
+    assert layout_2d["xaxis"]["constrain"] == "domain"
+    assert layout_2d["yaxis"]["constrain"] == "domain"
+
+
+def test_neighborhood_only_update_leaves_unframed_axes_untouched():
+    """Explorer marks may change without asking Plotly to autorange again."""
+    assert callbacks.viewport_axes(None, "2d", preserve=True) == {}
+
+
 def test_an_unframed_figure_releases_the_axes_rather_than_omitting_them():
     """`uirevision="keep"` preserves the user's zoom unless the figure changes
     the attribute, so "no range key" is not the same instruction as "autorange".

@@ -263,6 +263,10 @@ def base_figure_layout(is_3d: bool = False) -> dict:
         color=PLOT_TEXT,
         tickfont=dict(color=PLOT_TEXT, size=10),
         showspikes=False,
+        # Keep a responsive container resize in the layout domain.  The 2-D
+        # axes are scale-anchored below; Plotly's default range constraint
+        # otherwise turns docking the neighborhood drawer into a hidden zoom.
+        constrain="domain",
     )
     layout = dict(
         paper_bgcolor=PLOT_BG,

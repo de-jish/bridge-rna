@@ -25,6 +25,7 @@ The last of those is the part worth keeping: several of the features below were 
 | [Finding a study](#finding-a-study-on-the-map) | locating one study among 942,563 points, framing it, undoing that, and the probe that was cut |
 | [The OSDR-only color-bys](#osdr-only-color-bys) | why nine fields were removed and what the machinery is still for |
 | [File ingestion](#file-ingestion) | embedding an uploaded counts file and retrieving against it |
+| [Retrieval neighborhood explorer](#retrieval-neighborhood-explorer) | inspecting exact 512-D evidence without mistaking the projection for similarity |
 | [README screenshots](#readme-screenshots) | capturing the two images by measurement rather than by eye |
 
 ---
@@ -1590,6 +1591,56 @@ Two defects it found, both fixed:
 ### Staging, and why it is not just a temp file
 
 The embedder is a subprocess and takes a path, so an upload has to reach disk and survive past the callback that received it. That is the whole reason it cannot live in a `with` block. Three bounds keep it from being a leak: one process-owned directory removed at exit, a session's previous file unlinked when its next upload arrives, and PID-tagged reaping of directories whose owner is gone. Steady state is one file per active session.
+
+---
+
+<a id="retrieval-neighborhood-explorer"></a>
+
+## The retrieval neighborhood explorer
+
+A retrieval used to arrive on the map as the query and only the 3–30 hits the reader requested.
+That answered where the result landed, but not what biological and study context surrounded it.
+The explorer widens the evidence to the exact nearest **250 ARCHS4 samples in the original 512-dimensional embedding**, then makes that fixed set inspectable without pretending that nearby projected dots are equivalent evidence.
+
+### One scan, two prefixes
+
+The depth is deliberately fixed at 250 in version one.
+The reader still chooses the requested hit count independently, while the retrieval scan retains `max(requested_k, 250)` rows once and returns two prefixes: the first `requested_k` as the existing requested hits and the first 250 as the evidence neighborhood.
+The requested hits are therefore always the exact ranked prefix of the evidence set, not a separately scored result, and opening, closing, filtering or focusing the explorer never makes another pass over the 963 MB ARCHS4 memmap.
+Pooled cohorts follow the same rule without changing the requested depth used for their stability calculation.
+A comparison keeps an independent top-250 prefix for each arm; switching the arm changes the drawer label, rows and teal evidence trace while leaving both arms' requested-hit marks alone.
+
+### What the drawer says, and what it does not say
+
+Overview is computed prose rather than generated prose.
+It reports tissue and species counts, represented studies, top-study concentration and cosine-score range from at most 250 stored rows.
+Every composition percentage divides only by rows where that field is present, and the corresponding coverage denominator is printed beside it; missing metadata is not counted as `Other` and cannot silently strengthen a claim.
+Studies exposes every represented GSE (plus an explicit unassigned group) and Samples exposes every ranked GSM, with local search over all 250 rather than pagination or another data request.
+Selecting either kind of row adds a reversible focus trace and does not mutate the retrieval, evidence or viewport.
+
+All 250 evidence points use one subtle teal open-marker treatment.
+Rank belongs in hover and rows, not marker size, opacity or a distance gradient: any ramp would make their separation in a 2-D or 3-D projection look like their exact cosine distance.
+For the same reason there is no connecting line, contour, cluster hull or enclosing ring.
+Requested-hit rings remain on top and remain after the drawer closes.
+
+The drawer docks beside the canvas on wide screens and becomes a bounded, scrolling bottom sheet on narrow screens.
+**Explore neighborhood** changes no viewport and remains available in 3-D; **Frame retrieval** keeps its 2-D framing behavior and opens the same drawer.
+The standing footer names the epistemic boundary: teal marks are nearest in 512-D, not everything inside the visible frame.
+
+### Rejected boundaries
+
+A census of the current viewport or lasso was rejected because its membership changes with the projection, camera and zoom, not with expression similarity.
+Projection-distance thresholds, density contours and hulls were rejected for the same reason: they turn layout geometry into evidence the model did not produce.
+Automatic AI-authored interpretation was rejected because these summaries are small enough to derive exactly and audit row by row; generated copy would add variability without adding data.
+A configurable evidence depth and export were left out so the first release has one bounded performance and interpretation contract.
+
+### Browser finding: a drawer must not be a hidden zoom
+
+The real cached OSDR path exposed two ways docking the drawer could alter a 2-D view even though no viewport state changed.
+Plotly's equal-axis constraint compressed the numeric range when the canvas narrowed, so both Cartesian axes now use `constrain="domain"`; the plot gives up drawing domain instead of changing the data window.
+The figure callback also used to restate `autorange` on every neighborhood-only update, which let a responsive relayout choose a fresh window.
+Neighborhood open, arm and focus updates now leave unframed axes untouched.
+The browser regression compares the Plotly x range before first open and after reopen, in addition to checking that explicit **Frame retrieval** still narrows the view.
 
 ---
 

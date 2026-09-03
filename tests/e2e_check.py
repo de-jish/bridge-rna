@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,7 @@ from playwright.sync_api import sync_playwright
 
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
+CHROME = os.environ.get("MANIFOLD_CHROME")
 SHOTS = Path(os.environ.get("MANIFOLD_E2E_SHOTS",
                             Path(tempfile.gettempdir()) / "bm-e2e-shots"))
 
@@ -89,6 +91,292 @@ GSM_NODE_JS = """() => {
   }
   return null;
 }"""
+
+
+MAP_RETRIEVAL_READY_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  return !!(gd && gd._fullData &&
+            gd._fullData.some(t => t.name === 'retrieved hit'));
+}"""
+
+
+def _map_x_range(page) -> list[float]:
+    return page.evaluate(
+        "() => document.querySelector('#manifold-graph .js-plotly-plot')"
+        "._fullLayout.xaxis.range.slice()")
+
+
+def _trace_state(page) -> dict:
+    """Read the semantic overlays Plotly is actually rendering."""
+    return page.evaluate("""() => {
+      const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+      const data = (gd && gd.data) || [];
+      const full = (gd && gd._fullData) || [];
+      const evidence = full.filter(t => t.name === '512-D evidence neighbor');
+      const focus = full.filter(t => t.name === 'focused evidence neighbor');
+      const requested = full.filter(t => t.name === 'retrieved hit');
+      return {
+        evidenceTraces: data.filter(
+          t => t.name === '512-D evidence neighbor').length,
+        evidenceMarks: evidence.reduce((n, t) => n + ((t.x && t.x.length) || 0), 0),
+        evidenceTypes: evidence.map(t => t.type),
+        focusTraces: focus.length,
+        focusMarks: focus.reduce((n, t) => n + ((t.x && t.x.length) || 0), 0),
+        requestedTraces: requested.length,
+        requestedColours: requested.map(t => t.marker && t.marker.color),
+      };
+    }""")
+
+
+def _drawer_geometry(page) -> dict:
+    """Measure the drawer, its controls, and the Plotly modebar in the viewport."""
+    return page.evaluate("""() => {
+      const rect = selector => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {left: +r.left.toFixed(1), right: +r.right.toFixed(1),
+                top: +r.top.toFixed(1), bottom: +r.bottom.toFixed(1),
+                width: +r.width.toFixed(1), height: +r.height.toFixed(1)};
+      };
+      const overlaps = (a, b) => !!(a && b && a.left < b.right &&
+        a.right > b.left && a.top < b.bottom && a.bottom > b.top);
+      const drawer = rect('#neighborhood-drawer');
+      const plot = rect('.bm-plot-wrap');
+      const modebar = rect('.bm-plot-wrap .modebar');
+      const close = rect('#neighborhood-close');
+      const tabs = rect('#neighborhood-tab');
+      const search = rect('#neighborhood-search');
+      const inside = child => !!(child && drawer &&
+        child.left >= drawer.left - 1 && child.right <= drawer.right + 1 &&
+        child.top >= drawer.top - 1 && child.bottom <= drawer.bottom + 1);
+      return {
+        viewport: {width: innerWidth, height: innerHeight},
+        drawer, plot, modebar,
+        position: getComputedStyle(document.querySelector('#neighborhood-drawer')).position,
+        horizontalOverflow:
+          document.scrollingElement.scrollWidth > innerWidth + 1,
+        controlsInside: inside(close) && inside(tabs) && inside(search),
+        modebarObscured: overlaps(modebar, drawer),
+      };
+    }""")
+
+
+def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> None:
+    """Exercise the explorer from one real cached OSDR retrieval."""
+    page.locator("#see-on-map").click()
+    page.wait_for_url(re.compile(r"/map$"), timeout=30_000)
+    page.wait_for_function(MAP_RETRIEVAL_READY_JS, timeout=180_000)
+    page.wait_for_timeout(2500)
+
+    print("\n=== 7b. exact retrieval neighborhood explorer ===")
+    explore = page.get_by_role("button", name="Explore neighborhood")
+    c.ok(explore.is_visible(), "Explore neighborhood is offered for a real retrieval")
+    before = _map_x_range(page)
+    retrieval_runs = dash_changes.count("search-button.n_clicks")
+    t0 = time.perf_counter()
+    explore.click()
+    page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && (gd._fullData || []).some("
+        "t => t.name === '512-D evidence neighbor'); }", timeout=90_000)
+    first_open = time.perf_counter() - t0
+    c.note(f"first neighborhood open and evidence render in {first_open:.2f}s")
+
+    after = _map_x_range(page)
+    c.ok(max(abs(a - b) for a, b in zip(before, after)) < 0.05,
+         f"Explore opens without moving the viewport ({before} -> {after})")
+    heading = page.locator("#neighborhood-heading").inner_text().strip()
+    c.ok(bool(heading), f"the drawer names the active query: {heading!r}")
+    c.ok(page.get_by_role("complementary", name=heading).count() == 1,
+         "the drawer is a named complementary landmark")
+    c.ok(page.get_by_role("button", name="Close neighborhood explorer").count() == 1,
+         "Close is a named button")
+    meta = page.locator("#neighborhood-meta").inner_text()
+    c.ok("250 nearest" in meta and "512-D" in meta,
+         f"the drawer names its exact evidence depth and space: {meta!r}")
+    traces = _trace_state(page)
+    c.ok(traces["evidenceTraces"] == 1,
+         "the exact evidence neighborhood is drawn once")
+    c.ok(traces["evidenceMarks"] == 250,
+         f"that evidence trace contains all 250 neighbors ({traces['evidenceMarks']})")
+
+    # Opening focuses the announced heading. Reverse-tab reaches Close; a
+    # forward Tab then enters the radio-tab group. Native radio groups use one
+    # Tab stop and arrow keys between choices, which is their expected keyboard
+    # contract rather than three redundant Tab stops.
+    c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-heading",
+         "opening focuses the drawer heading for announcement")
+    page.keyboard.press("Shift+Tab")
+    c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-close",
+         "Shift+Tab reaches Close")
+    page.keyboard.press("Tab")
+    active_radio = page.evaluate("""() => ({
+      type: document.activeElement.type,
+      value: document.activeElement.value,
+    })""")
+    c.ok(active_radio == {"type": "radio", "value": "overview"},
+         f"Tab reaches the explorer tabs at Overview ({active_radio})")
+
+    page.keyboard.press("ArrowRight")
+    page.wait_for_selector(".bm-neighborhood-study", timeout=30_000)
+    studies_radio = page.get_by_role("radio", name=re.compile(r"^Studies\s+\d+"))
+    c.ok(studies_radio.count() == 1 and studies_radio.is_checked(),
+         "the Studies tab has a radio role, count-bearing name, and keyboard state")
+    study_count_text = page.locator(
+        "#neighborhood-tab .dash-options-list-option:has(input[value='studies'])"
+    ).inner_text()
+    represented = int(re.search(r"(\d[\d,]*)", study_count_text).group(1)
+                      .replace(",", ""))
+    study_rows = page.locator(".bm-neighborhood-study")
+    c.ok(study_rows.count() == represented and represented > 0,
+         f"all {represented} represented studies are available")
+    first_gse = study_rows.first.locator(
+        ".bm-neighborhood-row-primary").inner_text().strip()
+    c.ok(page.get_by_role(
+        "button", name=re.compile(rf"^{re.escape(first_gse)}")).count() == 1,
+        f"the first study row is a named button ({first_gse})")
+    page.keyboard.press("Tab")
+    c.ok(page.evaluate(
+        "() => document.activeElement.classList.contains('bm-neighborhood-study')"),
+        "Tab reaches the first study row")
+
+    runs_before_focus = dash_changes.count("search-button.n_clicks")
+    page.keyboard.press("Enter")
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && (gd._fullData || []).some("
+        "t => t.name === 'focused evidence neighbor'); }", timeout=90_000)
+    focused = _trace_state(page)
+    c.ok(focused["focusTraces"] == 1 and focused["focusMarks"] > 0,
+         f"selecting a study adds one focus trace ({focused['focusMarks']} marks)")
+    c.ok(dash_changes.count("search-button.n_clicks") == runs_before_focus,
+         "study focus does not rerun retrieval")
+
+    samples_radio = page.get_by_role("radio", name=re.compile(r"^Samples\s+250$"))
+    page.get_by_text(re.compile(r"^Samples\s+250$"), exact=True).click()
+    page.wait_for_selector(".bm-neighborhood-sample", timeout=30_000)
+    c.ok(samples_radio.count() == 1 and samples_radio.is_checked(),
+         "the Samples tab has a radio role and exact count-bearing name")
+    sample_rows = page.locator(".bm-neighborhood-sample")
+    c.ok(sample_rows.count() == 250,
+         f"the complete evidence list contains 250 samples ({sample_rows.count()})")
+    first_gsm = sample_rows.first.locator(
+        ".bm-neighborhood-row-primary").inner_text().strip()
+    c.ok(page.get_by_role(
+        "button", name=re.compile(rf"^{re.escape(first_gsm)}")).count() == 1,
+        f"the first sample row is a named button ({first_gsm})")
+    search = page.get_by_role("searchbox", name="Search neighborhood samples")
+    c.ok(search.count() == 1 and search.is_visible(),
+         "the sample search is a named searchbox")
+    samples_radio.focus()
+    page.keyboard.press("Tab")
+    c.ok(page.evaluate("() => document.activeElement.id") == "neighborhood-search",
+         "Tab reaches sample search")
+    page.keyboard.press("Tab")
+    c.ok(page.evaluate(
+        "() => document.activeElement.classList.contains('bm-neighborhood-sample')"),
+        "Tab reaches the first sample row")
+    search.fill(first_gsm)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.bm-neighborhood-sample').length === 1",
+        timeout=30_000)
+    c.ok(sample_rows.count() == 1,
+         f"the complete list is searchable to one exact GSM ({first_gsm})")
+
+    print("\n=== 7c. close, reopen, frame, and 3-D ===")
+    page.get_by_role("button", name="Close neighborhood explorer").click()
+    page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && !(gd._fullData || []).some(t => "
+        "['512-D evidence neighbor', 'focused evidence neighbor'].includes(t.name)); }",
+        timeout=90_000)
+    closed = _trace_state(page)
+    white = {"#fff", "#ffffff", "rgb(255, 255, 255)", "white"}
+    c.ok(closed["evidenceTraces"] == 0 and closed["focusTraces"] == 0,
+         "Close removes evidence and focus marks")
+    c.ok(closed["requestedTraces"] > 0
+         and all(str(colour).lower() in white
+                 for colour in closed["requestedColours"]),
+         "Close preserves the requested white hit rings")
+
+    before_reopen = _map_x_range(page)
+    explore.click()
+    page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
+    page.wait_for_timeout(2000)
+    after_reopen = _map_x_range(page)
+    c.ok(max(abs(a - b) for a, b in zip(before_reopen, after_reopen)) < 0.05,
+         "Explore reopens without changing the viewport")
+    page.get_by_role("button", name="Close neighborhood explorer").click()
+    page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+
+    before_frame = _map_x_range(page)
+    page.get_by_role("button", name="Frame the retrieval").click()
+    page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
+    page.wait_for_timeout(3000)
+    framed = _map_x_range(page)
+    c.ok(abs(framed[1] - framed[0]) < abs(before_frame[1] - before_frame[0]),
+         f"Frame opens the drawer and narrows the 2-D view ({framed})")
+    page.get_by_role("button", name="Close neighborhood explorer").click()
+    page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
+
+    set_segment(page, "Dimensions", "3D")
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && (gd._fullData || []).some(t => t.name === 'query'"
+        " && t.type === 'scatter3d'); }", timeout=90_000)
+    c.ok(not page.get_by_role("button", name="Frame the retrieval").is_visible(),
+         "3-D hides Frame, whose 2-D ranges its camera would ignore")
+    c.ok(explore.is_visible(), "Explore remains visible in 3-D")
+    explore.click()
+    page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
+    page.wait_for_timeout(2500)
+    three_d = _trace_state(page)
+    c.ok(three_d["evidenceTraces"] == 1
+         and three_d["evidenceTypes"] == ["scatter3d"],
+         f"Explore draws the evidence once in 3-D ({three_d['evidenceTypes']})")
+
+    set_segment(page, "Dimensions", "2D")
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && (gd._fullData || []).some(t => "
+        "t.name === '512-D evidence neighbor' && t.type === 'scattergl'); }",
+        timeout=90_000)
+    samples_radio = page.get_by_role("radio", name=re.compile(r"^Samples\s+250$"))
+    page.get_by_text(re.compile(r"^Samples\s+250$"), exact=True).click()
+    page.wait_for_selector("#neighborhood-search", state="visible", timeout=30_000)
+
+    print("\n=== 7d. docked drawer and bottom sheet ===")
+    for width, height in ((1440, 1000), (1024, 900), (768, 900), (320, 780)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.locator("#neighborhood-drawer").scroll_into_view_if_needed()
+        page.wait_for_timeout(1200)
+        geom = _drawer_geometry(page)
+        narrow = width <= 900
+        expected_position = "absolute" if narrow else "static"
+        c.ok(geom["position"] == expected_position,
+             f"{width}px uses the {'bottom sheet' if narrow else 'docked drawer'}")
+        c.ok(not geom["horizontalOverflow"],
+             f"{width}px has no horizontal page overflow")
+        c.ok(geom["controlsInside"],
+             f"{width}px keeps Close, tabs, and search inside the drawer")
+        c.ok(not geom["modebarObscured"],
+             f"{width}px leaves the Plotly modebar unobscured")
+        if narrow:
+            d = geom["drawer"]
+            v = geom["viewport"]
+            c.ok(d["left"] >= -1 and d["right"] <= v["width"] + 1
+                 and d["top"] >= -1 and d["bottom"] <= v["height"] + 1,
+                 f"the {width}px bottom sheet stays within the viewport ({d})")
+        else:
+            c.ok(geom["drawer"]["left"] >= geom["plot"]["right"] - 1,
+                 f"the {width}px drawer docks beside, not over, the map")
+        page.screenshot(path=str(SHOTS / f"10-neighborhood-{width}.png"))
+
+    c.ok(dash_changes.count("search-button.n_clicks") == retrieval_runs,
+         "opening, closing, focusing, filtering, framing, and resizing do not rerun retrieval")
 
 
 class Checks:
@@ -161,12 +449,30 @@ def main() -> int:
             return 1
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=not args.headed)
+            browser = p.chromium.launch(
+                headless=not args.headed, executable_path=CHROME)
             page = browser.new_page(viewport={"width": 1680, "height": 1000})
             console_errors: list[str] = []
-            page.on("console", lambda m: console_errors.append(m.text)
+            network_errors: list[str] = []
+
+            def record_response(response):
+                if response.status >= 400:
+                    network_errors.append(f"HTTP {response.status} {response.url}")
+
+            def record_failed_request(request):
+                network_errors.append(
+                    f"{request.failure or 'request failed'} {request.url}")
+
+            def watch_runtime(runtime_page):
+                runtime_page.on(
+                    "console", lambda m: console_errors.append(m.text)
                     if m.type == "error" else None)
-            page.on("pageerror", lambda e: console_errors.append(str(e)))
+                runtime_page.on(
+                    "pageerror", lambda e: console_errors.append(str(e)))
+                runtime_page.on("response", record_response)
+                runtime_page.on("requestfailed", record_failed_request)
+
+            watch_runtime(page)
 
             print("\n=== 1. first paint, default controls ===")
             t0 = time.time()
@@ -431,9 +737,21 @@ def main() -> int:
             # canvas out of the window with it. The page height is the check,
             # because that is the thing that must not move.
             rp = browser.new_page(viewport={"width": 1680, "height": 1010})
-            rp.on("console", lambda m: console_errors.append(m.text)
-                  if m.type == "error" else None)
-            rp.on("pageerror", lambda e: console_errors.append(str(e)))
+            watch_runtime(rp)
+            dash_changes: list[str] = []
+
+            def record_dash_changes(request):
+                if (request.method != "POST"
+                        or "/_dash-update-component" not in request.url):
+                    return
+                try:
+                    payload = request.post_data_json
+                except Exception:
+                    return
+                dash_changes.extend(str(change)
+                                    for change in payload.get("changedPropIds", []))
+
+            rp.on("request", record_dash_changes)
             rp.goto(f"http://127.0.0.1:{args.port}/", wait_until="load")
             rp.wait_for_selector(".sample-preview", timeout=60_000)
             rp.wait_for_timeout(1500)
@@ -444,6 +762,11 @@ def main() -> int:
             rp.locator("#search-button").click()
             rp.wait_for_function(NETWORK_READY_JS, timeout=180_000)
             rp.wait_for_timeout(1500)
+            search_status = rp.locator("#search-status").inner_text()
+            c.ok("precomputed OSDR embedding" in search_status,
+                 f"the real OSDR query used the cached path: {search_status[:90]!r}")
+            c.ok(dash_changes.count("search-button.n_clicks") == 1,
+                 "the requested retrieval ran exactly once")
             c.ok(rp.evaluate(fits), "the view still fits once the network is drawn")
 
             # Open the hit whose record is longest, since the bug only showed
@@ -496,9 +819,10 @@ def main() -> int:
                      f"the AI panel stays on screen (bottom at {geom['aiBottom']})")
             else:
                 c.ok(False, "no GSM node to open in the inspector")
+            check_neighborhood_explorer(rp, c, dash_changes)
             rp.close()
 
-            print("\n=== 7b. finding a sample on the map ===")
+            print("\n=== 8. finding a sample on the map ===")
             page.goto(f"http://127.0.0.1:{args.port}/map", wait_until="networkidle")
             wait_for_points(page)
             # `wait_for_points` returns as soon as one trace has coordinates,
@@ -648,7 +972,7 @@ def main() -> int:
             set_segment(page, "Dimensions", "2D")
             page.wait_for_timeout(3000)
 
-            print("\n=== 8. the find box completes what is being typed ===")
+            print("\n=== 9. the find box completes what is being typed ===")
             # The placeholder is the only thing an empty box says, and a
             # four-grammar wording clipped mid-word at "sample na…" for as long
             # as the box took four grammars. Nothing in Python can catch that -
@@ -782,7 +1106,7 @@ def main() -> int:
             c.ok(not refused["empty"],
                  "and gets no 'no matches' row to contradict the sentence below")
 
-            print("\n=== 9. one reset undoes every kind of framing ===")
+            print("\n=== 10. one reset undoes every kind of framing ===")
             page.fill("#find-input", "")
             page.wait_for_timeout(120)
             page.press("#find-input", "Enter")
@@ -852,12 +1176,16 @@ def main() -> int:
             set_segment(page, "Dimensions", "2D")
             page.wait_for_timeout(3000)
 
-            print("\n=== 10. console ===")
+            print("\n=== 11. console and network ===")
             real = [e for e in console_errors
                     if "favicon" not in e.lower() and "_dash-component-suites" not in e]
             for e in real[:10]:
                 print(f"     {e[:160]}")
             c.ok(not real, f"no console errors ({len(real)} seen)")
+            for error in network_errors[:10]:
+                print(f"     {error[:200]}")
+            c.ok(not network_errors,
+                 f"no failed browser requests or HTTP errors ({len(network_errors)} seen)")
 
             browser.close()
     finally:
