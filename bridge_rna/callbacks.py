@@ -43,6 +43,7 @@ from .layout import (
     build_graph_legend,
     samples_df,
 )
+from .neighborhoods import build_payload, unavailable_payload
 from .panels import (
     _details_head,
     build_cohort_card,
@@ -57,12 +58,20 @@ from .retrieval import (
     TIER_UNAVAILABLE,
     UPLOAD_MODE,
     cached_query_vectors,
-    run_cohort_retrieval,
-    run_uploaded_retrieval,
+    run_cohort_retrieval_with_neighborhood,
+    run_uploaded_retrieval_with_neighborhood,
     sample_tier,
-    search_hits,
+    search_hits_with_neighborhood,
 )
 from .util import _format_count, _last_nonempty_line, _safe_str
+
+
+def _evidence_payload(frame: pd.DataFrame | None, label: str = "") -> dict:
+    if frame is None:
+        return unavailable_payload(
+            "Run this retrieval again to build its 250-sample evidence neighborhood."
+        )
+    return build_payload(frame, label=label)
 
 
 def _retrieval_phrase(mode: str) -> str:
@@ -487,7 +496,7 @@ def register(app) -> None:
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
         try:
-            hits_df, mode = search_hits(
+            hits_df, neighborhood_df, mode = search_hits_with_neighborhood(
                 samples_df=samples_df,
                 sample_id=sample_id,
                 topk=int(topk),
@@ -530,6 +539,9 @@ def register(app) -> None:
             "mode": mode,
             "hits": hits_df.to_dict(orient="records"),
             "query": _query_dict(q_row),
+            "neighborhood": _evidence_payload(
+                neighborhood_df, label=_safe_str(q_row.get("sample_name"))
+            ),
         }
         return network, payload, status
 
@@ -893,16 +905,23 @@ def register(app) -> None:
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
 
         try:
-            hits_df, rows, stability = run_cohort_retrieval(members, topk=int(topk))
+            hits_df, neighborhood_df, rows, stability = (
+                run_cohort_retrieval_with_neighborhood(members, topk=int(topk))
+            )
             geometry = C.cohort_geometry(members, rows)
             if enable_biopython and _safe_str(entrez_email):
                 hits_df = _enrich_hits_from_ncbi_eutils(hits_df, email_value)
 
             other = C.find_cohort(_safe_str(compare_id), facets=facets)
-            other_hits, other_geometry, other_stability = None, None, None
+            other_hits, other_neighborhood, other_geometry, other_stability = (
+                None, None, None, None
+            )
             if other is not None:
-                other_hits, other_rows, other_stability = run_cohort_retrieval(
-                    list(other.members), topk=int(topk))
+                other_hits, other_neighborhood, other_rows, other_stability = (
+                    run_cohort_retrieval_with_neighborhood(
+                        list(other.members), topk=int(topk)
+                    )
+                )
                 other_geometry = C.cohort_geometry(list(other.members), other_rows)
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
@@ -930,6 +949,9 @@ def register(app) -> None:
             # hits rather than being recomputed, because recomputing it means a
             # second memmap pass and it is a property of *these* hits.
             "stability": stability.as_dict() if stability is not None else None,
+            "neighborhood": _evidence_payload(
+                neighborhood_df, label=cohort.label
+            ),
         }
 
         how = _retrieval_phrase(COHORT_MODE)
@@ -973,6 +995,9 @@ def register(app) -> None:
             # overlap number below to believe.
             "stability": (other_stability.as_dict()
                           if other_stability is not None else None),
+            "neighborhood_b": _evidence_payload(
+                other_neighborhood, label=other.label
+            ),
         }
         message = (
             f"Two pooled queries differing by {facet_label}: "
@@ -1101,7 +1126,7 @@ def register(app) -> None:
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
 
         try:
-            hits_df = run_uploaded_retrieval(
+            hits_df, neighborhood_df = run_uploaded_retrieval_with_neighborhood(
                 counts_path=upload_store["path"],
                 sample_column=column,
                 topk=int(topk),
@@ -1135,6 +1160,7 @@ def register(app) -> None:
             "mode": UPLOAD_MODE,
             "hits": hits_df.to_dict(orient="records"),
             "query": _query_dict(query),
+            "neighborhood": _evidence_payload(neighborhood_df, label=column),
         }
         return network, payload, status
 

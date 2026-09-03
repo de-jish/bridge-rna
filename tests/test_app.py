@@ -131,6 +131,231 @@ def test_app_builds(app):
     assert app.title == "Bridge RNA"
 
 
+def test_evidence_payload_is_json_safe_and_uses_the_fixed_depth():
+    import numpy as np
+    import pandas as pd
+
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    frame = pd.DataFrame([
+        {"gsm": "GSM1", "score": np.float32(0.9),
+         "archs4_index": np.int64(7)},
+        {"gsm": "GSM2", "score": np.float32(0.8),
+         "archs4_index": np.int64(8)},
+    ])
+    payload = retrieval_callbacks._evidence_payload(frame, label="Cohort A")
+
+    assert payload["depth_requested"] == 250
+    assert payload["depth_returned"] == 2
+    assert [row["rank"] for row in payload["hits"]] == [1, 2]
+    assert all(type(row["rank"]) is int for row in payload["hits"])
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_missing_evidence_payload_requires_rerunning_the_retrieval():
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    payload = retrieval_callbacks._evidence_payload(None, label="ignored")
+
+    assert payload["available"] is False
+    assert payload["depth_requested"] == 250
+    assert payload["depth_returned"] == 0
+    assert payload["reason"] == (
+        "Run this retrieval again to build its 250-sample evidence neighborhood."
+    )
+
+
+def _callback_for(app, trigger_id):
+    matches = [
+        entry["callback"]
+        for entry in app.callback_map.values()
+        if any(item["id"] == trigger_id for item in entry["inputs"])
+    ]
+    assert len(matches) == 1
+    return getattr(matches[0], "__wrapped__", matches[0])
+
+
+def _retrieval_frame(prefix, count, start=0):
+    import pandas as pd
+
+    return pd.DataFrame([
+        {
+            "gsm": f"{prefix}{i}",
+            "gse": f"GSE{i}",
+            "title": f"{prefix} title {i}",
+            "source_name": f"{prefix} source {i}",
+            "characteristics": "",
+            "tissue": "Liver",
+            "species": "Mus musculus",
+            "score": 0.99 - i / 100,
+            "archs4_index": start + i,
+        }
+        for i in range(count)
+    ])
+
+
+def test_cached_sample_callback_carries_its_evidence_neighborhood(
+    app, monkeypatch
+):
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    hits = _retrieval_frame("GSM-A-", 2)
+    neighborhood = _retrieval_frame("GSM-A-", 4)
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "search_hits_with_neighborhood",
+        lambda **_kwargs: (hits, neighborhood, "cached"),
+    )
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "build_network_figure",
+        lambda *, query, hits_df: {"requested_count": len(hits_df)},
+    )
+    query = retrieval_callbacks.samples_df.iloc[0]
+
+    network, payload, _status = _callback_for(app, "search-button")(
+        1, query["sample_id"], 2, "", []
+    )
+
+    assert network["requested_count"] == 2
+    assert len(payload["hits"]) == 2
+    assert payload["neighborhood"]["available"] is True
+    assert payload["neighborhood"]["label"] == query["sample_name"]
+    assert [row["gsm"] for row in payload["neighborhood"]["hits"]] == [
+        "GSM-A-0", "GSM-A-1", "GSM-A-2", "GSM-A-3"
+    ]
+
+
+def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
+    app, monkeypatch
+):
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    hits = _retrieval_frame("GSM-D-", 2)
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "search_hits_with_neighborhood",
+        lambda **_kwargs: (hits, None, "demo"),
+    )
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "build_network_figure",
+        lambda *, query, hits_df: {"requested_count": len(hits_df)},
+    )
+    query = retrieval_callbacks.samples_df.iloc[0]
+
+    network, payload, _status = _callback_for(app, "search-button")(
+        1, query["sample_id"], 2, "", []
+    )
+
+    assert network["requested_count"] == 2
+    assert [row["gsm"] for row in payload["hits"]] == ["GSM-D-0", "GSM-D-1"]
+    assert payload["neighborhood"]["available"] is False
+    assert "Run this retrieval again" in payload["neighborhood"]["reason"]
+
+
+def test_upload_callback_carries_evidence_without_expanding_the_network(
+    app, monkeypatch
+):
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    hits = _retrieval_frame("GSM-U-", 2)
+    neighborhood = _retrieval_frame("GSM-U-", 4)
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "run_uploaded_retrieval_with_neighborhood",
+        lambda **_kwargs: (hits, neighborhood),
+    )
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "build_network_figure",
+        lambda *, query, hits_df: {"requested_count": len(hits_df)},
+    )
+
+    network, payload, _status = _callback_for(app, "upload-search-button")(
+        1,
+        {"path": "counts.csv", "filename": "counts.csv", "columns": ["Sample A"]},
+        "Sample A",
+        2,
+        "",
+        [],
+    )
+
+    assert network["requested_count"] == 2
+    assert len(payload["hits"]) == 2
+    assert payload["neighborhood"]["label"] == "Sample A"
+    assert payload["neighborhood"]["depth_returned"] == 4
+
+
+def test_comparison_callback_keeps_independent_evidence_for_both_arms(
+    app, monkeypatch
+):
+    import numpy as np
+
+    from bridge_rna import callbacks as retrieval_callbacks
+    from bridge_rna import cohorts as C
+
+    facets = ("study", "tissue", "spaceflight")
+    cohort_a = C.Cohort(
+        "COHORT|a", "OSD-1", facets,
+        {"study": "OSD-1", "tissue": "Liver", "spaceflight": "Flight"},
+        ("A1", "A2"),
+    )
+    cohort_b = C.Cohort(
+        "COHORT|b", "OSD-1", facets,
+        {"study": "OSD-1", "tissue": "Liver", "spaceflight": "Ground"},
+        ("B1", "B2"),
+    )
+    hits_a = _retrieval_frame("GSM-A-", 2, start=10)
+    hits_b = _retrieval_frame("GSM-B-", 2, start=20)
+    neighborhood_a = _retrieval_frame("GSM-A-", 4, start=10)
+    neighborhood_b = _retrieval_frame("GSM-B-", 5, start=20)
+    rows = np.asarray([[1.0, 0.0], [0.9, 0.1]], dtype=np.float32)
+    by_id = {cohort_a.cohort_id: cohort_a, cohort_b.cohort_id: cohort_b}
+    monkeypatch.setattr(
+        C, "find_cohort", lambda cohort_id, facets=None: by_id.get(cohort_id)
+    )
+    results = {
+        cohort_a.members: (hits_a, neighborhood_a, rows, None),
+        cohort_b.members: (hits_b, neighborhood_b, rows, None),
+    }
+    monkeypatch.setattr(
+        retrieval_callbacks,
+        "run_cohort_retrieval_with_neighborhood",
+        lambda members, topk: results[tuple(members)],
+    )
+    seen = {}
+
+    def comparison_figure(**kwargs):
+        seen.update(kwargs)
+        return {"comparison": True}
+
+    monkeypatch.setattr(
+        retrieval_callbacks, "build_comparison_figure", comparison_figure
+    )
+
+    network, payload, _status = _callback_for(app, "cohort-search-button")(
+        1,
+        cohort_a.cohort_id,
+        list(cohort_a.members),
+        cohort_b.cohort_id,
+        list(facets),
+        2,
+        "",
+        [],
+    )
+
+    assert network == {"comparison": True}
+    assert len(seen["hits_a"]) == len(seen["hits_b"]) == 2
+    assert len(payload["hits"]) == len(payload["comparison"]["hits_b"]) == 2
+    assert payload["neighborhood"]["label"] == cohort_a.label
+    assert payload["comparison"]["neighborhood_b"]["label"] == cohort_b.label
+    assert payload["neighborhood"]["depth_returned"] == 4
+    assert payload["comparison"]["neighborhood_b"]["depth_returned"] == 5
+    assert payload["neighborhood"]["hits"][0]["gsm"] == "GSM-A-0"
+    assert payload["comparison"]["neighborhood_b"]["hits"][0]["gsm"] == "GSM-B-0"
+
+
 def test_every_callback_target_exists_in_some_view(app, mounted_ids):
     referenced = set()
     for cb in app.callback_map.values():

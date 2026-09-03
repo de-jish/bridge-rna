@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from bridge_rna import cohorts as C
+from bridge_rna import retrieval
 
 
 # --- The facet registry ------------------------------------------------------
@@ -317,6 +318,68 @@ def test_the_caution_floor_is_the_threshold_that_set_low_n():
 # The set arithmetic lives here because it is arithmetic; the scan that feeds it
 # is exercised against the fixture memmap in test_retrieval.py, and the
 # corpus-scale claim is `precompute/validate_cohorts.py` check 2.
+
+
+def _cohort_keys(corpus, k: int) -> list[str]:
+    return [str(x) for x in corpus["osdr_metadata"]["sample_key"].head(k)]
+
+
+@pytest.fixture
+def fixture_retrieval(monkeypatch, corpus):
+    retrieval._cached_osdr_embeddings.cache_clear()
+    retrieval._archs4_annotations.cache_clear()
+    retrieval._ARCHS4_CACHE.clear()
+    monkeypatch.setattr(
+        retrieval,
+        "EMBEDDING_DIR",
+        corpus["bridge_rna_root"] / "archs4_sample_embeddings_full",
+    )
+    yield
+    retrieval._cached_osdr_embeddings.cache_clear()
+    retrieval._archs4_annotations.cache_clear()
+    retrieval._ARCHS4_CACHE.clear()
+
+
+def test_cohort_evidence_is_250_but_stability_uses_requested_depth(
+    monkeypatch, corpus, fixture_retrieval
+):
+    real_measure = C.measure_stability
+    captured = {}
+
+    def measure(**kwargs):
+        captured.update(kwargs)
+        return real_measure(**kwargs)
+
+    monkeypatch.setattr(C, "measure_stability", measure)
+    hits, neighborhood, rows, stability = (
+        retrieval.run_cohort_retrieval_with_neighborhood(
+            _cohort_keys(corpus, 4), topk=6, neighborhood_depth=250
+        )
+    )
+    assert len(hits) == 6 and len(neighborhood) == 250
+    assert hits["archs4_index"].tolist() == (
+        neighborhood.head(6)["archs4_index"].tolist()
+    )
+    assert len(captured["pooled_top"]) == 6
+    assert all(len(row) == 6 for row in captured["loo_tops"])
+    assert stability.depth == 6
+
+
+def test_cohort_evidence_and_stability_share_one_scan(
+    monkeypatch, corpus, fixture_retrieval
+):
+    calls = []
+    real_scan = retrieval._topk_cosine_matrix
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("k", args[2] if len(args) > 2 else None))
+        return real_scan(*args, **kwargs)
+
+    monkeypatch.setattr(retrieval, "_topk_cosine_matrix", counted)
+    retrieval.run_cohort_retrieval_with_neighborhood(
+        _cohort_keys(corpus, 4), topk=6, neighborhood_depth=250
+    )
+    assert calls == [250]
 
 
 def test_agreement_is_jaccard_and_agrees_with_the_validators_definition():

@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -800,9 +801,13 @@ def run_uploaded_retrieval_with_neighborhood(
 COHORT_MODE = "cohort"
 
 
-def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
-                         ) -> tuple[pd.DataFrame, np.ndarray, Any]:
-    """Pool a cohort's cached vectors into one query, then run the cached scan.
+def run_cohort_retrieval_with_neighborhood(
+    sample_ids: Sequence[str],
+    topk: int,
+    *,
+    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
+) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray, Any]:
+    """Pool a cohort and return requested hits plus one evidence prefix.
 
     The pooled vector is the only new thing. The cosine scan, the offline
     annotation from `archs4_metadata.parquet`, and the `archs4_index` column are
@@ -825,10 +830,10 @@ def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
     query alone, 1.00 s for the 77 vectors a 38-animal cohort needs, against a
     963 MB read that dominates both.
 
-    Returns `(hits, rows, stability)`. The members' stacked vectors come back so
-    the caller can compute the cohort's geometry without loading them twice;
-    `stability` is a `cohorts.StabilityMeasurement`, or None for a pool with
-    nothing to leave out.
+    Returns `(hits, neighborhood, rows, stability)`. The members' stacked
+    vectors come back so the caller can compute the cohort's geometry without
+    loading them twice; `stability` is a `cohorts.StabilityMeasurement`, or
+    None for a pool with nothing to leave out.
     """
     from .cohorts import cohort_query_vector, leave_one_out_vectors, measure_stability
 
@@ -851,19 +856,30 @@ def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
     q_mat = np.concatenate([cohort_query_vector(rows).reshape(1, -1), loo, rows])
 
     index_vecs, _, _ = _load_archs4_index()
-    idx, score = _topk_cosine_matrix(index_vecs=index_vecs, q_mat=q_mat, k=topk)
+    scan_k = max(int(topk), int(neighborhood_depth))
+    idx, score = _topk_cosine_matrix(index_vecs=index_vecs, q_mat=q_mat, k=scan_k)
 
-    hits = _annotate_from_cache(idx[0], score[0])
-    hits["archs4_index"] = idx[0].astype(int)
-    hits = hits.sort_values("score", ascending=False).reset_index(drop=True)
+    ranked = _annotate_from_cache(idx[0], score[0])
+    ranked["archs4_index"] = idx[0].astype(int)
+    hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
 
     k = len(rows)
+    depth = int(topk)
     stability = measure_stability(
         members=ids,
-        pooled_top=idx[0],
-        loo_tops=idx[1:1 + len(loo)],
-        member_tops=idx[1 + len(loo):1 + len(loo) + k],
-        depth=int(topk),
+        pooled_top=idx[0, :depth],
+        loo_tops=idx[1:1 + len(loo), :depth],
+        member_tops=idx[1 + len(loo):1 + len(loo) + k, :depth],
+        depth=depth,
+    )
+    return hits, neighborhood, rows, stability
+
+
+def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
+                         ) -> tuple[pd.DataFrame, np.ndarray, Any]:
+    """Pool a cohort's cached vectors into one requested-depth result."""
+    hits, _neighborhood, rows, stability = run_cohort_retrieval_with_neighborhood(
+        sample_ids, topk, neighborhood_depth=topk
     )
     return hits, rows, stability
 
