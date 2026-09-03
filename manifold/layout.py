@@ -417,6 +417,8 @@ def control_rail() -> html.Aside:
                 html.Div(id="retrieval-summary", className="bm-hint"),
                 html.Button("Frame the retrieval", id="frame-retrieval",
                             n_clicks=0, className="bm-button"),
+                html.Button("Explore neighborhood", id="explore-neighborhood",
+                            n_clicks=0, className="bm-button"),
                 # What each mark means lives in the key on the plot, beside the
                 # marks. Nothing else belongs here.
                 #
@@ -812,6 +814,232 @@ def legend_panel() -> html.Div:
     )
 
 
+def _neighborhood_empty(message: str) -> list:
+    return [html.Div(message, className="bm-neighborhood-empty", role="status")]
+
+
+def _neighborhood_row(kind: str, value: str, primary: str,
+                      secondary: str, trailing: str, selected: bool,
+                      disabled: bool = False) -> html.Button:
+    """One keyboard-native evidence row shared by Studies and Samples."""
+    return html.Button(
+        id={"type": f"neighborhood-{kind}", "value": value},
+        n_clicks=0,
+        disabled=disabled,
+        **{"aria-pressed": "true" if selected else "false"},
+        className=("bm-neighborhood-row "
+                   f"bm-neighborhood-{kind}"
+                   + (" is-selected" if selected else "")),
+        children=[
+            html.Span(primary, className="bm-neighborhood-row-primary"),
+            html.Span(secondary, className="bm-neighborhood-row-secondary"),
+            html.Span(trailing, className="bm-neighborhood-row-trailing"),
+        ],
+    )
+
+
+def _neighborhood_category_rows(category: dict) -> list:
+    """The five leading recorded categories plus one honest remainder."""
+    items = list(category.get("items") or [])
+    shown = items[:5]
+    if len(items) > 5:
+        count = sum(int(item.get("count") or 0) for item in items[5:])
+        covered = int(category.get("covered") or 0)
+        shown.append({
+            "label": "Other recorded categories",
+            "count": count,
+            "share": count / covered if covered else 0,
+        })
+    return [
+        html.Div(className="bm-neighborhood-bar-row", children=[
+            html.Div(className="bm-neighborhood-bar-label", children=[
+                html.Span(str(item.get("label") or "Not recorded")),
+                html.Span(f"{int(item.get('count') or 0):,}"),
+            ]),
+            html.Div(className="bm-neighborhood-bar-track", children=[
+                html.Div(
+                    className="bm-neighborhood-bar-fill",
+                    style={
+                        "width": (
+                            f"{max(0, min(1, float(item.get('share') or 0))) * 100:.1f}%"
+                        ),
+                    },
+                ),
+            ]),
+        ])
+        for item in shown
+    ]
+
+
+def neighborhood_overview_children(summary: dict) -> list:
+    """Render the deterministic, denominator-explicit evidence summary."""
+    depth = int(summary.get("depth") or 0)
+    if not depth:
+        return _neighborhood_empty("No samples are available in this neighborhood.")
+
+    tissue = summary.get("tissue") or {}
+    species = summary.get("species") or {}
+    score = summary.get("score") or {}
+    median = score.get("median")
+    minimum = score.get("minimum")
+    maximum = score.get("maximum")
+    score_value = "—" if median is None else f"{float(median):.3f}"
+    score_range = ("No numeric scores" if minimum is None or maximum is None else
+                   f"Range {float(minimum):.3f}–{float(maximum):.3f}")
+    top_three = int(summary.get("top_three_study_samples") or 0)
+
+    def composition(title: str, category: dict) -> html.Div:
+        rows = _neighborhood_category_rows(category)
+        return html.Div(className="bm-neighborhood-composition", children=[
+            html.H3(title, className="bm-neighborhood-section-title"),
+            *(rows or [html.Div("No recorded metadata.",
+                               className="bm-neighborhood-muted")]),
+        ])
+
+    leading = list(summary.get("leading_studies") or [])[:3]
+    leading_children = [
+        html.Div(className="bm-neighborhood-leading-row", children=[
+            html.Span(str(group.get("display_gse") or "No GSE recorded"),
+                      className="bm-neighborhood-leading-name"),
+            html.Span(
+                f"{int(group.get('sample_count') or 0):,} sample"
+                f"{'s' if int(group.get('sample_count') or 0) != 1 else ''}",
+                className="bm-neighborhood-leading-count",
+            ),
+        ])
+        for group in leading
+    ]
+
+    return [
+        html.P(str(summary.get("sentence") or ""),
+               className="bm-neighborhood-summary"),
+        html.Div(className="bm-neighborhood-coverage", children=[
+            html.Span(
+                f"Tissue metadata {int(tissue.get('covered') or 0):,} of {depth:,}"),
+            html.Span(
+                f"Species metadata {int(species.get('covered') or 0):,} of {depth:,}"),
+        ]),
+        html.Div(className="bm-neighborhood-metrics", children=[
+            html.Div(className="bm-neighborhood-metric", children=[
+                html.Strong(f"{int(summary.get('study_count') or 0):,}"),
+                html.Span("GEO studies"),
+            ]),
+            html.Div(className="bm-neighborhood-metric", children=[
+                html.Strong(f"{top_three:,} of {depth:,}"),
+                html.Span("in top 3 studies"),
+            ]),
+            html.Div(className="bm-neighborhood-metric", children=[
+                html.Strong(score_value),
+                html.Span("median cosine"),
+                html.Small(score_range),
+            ]),
+        ]),
+        composition("Tissue composition", tissue),
+        composition("Species composition", species),
+        html.Div(className="bm-neighborhood-leading", children=[
+            html.H3("Leading studies", className="bm-neighborhood-section-title"),
+            *(leading_children or [html.Div(
+                "No GEO studies are represented.",
+                className="bm-neighborhood-muted")]),
+        ]),
+    ]
+
+
+def _geo_link(accession: str, label: str) -> html.A:
+    return html.A(
+        label,
+        href=("https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc="
+              f"{quote(accession, safe='')}"),
+        target="_blank",
+        rel="noopener noreferrer",
+        className="bm-neighborhood-geo",
+    )
+
+
+def neighborhood_studies_children(groups: list[dict],
+                                    focus: dict | None) -> list:
+    """Render grouped evidence studies without nesting links in buttons."""
+    if not groups:
+        return _neighborhood_empty("No studies are represented in this neighborhood.")
+    selected = focus or {}
+    children = []
+    for group in groups:
+        gse = str(group.get("gse") or "")
+        display_gse = str(group.get("display_gse") or "No GSE recorded")
+        count = int(group.get("sample_count") or 0)
+        rank = int(group.get("best_rank") or 0)
+        tissue = str(group.get("dominant_tissue") or "Tissue not recorded")
+        button = _neighborhood_row(
+            "study", display_gse, display_gse, tissue,
+            f"{count:,} sample{'s' if count != 1 else ''} · best rank {rank:,}",
+            selected.get("kind") == "study"
+            and str(selected.get("value") or "") == display_gse,
+        )
+        row_children = [button]
+        if gse:
+            row_children.append(_geo_link(gse, f"Open {gse} in GEO"))
+        children.append(html.Div(
+            row_children, className="bm-neighborhood-study-wrap"))
+    return children
+
+
+def _sample_detail(row: dict) -> html.Div:
+    gsm = str(row.get("gsm") or "GSM not recorded")
+    score = row.get("score")
+    score_text = "Not recorded" if score is None else f"{float(score):.3f}"
+    fields = [
+        ("Study", str(row.get("gse") or "Not recorded")),
+        ("Tissue", str(row.get("tissue") or "Not recorded")),
+        ("Species", str(row.get("species") or "Not recorded")),
+        ("Cosine", score_text),
+    ]
+    return html.Div(className="bm-neighborhood-detail", children=[
+        html.Div(className="bm-neighborhood-detail-head", children=[
+            html.H3(gsm),
+            _geo_link(gsm, f"Open {gsm} in GEO") if row.get("gsm") else None,
+        ]),
+        html.P(str(row.get("title") or "Title not recorded")),
+        html.Dl([
+            child
+            for label, value in fields
+            for child in (html.Dt(label), html.Dd(value))
+        ]),
+    ])
+
+
+def neighborhood_samples_children(rows: list[dict],
+                                   focus: dict | None) -> list:
+    """Render every filtered evidence sample and its cached selected detail."""
+    if not rows:
+        return _neighborhood_empty("No samples match this search.")
+    selected = focus or {}
+    selected_gsm = (str(selected.get("value") or "")
+                    if selected.get("kind") == "sample" else "")
+    detail = next((row for row in rows
+                   if str(row.get("gsm") or "") == selected_gsm), None)
+    children = [_sample_detail(detail)] if detail is not None else []
+    for row in rows:
+        gsm = str(row.get("gsm") or "GSM not recorded")
+        gse = str(row.get("gse") or "No GSE")
+        tissue = str(row.get("tissue") or "Tissue not recorded")
+        species = str(row.get("species") or "Species not recorded")
+        title = str(row.get("title") or "Title not recorded")
+        rank = int(row.get("rank") or 0)
+        score = row.get("score")
+        score_text = "—" if score is None else f"{float(score):.3f}"
+        children.append(_neighborhood_row(
+            "sample", gsm, gsm, f"{gse} · {tissue} · {species} · {title}",
+            f"#{rank:,} · {score_text}", gsm == selected_gsm,
+        ))
+    return children
+
+
+def neighborhood_unavailable_children(reason: str) -> list:
+    """Render a stale/legacy result without pretending evidence exists."""
+    return _neighborhood_empty(
+        reason or "This retrieval has no evidence neighborhood available.")
+
+
 def build_view() -> html.Div:
     """The map view, everything below the shared header.
 
@@ -824,6 +1052,7 @@ def build_view() -> html.Div:
     return html.Div(className="bm-app", children=[
         html.Div(className="bm-body", children=[
             control_rail(),
+            html.Div(id="map-workspace", className="bm-map-workspace", children=[
             html.Main(className="bm-plot-wrap", **{"aria-label": "Embedding map"}, children=[
                 # The strip across the top of the canvas: what is drawn right
                 # now. Nothing else. "Reset view" used to share it and moved to
@@ -877,6 +1106,58 @@ def build_view() -> html.Div:
                     ),
                 ),
             ]),
+            html.Aside(
+                id="neighborhood-drawer",
+                className="bm-neighborhood",
+                style={"display": "none"},
+                **{"aria-labelledby": "neighborhood-heading"},
+                children=[
+                    html.Div(className="bm-neighborhood-head", children=[
+                        html.Div("Neighborhood explorer",
+                                 className="bm-group-label"),
+                        html.Button(
+                            "Close", id="neighborhood-close", n_clicks=0,
+                            className="bm-neighborhood-close",
+                            **{"aria-label": "Close neighborhood explorer"},
+                        ),
+                        html.H2(id="neighborhood-heading", tabIndex=-1),
+                        html.Div(id="neighborhood-meta", className="bm-hint"),
+                        dcc.RadioItems(
+                            id="neighborhood-arm", value="a",
+                            className="bm-seg bm-neighborhood-arm",
+                        ),
+                        dcc.RadioItems(
+                            id="neighborhood-tab", value="overview",
+                            options=[
+                                {"label": "Overview", "value": "overview"},
+                                {"label": "Studies", "value": "studies"},
+                                {"label": "Samples", "value": "samples"},
+                            ],
+                            className="bm-seg bm-neighborhood-tabs",
+                        ),
+                        html.Label(
+                            "Search neighborhood samples",
+                            htmlFor="neighborhood-search",
+                            className="visually-hidden",
+                        ),
+                        dcc.Input(
+                            id="neighborhood-search", type="search",
+                            placeholder="Search GSM, GSE, tissue…",
+                            className="bm-neighborhood-search",
+                            style={"display": "none"},
+                        ),
+                    ]),
+                    html.Div(
+                        id="neighborhood-body",
+                        className="bm-neighborhood-body",
+                    ),
+                    html.Div(
+                        "Nearest in 512-D—not everything inside the visible frame.",
+                        className="bm-neighborhood-foot",
+                    ),
+                ],
+            ),
+            ]),
         ]),
         dcc.Store(id="viewport-store"),
         dcc.Store(id="legend-store"),
@@ -896,4 +1177,10 @@ def build_view() -> html.Div:
         # actually clicked, so the search callback is never woken with nothing
         # to do. See `callbacks.choose_suggestion`.
         dcc.Store(id="find-chosen"),
+        dcc.Store(
+            id="neighborhood-open-store",
+            data={"open": False, "opener": "explore-neighborhood"},
+        ),
+        dcc.Store(id="neighborhood-focus-store"),
+        dcc.Store(id="neighborhood-focus-sink"),
     ])

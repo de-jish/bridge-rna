@@ -663,6 +663,321 @@ a, a:visited { color: var(--accent-text); }
 /* dcc.Link renders an <a>; .bm-button is written for a <button>. */
 a.bm-button { display: block; text-align: center; text-decoration: none; }
 
+/* ---- Evidence neighborhood explorer ----------------------------------- */
+.bm-map-workspace {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.bm-map-workspace > .bm-plot-wrap { min-width: 0; }
+
+.bm-neighborhood {
+  width: 390px;
+  min-width: 0;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: var(--border);
+  color: var(--text-primary);
+}
+.bm-neighborhood-head {
+  position: relative;
+  padding: var(--space-3);
+  border-bottom: var(--border);
+}
+.bm-neighborhood-head > .bm-group-label { margin-bottom: var(--space-1); }
+.bm-neighborhood-head h2 {
+  min-width: 0;
+  margin: 0;
+  padding-right: calc(var(--space-5) + var(--space-4));
+  font-size: var(--text-lg);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.bm-neighborhood-close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  min-height: var(--space-5);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.bm-neighborhood-close:hover { background: var(--accent-soft); }
+.bm-neighborhood-close:focus-visible,
+.bm-neighborhood-geo:focus-visible,
+.bm-neighborhood-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.bm-neighborhood-head > .bm-hint { margin-top: var(--space-1); }
+.bm-neighborhood-arm,
+.bm-neighborhood-tabs { margin-top: var(--space-3); }
+.bm-neighborhood-arm .dash-options-list-option-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bm-neighborhood-search {
+  width: 100%;
+  margin-top: var(--space-3);
+  min-height: var(--space-5);
+  padding: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.bm-neighborhood-search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.bm-neighborhood-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.bm-neighborhood-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-3) var(--space-3);
+  overscroll-behavior: contain;
+}
+.bm-neighborhood-summary {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+.bm-neighborhood-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.bm-neighborhood-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.bm-neighborhood-metric {
+  min-width: 0;
+  padding: var(--space-2);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.bm-neighborhood-metric strong,
+.bm-neighborhood-metric span,
+.bm-neighborhood-metric small { display: block; }
+.bm-neighborhood-metric strong {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+}
+.bm-neighborhood-metric span,
+.bm-neighborhood-metric small {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.3;
+}
+.bm-neighborhood-composition,
+.bm-neighborhood-leading { margin-top: var(--space-4); }
+.bm-neighborhood-section-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.bm-neighborhood-bar-row + .bm-neighborhood-bar-row { margin-top: var(--space-2); }
+.bm-neighborhood-bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.bm-neighborhood-bar-label span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bm-neighborhood-bar-label span:last-child {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.bm-neighborhood-bar-track {
+  height: var(--space-1);
+  margin-top: var(--space-1);
+  overflow: hidden;
+  border-radius: var(--space-1);
+  background: var(--bg-inset);
+}
+.bm-neighborhood-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-teal);
+}
+.bm-neighborhood-leading-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-top: var(--border);
+  font-size: var(--text-sm);
+}
+.bm-neighborhood-leading-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.bm-neighborhood-leading-count { color: var(--text-secondary); }
+.bm-neighborhood-muted {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.bm-neighborhood-study-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  border-top: var(--border);
+}
+.bm-neighborhood-row {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--space-5) + var(--space-3));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2);
+  border: 0;
+  border-top: var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.bm-neighborhood-study-wrap .bm-neighborhood-row { border-top: 0; }
+.bm-neighborhood-row:hover,
+.bm-neighborhood-row:focus-visible,
+.bm-neighborhood-row.is-selected { background: var(--accent-soft); }
+.bm-neighborhood-row.is-selected { box-shadow: inset 3px 0 0 var(--accent); }
+.bm-neighborhood-row-primary,
+.bm-neighborhood-row-secondary,
+.bm-neighborhood-row-trailing { min-width: 0; }
+.bm-neighborhood-row-primary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.bm-neighborhood-row-secondary {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.bm-neighborhood-row-trailing {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.bm-neighborhood-geo {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--space-5);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.bm-neighborhood-detail {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.bm-neighborhood-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.bm-neighborhood-detail h3,
+.bm-neighborhood-detail p { margin: 0; }
+.bm-neighborhood-detail h3 { font-size: var(--text-base); }
+.bm-neighborhood-detail p {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.bm-neighborhood-detail dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+}
+.bm-neighborhood-detail dt { color: var(--text-secondary); }
+.bm-neighborhood-detail dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.bm-neighborhood-empty {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  text-align: center;
+}
+.bm-neighborhood-foot {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 /* ==========================================================================
    Responsive: two columns → rail above map
 
@@ -711,7 +1026,31 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
      thirds of the viewport keeps the projection legible while leaving the rail
      visible above it, and the floor keeps it a map rather than a band on a
      short landscape phone. */
-  .bm-plot-wrap { flex: none; height: 68vh; min-height: 420px; }
+  .bm-map-workspace {
+    position: relative;
+    flex: none;
+    height: 68vh;
+    min-height: 420px;
+  }
+  .bm-map-workspace > .bm-plot-wrap {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+  }
+  .bm-neighborhood {
+    position: absolute;
+    z-index: 12;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-height: min(72%, 560px);
+    border-left: 0;
+    border-top: var(--border);
+    box-shadow: var(--shadow-raised);
+  }
+  .bm-neighborhood-close,
+  .bm-neighborhood-geo { min-height: 44px; }
 
   /* Plotly parks its modebar at the top right of the canvas, which is where
      the badges wrap into once the plot is narrow. */

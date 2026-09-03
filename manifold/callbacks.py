@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 from dash import ALL, Input, Output, State, ctx, html, no_update
 
+from bridge_rna import neighborhoods
+
 from . import colorby, data, find, layout, render, theme
 
 # The legend search only earns its space once the list is long enough to be
@@ -150,6 +152,115 @@ def _neighborhood_payload_for_arm(hits_payload: dict | None,
     if arm == ROLE_B:
         return (hits_payload.get("comparison") or {}).get("neighborhood_b")
     return hits_payload.get("neighborhood")
+
+
+def next_neighborhood_open_state(trigger: str | None, previous: dict | None,
+                                 has_retrieval: bool) -> dict:
+    """Apply one open/close event without giving the store another writer."""
+    old = previous or {"open": False, "opener": "explore-neighborhood"}
+    if trigger == "hits-store":
+        return {"open": False, "opener": old["opener"]}
+    if trigger == "neighborhood-close":
+        return {"open": False, "opener": old["opener"]}
+    if trigger in ("frame-retrieval", "explore-neighborhood") and has_retrieval:
+        return {"open": True, "opener": trigger}
+    return old
+
+
+def _neighborhood_arm_label(hits_payload: dict | None, arm: str) -> str:
+    payload = hits_payload or {}
+    if arm == ROLE_B:
+        comparison = payload.get("comparison") or {}
+        neighborhood = comparison.get("neighborhood_b") or {}
+        query = comparison.get("query_b") or {}
+        fallback = "Cohort B"
+    else:
+        neighborhood = payload.get("neighborhood") or {}
+        query = payload.get("query") or {}
+        fallback = "Evidence neighborhood"
+    return (str(neighborhood.get("label") or "")
+            or str(query.get("cohort_label") or query.get("sample_name") or "")
+            or fallback)
+
+
+def neighborhood_arm_options(hits_payload: dict | None) -> tuple[list[dict], dict]:
+    """Name comparison arms independently and hide the redundant single arm."""
+    payload = hits_payload or {}
+    comparison = payload.get("comparison") or {}
+    label_a = _neighborhood_arm_label(payload, ROLE_A)
+    if not comparison:
+        return [{"label": label_a, "value": ROLE_A}], {"display": "none"}
+
+    label_b = _neighborhood_arm_label(payload, ROLE_B)
+    return [
+        {"label": f"A · {label_a}", "value": ROLE_A},
+        {"label": f"B · {label_b}", "value": ROLE_B},
+    ], {}
+
+
+def next_neighborhood_focus(trigger, value):
+    """Translate an explicit row/map click into the explorer's focus shape."""
+    if trigger == "hits-store":
+        return None
+    if isinstance(trigger, dict):
+        kind = {"neighborhood-study": "study",
+                "neighborhood-sample": "sample"}.get(trigger.get("type"))
+        selected = str(trigger.get("value") or "")
+        if kind and selected and value:
+            return {"kind": kind, "value": selected}
+        return no_update
+    if trigger != "manifold-graph" or not value:
+        return no_update
+    points = value.get("points") or []
+    custom = points[0].get("customdata") if points else None
+    if (not isinstance(custom, (list, tuple)) or len(custom) < 3
+            or custom[0] != "neighborhood" or not custom[2]):
+        return no_update
+    return {"kind": "sample", "value": str(custom[2])}
+
+
+def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
+                              tab: str, search: str | None,
+                              focus: dict | None) -> dict:
+    """Build every drawer output from one selected, cached evidence arm."""
+    payload = _neighborhood_payload_for_arm(hits_payload, arm or ROLE_A) or {}
+    options, arm_style = neighborhood_arm_options(hits_payload)
+    available = bool(payload.get("available"))
+    summary = neighborhoods.summarize(payload)
+    groups = neighborhoods.study_groups(payload)
+    rows = neighborhoods.sample_rows(payload, search or "")
+    summary["leading_studies"] = groups[:3]
+    depth = int(summary.get("depth") or 0)
+    study_count = int(summary.get("study_count") or 0)
+    tabs = [
+        {"label": "Overview", "value": "overview"},
+        {"label": f"Studies {study_count:,}", "value": "studies"},
+        {"label": f"Samples {depth:,}", "value": "samples"},
+    ]
+    if available:
+        builders = {
+            "overview": lambda: layout.neighborhood_overview_children(summary),
+            "studies": lambda: layout.neighborhood_studies_children(groups, focus),
+            "samples": lambda: layout.neighborhood_samples_children(rows, focus),
+        }
+        body = builders.get(tab, builders["overview"])()
+        meta = (f"{depth:,} nearest sample{'s' if depth != 1 else ''} · "
+                "cosine in 512-D")
+    else:
+        body = layout.neighborhood_unavailable_children(
+            str(payload.get("reason") or
+                "Run this retrieval again to build its evidence neighborhood."))
+        meta = "Evidence neighborhood unavailable"
+    return {
+        "heading": _neighborhood_arm_label(hits_payload, arm or ROLE_A),
+        "meta": meta,
+        "arm_options": options,
+        "arm_style": arm_style,
+        "tabs": tabs,
+        "search_style": ({} if available and tab == "samples"
+                         else {"display": "none"}),
+        "body": body,
+    }
 
 
 def _neighborhood_overlay(hits_payload: dict | None, arm: str,
@@ -511,15 +622,23 @@ def register(app):
         Input("hits-store", "data"),
         Input("show-retrieval", "value"),
         Input("find-store", "data"),
+        Input("neighborhood-open-store", "data"),
+        Input("neighborhood-arm", "value"),
+        Input("neighborhood-focus-store", "data"),
     )
     def update_figure(method, dims, color_by, layers, budget, viewport,
-                      hits_payload, show_retrieval, found):
+                      hits_payload, show_retrieval, found, open_state, arm,
+                      focus):
         vp = tuple(viewport) if viewport else None
         roles = _roles_from_checklist(show_retrieval)
         retrieval = _retrieval_overlay(hits_payload, roles) if roles else None
+        state = open_state or {}
+        neighborhood = (_neighborhood_overlay(hits_payload, arm or ROLE_A, focus)
+                        if state.get("open") else None)
         fig, legend_data, badges = render.build_figure(
             method, dims, color_by, layers or [], budget,
-            vp if dims == "2d" else None, retrieval=retrieval, found=found)
+            vp if dims == "2d" else None, retrieval=retrieval,
+            neighborhood=neighborhood, found=found)
         legend_data["title"] = layout.color_by_label(color_by)
         fig.update_layout(**viewport_axes(vp, dims))
         badge_children = [_badge(b) for b in badges]
@@ -529,7 +648,8 @@ def register(app):
         # ticked, so an unticked cohort can keep its row, receded. `retrieval`
         # above is the drawn subset and is what the figure gets.
         key = layout.retrieval_key_children(
-            _retrieval_overlay(hits_payload), roles, dims)
+            _retrieval_overlay(hits_payload), roles, dims,
+            neighborhood=neighborhood)
         corpus = layout.corpus_key_children(layers)
         found_key = layout.found_key_children(found)
 
@@ -743,6 +863,7 @@ def register(app):
     @app.callback(
         Output("retrieval-group", "style"),
         Output("frame-retrieval", "style"),
+        Output("explore-neighborhood", "style"),
         Output("show-retrieval", "options"),
         Output("show-retrieval", "value"),
         Input("hits-store", "data"),
@@ -782,16 +903,126 @@ def register(app):
         overlay = _retrieval_overlay(hits_payload)
         if overlay is None:
             return ({"display": "none"}, {"display": "none"},
+                    {"display": "none"},
                     *ticks(single, ["on"]))
 
         frame_style = {} if dims == "2d" else {"display": "none"}
         if len(overlay["cohorts"]) < 2:
-            return {}, frame_style, *ticks(single, ["on"])
+            return {}, frame_style, {}, *ticks(single, ["on"])
         options = [
             {"label": f"  {c['label'] or 'cohort'}", "value": key}
             for c, key in zip(overlay["cohorts"], ("on", ROLE_B))
         ]
-        return {}, frame_style, *ticks(options, ["on", ROLE_B])
+        return {}, frame_style, {}, *ticks(options, ["on", ROLE_B])
+
+    @app.callback(
+        Output("neighborhood-open-store", "data"),
+        Input("frame-retrieval", "n_clicks"),
+        Input("explore-neighborhood", "n_clicks"),
+        Input("neighborhood-close", "n_clicks"),
+        Input("hits-store", "data"),
+        State("neighborhood-open-store", "data"),
+        prevent_initial_call=True,
+    )
+    def set_neighborhood_open(_frame, _explore, _close, hits_payload, previous):
+        has_retrieval = _retrieval_overlay(hits_payload) is not None
+        return next_neighborhood_open_state(
+            ctx.triggered_id, previous, has_retrieval)
+
+    @app.callback(
+        Output("neighborhood-drawer", "style"),
+        Output("map-workspace", "className"),
+        Input("neighborhood-open-store", "data"),
+    )
+    def show_neighborhood(open_state):
+        opened = bool((open_state or {}).get("open"))
+        return ({} if opened else {"display": "none"},
+                "bm-map-workspace" + (" is-neighborhood-open" if opened else ""))
+
+    app.clientside_callback(
+        """
+        function(state) {
+            const opened = !!(state && state.open);
+            const targetId = opened
+                ? "neighborhood-heading"
+                : ((state && state.opener) || "explore-neighborhood");
+            let attempts = 0;
+            const focusWhenReady = function() {
+                const target = document.getElementById(targetId);
+                if (target && target.offsetParent !== null) {
+                    target.focus();
+                    return;
+                }
+                if (!opened) {
+                    const fallback = document.getElementById("explore-neighborhood");
+                    if (fallback && fallback.offsetParent !== null) {
+                        fallback.focus();
+                        return;
+                    }
+                }
+                attempts += 1;
+                if (attempts < 30) {
+                    window.requestAnimationFrame(focusWhenReady);
+                }
+            };
+            window.requestAnimationFrame(focusWhenReady);
+            return {open: opened, opener: targetId, sequence: Date.now()};
+        }
+        """,
+        Output("neighborhood-focus-sink", "data"),
+        Input("neighborhood-open-store", "data"),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output("neighborhood-tab", "value"),
+        Output("neighborhood-arm", "value"),
+        Output("neighborhood-search", "value"),
+        Input("hits-store", "data"),
+        prevent_initial_call=True,
+    )
+    def reset_neighborhood_controls(_hits_payload):
+        return "overview", ROLE_A, ""
+
+    @app.callback(
+        Output("neighborhood-heading", "children"),
+        Output("neighborhood-meta", "children"),
+        Output("neighborhood-arm", "options"),
+        Output("neighborhood-arm", "style"),
+        Output("neighborhood-tab", "options"),
+        Output("neighborhood-search", "style"),
+        Output("neighborhood-body", "children"),
+        Input("hits-store", "data"),
+        Input("neighborhood-arm", "value"),
+        Input("neighborhood-tab", "value"),
+        Input("neighborhood-search", "value"),
+        Input("neighborhood-focus-store", "data"),
+    )
+    def render_neighborhood(hits_payload, arm, tab, search, focus):
+        state = neighborhood_drawer_state(
+            hits_payload, arm or ROLE_A, tab or "overview", search, focus)
+        return (state["heading"], state["meta"], state["arm_options"],
+                state["arm_style"], state["tabs"], state["search_style"],
+                state["body"])
+
+    @app.callback(
+        Output("neighborhood-focus-store", "data"),
+        Input({"type": "neighborhood-study", "value": ALL}, "n_clicks"),
+        Input({"type": "neighborhood-sample", "value": ALL}, "n_clicks"),
+        Input("manifold-graph", "clickData"),
+        Input("hits-store", "data"),
+        prevent_initial_call=True,
+    )
+    def focus_neighborhood(_study_clicks, _sample_clicks, click_data,
+                           hits_payload):
+        trigger = ctx.triggered_id
+        if trigger == "hits-store":
+            return next_neighborhood_focus(trigger, hits_payload)
+        if trigger == "manifold-graph":
+            return next_neighborhood_focus(trigger, click_data)
+        changed = next((item.get("value") for item in (ctx.triggered or [])
+                        if item.get("value") is not None), None)
+        return next_neighborhood_focus(trigger, changed)
 
     @app.callback(
         Output("retrieval-summary", "children"),

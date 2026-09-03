@@ -76,6 +76,15 @@ def mounted_ids(app):
     trees.append(html.Div(layout.suggestion_children(
         {"items": [{"value": "GSM1", "label": "GSM1", "detail": "", "kind": "gsm"}],
          "reason": ""})))
+    trees.append(html.Div(layout.neighborhood_studies_children([
+        {"gse": "GSE1", "display_gse": "GSE1", "sample_count": 1,
+         "best_rank": 1, "dominant_tissue": "Eye"},
+    ], None)))
+    trees.append(html.Div(layout.neighborhood_samples_children([
+        {"rank": 1, "gsm": "GSM1", "gse": "GSE1", "title": "Eye",
+         "tissue": "Eye", "species": "mouse", "score": 0.9,
+         "archs4_index": 1},
+    ], None)))
     # The shell itself, built outside a request so it takes the default route.
     trees.append(app.layout() if callable(app.layout) else app.layout)
     for tree in trees:
@@ -466,6 +475,277 @@ def test_legend_parts_are_static_so_dash_can_validate_them(map_view):
     for required in ("legend-title", "legend-search", "legend-search-group",
                      "legend-list", "legend-store"):
         assert required in ids, f"{required} is only created at runtime"
+
+
+def test_neighborhood_explorer_parts_are_static_so_dash_can_validate_them(map_view):
+    ids = {getattr(c, "id", None) for c in _walk(map_view)}
+    required = {
+        "explore-neighborhood", "neighborhood-drawer", "neighborhood-close",
+        "neighborhood-heading", "neighborhood-arm", "neighborhood-tab",
+        "neighborhood-search", "neighborhood-body",
+        "neighborhood-open-store", "neighborhood-focus-store",
+        "neighborhood-focus-sink",
+    }
+    assert required <= ids, f"layout is missing {sorted(required - ids)}"
+
+
+def test_one_callback_owns_neighborhood_open_state(app):
+    writers = [k for k in app.callback_map
+               if "neighborhood-open-store.data" in k]
+    assert len(writers) == 1
+    inputs = {i["id"] for i in app.callback_map[writers[0]]["inputs"]}
+    assert {"frame-retrieval", "explore-neighborhood", "neighborhood-close",
+            "hits-store"} <= inputs
+
+
+def test_explorer_does_not_make_the_viewport_multi_writer(app):
+    writers = [k for k in app.callback_map if "viewport-store.data" in k]
+    assert len(writers) == 1
+
+
+def test_tab_and_search_changes_do_not_redraw_the_map(app):
+    figure_key = next(k for k in app.callback_map
+                      if "manifold-graph.figure" in k)
+    figure_inputs = {(i["id"], i["property"])
+                     for i in app.callback_map[figure_key]["inputs"]}
+    assert {("neighborhood-open-store", "data"),
+            ("neighborhood-arm", "value"),
+            ("neighborhood-focus-store", "data")} <= figure_inputs
+    assert ("neighborhood-tab", "value") not in figure_inputs
+    assert ("neighborhood-search", "value") not in figure_inputs
+
+
+@pytest.mark.parametrize(
+    "trigger,previous,has_retrieval,expected",
+    [
+        (None, None, False,
+         {"open": False, "opener": "explore-neighborhood"}),
+        ("frame-retrieval", None, True,
+         {"open": True, "opener": "frame-retrieval"}),
+        ("explore-neighborhood", {"open": False, "opener": "frame-retrieval"},
+         True, {"open": True, "opener": "explore-neighborhood"}),
+        ("neighborhood-close", {"open": True, "opener": "frame-retrieval"},
+         True, {"open": False, "opener": "frame-retrieval"}),
+        ("hits-store", {"open": True, "opener": "explore-neighborhood"},
+         True, {"open": False, "opener": "explore-neighborhood"}),
+        ("frame-retrieval", {"open": False, "opener": "explore-neighborhood"},
+         False, {"open": False, "opener": "explore-neighborhood"}),
+    ],
+)
+def test_neighborhood_open_state_has_one_deterministic_transition(
+        trigger, previous, has_retrieval, expected):
+    assert callbacks.next_neighborhood_open_state(
+        trigger, previous, has_retrieval) == expected
+
+
+def test_neighborhood_overview_renders_metrics_coverage_and_ranked_groups():
+    summary = {
+        "available": True,
+        "depth": 4,
+        "sentence": "Eye is the leading tissue: 2 of 3 samples with tissue metadata.",
+        "study_count": 2,
+        "top_three_study_samples": 3,
+        "score": {"count": 4, "median": 0.975, "minimum": 0.95,
+                  "maximum": 0.99},
+        "tissue": {"covered": 3, "items": [
+            {"label": "Eye", "count": 2, "share": 2 / 3},
+            {"label": "Brain", "count": 1, "share": 1 / 3},
+        ]},
+        "species": {"covered": 3, "items": [
+            {"label": "Mus musculus", "count": 2, "share": 2 / 3},
+            {"label": "Homo sapiens", "count": 1, "share": 1 / 3},
+        ]},
+        "leading_studies": [
+            {"display_gse": "GSE10", "sample_count": 2,
+             "dominant_tissue": "Eye"},
+            {"display_gse": "GSE20", "sample_count": 1,
+             "dominant_tissue": "Brain"},
+        ],
+    }
+
+    children = layout.neighborhood_overview_children(summary)
+    text = _text(children)
+    classes = _classes(children)
+
+    assert summary["sentence"] in text
+    assert "Tissue metadata 3 of 4" in text
+    assert "Species metadata 3 of 4" in text
+    assert all(value in text for value in ("4", "2", "0.975"))
+    assert "GSE10" in text and "GSE20" in text
+    assert "bm-neighborhood-metrics" in classes
+    assert classes.count("bm-neighborhood-bar-fill") == 4
+
+
+def test_neighborhood_studies_use_separate_buttons_and_geo_links():
+    groups = [
+        {"gse": "GSE10", "display_gse": "GSE10", "sample_count": 2,
+         "best_rank": 1, "dominant_tissue": "Eye"},
+        {"gse": "", "display_gse": "No GSE recorded", "sample_count": 1,
+         "best_rank": 4, "dominant_tissue": ""},
+    ]
+    children = layout.neighborhood_studies_children(
+        groups, {"kind": "study", "value": "GSE10"})
+    tree = html.Div(children)
+    buttons = [c for c in _walk(tree) if type(c).__name__ == "Button"]
+    links = [c for c in _walk(tree) if type(c).__name__ == "A"]
+
+    assert [button.id for button in buttons] == [
+        {"type": "neighborhood-study", "value": "GSE10"},
+        {"type": "neighborhood-study", "value": "No GSE recorded"},
+    ]
+    assert "is-selected" in buttons[0].className
+    assert getattr(buttons[0], "aria-pressed") == "true"
+    assert getattr(buttons[1], "aria-pressed") == "false"
+    assert buttons[1].disabled is False
+    assert len(links) == 1
+    assert links[0].href.endswith("?acc=GSE10")
+    assert not any(type(c).__name__ == "A" for c in _walk(buttons[0]))
+
+
+def test_neighborhood_samples_keep_unlocatable_rows_selectable_and_show_detail():
+    rows = [
+        {"rank": 1, "gsm": "GSM1", "gse": "GSE10", "title": "Retina A",
+         "tissue": "Eye", "species": "Mus musculus", "score": 0.99,
+         "archs4_index": 4},
+        {"rank": 2, "gsm": "GSM2", "gse": "", "title": "Brain B",
+         "tissue": "Brain", "species": "Homo sapiens", "score": None,
+         "archs4_index": None},
+    ]
+    children = layout.neighborhood_samples_children(
+        rows, {"kind": "sample", "value": "GSM2"})
+    tree = html.Div(children)
+    buttons = [c for c in _walk(tree) if type(c).__name__ == "Button"]
+    links = [c for c in _walk(tree) if type(c).__name__ == "A"]
+
+    assert [button.id["value"] for button in buttons] == ["GSM1", "GSM2"]
+    assert buttons[1].disabled is False
+    assert "is-selected" in buttons[1].className
+    assert getattr(buttons[1], "aria-pressed") == "true"
+    assert "Brain B" in _text(children)
+    assert any(link.href.endswith("?acc=GSM2") for link in links)
+
+
+def test_neighborhood_builders_have_explicit_empty_and_unavailable_states():
+    assert "No studies" in _text(layout.neighborhood_studies_children([], None))
+    assert "No samples" in _text(layout.neighborhood_samples_children([], None))
+    unavailable = layout.neighborhood_unavailable_children(
+        "Run this retrieval again to build its evidence neighborhood.")
+    assert "Run this retrieval again" in _text(unavailable)
+    assert "bm-neighborhood-empty" in _classes(unavailable)
+
+
+def test_comparison_arm_options_name_both_cohorts_without_merging_them():
+    payload = {
+        "query": {"cohort_label": "Flight"},
+        "neighborhood": {"available": True, "label": "Flight", "hits": []},
+        "comparison": {
+            "query_b": {"cohort_label": "Ground"},
+            "neighborhood_b": {"available": True, "label": "Ground", "hits": []},
+        },
+    }
+    options, style = callbacks.neighborhood_arm_options(payload)
+    assert options == [
+        {"label": "A · Flight", "value": "a"},
+        {"label": "B · Ground", "value": "b"},
+    ]
+    assert style == {}
+
+    single, single_style = callbacks.neighborhood_arm_options({
+        "query": {"sample_name": "Sample 1"},
+        "neighborhood": {"available": True, "label": "Sample 1", "hits": []},
+    })
+    assert single == [{"label": "Sample 1", "value": "a"}]
+    assert single_style == {"display": "none"}
+
+
+def test_drawer_state_reads_only_the_selected_comparison_arm():
+    arm_a = _neighborhood_payload("Flight")
+    arm_b = _neighborhood_payload("Ground", 10)
+    arm_b["hits"] = arm_b["hits"][:1]
+    arm_b["depth_returned"] = 1
+    payload = {
+        "neighborhood": arm_a,
+        "comparison": {"neighborhood_b": arm_b},
+    }
+
+    state = callbacks.neighborhood_drawer_state(
+        payload, "b", "samples", "", None)
+
+    assert state["heading"] == "Ground"
+    assert state["tabs"][1]["label"] == "Studies 1"
+    assert state["tabs"][2]["label"] == "Samples 1"
+    buttons = [c for c in _walk(html.Div(state["body"]))
+               if type(c).__name__ == "Button"]
+    assert [button.id["value"] for button in buttons] == ["GSM1"]
+    assert state["search_style"] == {}
+
+
+def test_drawer_state_explains_an_unavailable_neighborhood():
+    reason = "Run this retrieval again to build its evidence neighborhood."
+    state = callbacks.neighborhood_drawer_state(
+        {"neighborhood": {"available": False, "reason": reason}},
+        "a", "overview", "", None)
+    assert reason in _text(state["body"])
+    assert state["search_style"] == {"display": "none"}
+
+
+def test_unavailable_comparison_arm_keeps_its_cohort_name():
+    reason = "Run this retrieval again."
+    state = callbacks.neighborhood_drawer_state({
+        "query": {"cohort_label": "Flight"},
+        "neighborhood": {"available": True, "label": "Flight", "hits": []},
+        "comparison": {
+            "query_b": {"cohort_label": "Ground"},
+            "neighborhood_b": {"available": False, "reason": reason,
+                               "label": "", "hits": []},
+        },
+    }, "b", "overview", "", None)
+
+    assert state["heading"] == "Ground"
+    assert reason in _text(state["body"])
+
+
+@pytest.mark.parametrize(
+    "trigger,value,expected",
+    [
+        ("hits-store", {"anything": True}, None),
+        ({"type": "neighborhood-study", "value": "GSE10"}, 1,
+         {"kind": "study", "value": "GSE10"}),
+        ({"type": "neighborhood-sample", "value": "GSM2"}, 1,
+         {"kind": "sample", "value": "GSM2"}),
+        ("manifold-graph", {"points": [{"customdata": [
+            "neighborhood", 2, "GSM2", "GSE10", 0.98, "Eye", "mouse"]}]},
+         {"kind": "sample", "value": "GSM2"}),
+    ],
+)
+def test_neighborhood_focus_accepts_only_explicit_evidence_actions(
+        trigger, value, expected):
+    assert callbacks.next_neighborhood_focus(trigger, value) == expected
+
+
+def test_neighborhood_focus_ignores_mounts_and_non_evidence_map_clicks():
+    assert callbacks.next_neighborhood_focus(
+        {"type": "neighborhood-study", "value": "GSE10"}, 0
+    ) is callbacks.no_update
+    assert callbacks.next_neighborhood_focus(
+        "manifold-graph", {"points": [{"customdata": ["OSD-1|sample"]}]}
+    ) is callbacks.no_update
+    assert callbacks.next_neighborhood_focus("manifold-graph", None) \
+        is callbacks.no_update
+
+
+def test_one_callback_owns_neighborhood_focus_state(app):
+    writers = [k for k in app.callback_map
+               if "neighborhood-focus-store.data" in k]
+    assert len(writers) == 1
+    inputs = {(str(i["id"]), i["property"])
+              for i in app.callback_map[writers[0]]["inputs"]}
+    assert ("manifold-graph", "clickData") in inputs
+    assert ("hits-store", "data") in inputs
+    assert any("neighborhood-study" in component_id
+               for component_id, _property in inputs)
+    assert any("neighborhood-sample" in component_id
+               for component_id, _property in inputs)
 
 
 def test_budget_tiers_follow_dimensionality(corpus):
