@@ -51,7 +51,6 @@ from .neighborhoods import (
 from .panels import (
     build_cohort_card,
     build_details_panel,
-    build_stability_panel,
     build_status_banner,
 )
 from .retrieval import (
@@ -122,10 +121,6 @@ def _cohort_query_series(cohort, geometry, excluded: list[str]) -> pd.Series:
         "condition": cohort.values.get("spaceflight", ""),
         "is_cohort": "1",
         "grouped_by": grouped,
-        # No stability field. It used to carry `expected_stability(k)`, a curve
-        # looked up by cohort size; it is measured during the search now and
-        # travels in the payload's own `stability` block, which the inspector's
-        # stability panel reads. See docs/design-notes.md#live-stability.
         "members": "\n".join(geometry.members),
         "excluded": "\n".join(excluded),
         "outliers": "\n".join(outliers),
@@ -759,12 +754,6 @@ def register(app) -> None:
                            compare_id: str | None, facets: list[str] | None):
         """Restate the pooled size of every query that is about to run.
 
-        Size, and nothing else. This used to restate a stability figure too,
-        looked up from a curve by that size; the number is measured during the
-        search now and `build_stability_panel` reports it in the inspector
-        afterwards, so what is left here is the one fact the rail can state
-        before anything has been scored.
-
         It reads the *included* members rather than the cohort's full
         membership, because excluding two of six changes the size the card
         states. A card that kept quoting the cohort's nominal size while the
@@ -908,7 +897,7 @@ def register(app) -> None:
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
 
         try:
-            hits_df, neighborhood_df, rows, stability = (
+            hits_df, neighborhood_df, rows = (
                 run_cohort_retrieval_with_neighborhood(members, topk=int(topk))
             )
             geometry = C.cohort_geometry(members, rows)
@@ -916,11 +905,11 @@ def register(app) -> None:
                 hits_df = _enrich_hits_from_ncbi_eutils(hits_df, email_value)
 
             other = C.find_cohort(_safe_str(compare_id), facets=facets)
-            other_hits, other_neighborhood, other_geometry, other_stability = (
-                None, None, None, None
+            other_hits, other_neighborhood, other_geometry = (
+                None, None, None
             )
             if other is not None:
-                other_hits, other_neighborhood, other_rows, other_stability = (
+                other_hits, other_neighborhood, other_rows = (
                     run_cohort_retrieval_with_neighborhood(
                         list(other.members), topk=int(topk)
                     )
@@ -947,11 +936,6 @@ def register(app) -> None:
             # The map draws every pooled member rather than one query point,
             # because a cohort has no single position in the space.
             "member_ids": list(geometry.members),
-            # Measured during the scan that produced these hits, over this
-            # cohort's own leave-one-out pools at this depth. It travels with the
-            # hits rather than being recomputed, because recomputing it means a
-            # second memmap pass and it is a property of *these* hits.
-            "stability": stability.as_dict() if stability is not None else None,
             "neighborhood": _evidence_payload(
                 neighborhood_df, label=cohort.label
             ),
@@ -993,11 +977,6 @@ def register(app) -> None:
             # than the newline-joined `members` string inside `query_b`, which
             # exists for the inspector to print.
             "member_ids": list(other_geometry.members),
-            # Cohort B is measured on its own terms. It can easily be the
-            # shakier arm, and that is exactly what decides how much of the
-            # overlap number below to believe.
-            "stability": (other_stability.as_dict()
-                          if other_stability is not None else None),
             "neighborhood_b": _evidence_payload(
                 other_neighborhood, label=other.label
             ),
@@ -1250,26 +1229,6 @@ def register(app) -> None:
         else:
             kind = "sample"
         return build_graph_legend(kind), CANVAS_SUBTITLES[kind]
-
-    @app.callback(
-        Output("stability-panel", "children"),
-        Output("stability-panel", "style"),
-        Input("hits-store", "data"),
-    )
-    def report_measured_stability(hits_payload: dict[str, Any] | None):
-        """Show how far the result on screen survived dropping one of its own.
-
-        Driven by `hits-store` rather than written directly by the search
-        callback, for the same reason the legend and the map link are: the
-        router destroys this view when you walk to the map, so a panel painted
-        by the search would come back blank while the hits it describes are
-        still on the canvas.
-
-        It is also why the measurement travels *in* the payload. Recomputing it
-        here would mean a second pass over the 963 MB memmap on every remount,
-        for a number that is a property of hits already retrieved.
-        """
-        return build_stability_panel(hits_payload)
 
     @app.callback(
         Output("see-on-map", "style"),

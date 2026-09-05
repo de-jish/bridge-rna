@@ -381,14 +381,7 @@ def test_the_cached_path_never_opens_a_checkpoint_or_shells_out(monkeypatch, cor
     assert mode == "cached" and len(hits) == 3
 
 
-# --- The fused scan, and stability measured on the query that ran ------------
-#
-# Result stability used to be `expected_stability(k)`, a curve of mean
-# leave-one-out agreement against cohort size measured offline over all 212
-# cohorts and looked up by size. It is measured now, during the search, over
-# this cohort's own leave-one-out pools - which only works because scoring
-# `2k+1` query vectors costs one memmap pass rather than `2k+1` of them.
-# docs/design-notes.md#live-stability carries the measurements behind both halves.
+# --- Shared cosine scans and pooled-query result preservation ----------------
 
 
 def _cohort_keys(corpus, k: int) -> list[str]:
@@ -397,8 +390,8 @@ def _cohort_keys(corpus, k: int) -> list[str]:
 
 def test_the_fused_scan_reproduces_a_scan_per_query(corpus):
     """The whole design rests on this. Scoring m queries in one pass has to give
-    exactly what scoring them one at a time gives, or live stability is measuring
-    something subtly different from what the single-sample path returns."""
+    the same cosine results as scoring them one at a time, within the
+    numerical precision documented below."""
     rng = np.random.default_rng(11)
     vecs, _, d = retrieval._load_archs4_index()
     q_mat = rng.normal(size=(9, d)).astype(np.float32)
@@ -450,96 +443,73 @@ def test_the_scan_reports_its_progress_over_the_whole_index(corpus):
     assert [a for a, _ in seen] == sorted(a for a, _ in seen)
 
 
-def test_a_pooled_query_comes_back_with_its_stability_measured(corpus):
+@pytest.mark.parametrize("size,topk", [(2, 3), (5, 7), (12, 30)])
+def test_cohort_results_match_the_legacy_pooled_row(corpus, size, topk):
+    """Removing diagnostic queries must preserve all hits, evidence and metadata."""
+    from bridge_rna import cohorts as C
+
+    keys = _cohort_keys(corpus, size)
+    rows, missing = retrieval.cached_query_vectors(keys)
+    assert not missing
+    pooled = C.cohort_query_vector(rows)
+    # Reconstruct the old batch independently; only its pooled row is a result.
+    omitted = np.stack([
+        C.cohort_query_vector(np.delete(rows, i, axis=0))
+        for i in range(len(rows))
+    ])
+    old_queries = np.concatenate([pooled.reshape(1, -1), omitted, rows])
+    vecs, _, _ = retrieval._load_archs4_index()
+    old_idx, old_score = retrieval._topk_cosine_matrix(vecs, old_queries, k=250)
+    old_ranked = retrieval._annotate_from_cache(old_idx[0], old_score[0])
+    old_ranked["archs4_index"] = old_idx[0].astype(int)
+    expected_hits, expected_evidence = retrieval.split_ranked_hits(old_ranked, topk, 250)
+
+    hits, evidence, returned_rows = retrieval.run_cohort_retrieval_with_neighborhood(
+        keys, topk=topk)
+    pd.testing.assert_frame_equal(hits, expected_hits, check_exact=True)
+    pd.testing.assert_frame_equal(evidence, expected_evidence, check_exact=True)
+    np.testing.assert_array_equal(returned_rows, rows)
+
+
+def test_matrix_padding_never_becomes_a_ranked_query(corpus):
+    """The numerical compatibility column is not evidence or a second sample."""
+    vecs, _, dims = retrieval._load_archs4_index()
+    query = np.ones((1, dims), dtype=np.float32)
+    idx, score = retrieval._topk_cosine_matrix(
+        vecs, query, k=17, preserve_matrix_product=True)
+    assert idx.shape == score.shape == (1, 17)
+    expected_idx, expected_score = retrieval._topk_cosine_matrix(
+        vecs, np.concatenate([query, np.zeros_like(query)]), k=17)
+    np.testing.assert_array_equal(idx[0], expected_idx[0])
+    np.testing.assert_array_equal(score[0], expected_score[0])
+
+
+def test_pooled_query_wrapper_returns_hits_and_member_vectors(corpus):
     keys = _cohort_keys(corpus, 5)
-    hits, rows, stability = retrieval.run_cohort_retrieval(keys, topk=7)
-
+    hits, rows = retrieval.run_cohort_retrieval(keys, topk=7)
     assert len(hits) == 7 and rows.shape[0] == 5
-    assert stability is not None
-    assert stability.size == 5 and stability.depth == 7
-    assert stability.members == tuple(keys)
-    assert len(stability.per_member) == 5
-    assert 0.0 <= stability.pooled <= 1.0
-    assert 0.0 <= stability.single_sample <= 1.0
 
 
-def test_the_measured_stability_equals_a_scan_per_leave_one_out(corpus):
-    """The reference implementation, run the slow and obvious way: pool every
-    subset separately, scan each on its own, and compare the hit lists. The fast
-    path must agree with it exactly."""
-    from bridge_rna import cohorts as C
-
-    keys = _cohort_keys(corpus, 4)
-    depth = 6
-    _hits, rows, measured = retrieval.run_cohort_retrieval(keys, topk=depth)
-
-    vecs, _, _ = retrieval._load_archs4_index()
-
-    def top(vec):
-        return retrieval._topk_cosine_from_memmap(vecs, vec, depth)[0]
-
-    full = top(C.cohort_query_vector(rows))
-    expected_per_member = [
-        C.top_k_agreement(full, top(C.cohort_query_vector(np.delete(rows, i, axis=0))))
-        for i in range(len(keys))
-    ]
-    member_tops = [top(rows[i]) for i in range(len(keys))]
-    expected_single = float(np.mean([
-        C.top_k_agreement(member_tops[i], member_tops[j])
-        for i in range(len(keys)) for j in range(i + 1, len(keys))
-    ]))
-
-    assert list(measured.per_member) == pytest.approx(expected_per_member)
-    assert measured.single_sample == pytest.approx(expected_single)
-
-
-def test_identical_members_measure_perfect_stability(corpus):
-    """Dropping a member changes nothing when every member is the same vector,
-    so the answer is exactly 1.0. A statistic that cannot return its own maximum
-    on the one case where the maximum is obviously right is not measuring what
-    it says."""
-    from bridge_rna import cohorts as C
-
-    keys = _cohort_keys(corpus, 3)
-    one = retrieval.cached_query_vector(keys[0])
-    rows = np.stack([one, one, one])
-
-    vecs, _, _ = retrieval._load_archs4_index()
-    idx, _ = retrieval._topk_cosine_matrix(
-        vecs,
-        np.concatenate([C.cohort_query_vector(rows).reshape(1, -1),
-                        C.leave_one_out_vectors(rows), rows]),
-        k=8)
-    m = C.measure_stability(keys, idx[0], idx[1:4], idx[4:7], depth=8)
-    assert m.pooled == 1.0
-    assert m.single_sample == 1.0
-    assert m.gain == pytest.approx(1.0)
-    assert m.weakest_member is None
-
-
-def test_pooling_one_sample_leaves_nothing_to_measure(corpus):
-    """A cohort needs two members before "drop one" means anything. The UI gates
-    this, but the seam must not invent a number when the gate is bypassed."""
+def test_pooling_one_sample_preserves_the_supported_seam(corpus):
     keys = _cohort_keys(corpus, 1)
-    hits, rows, stability = retrieval.run_cohort_retrieval(keys, topk=5)
+    hits, rows = retrieval.run_cohort_retrieval(keys, topk=5)
     assert len(hits) == 5 and rows.shape[0] == 1
-    assert stability is None
 
 
-def test_a_pooled_query_still_costs_one_pass_over_the_index(corpus, monkeypatch):
-    """The measurement is affordable only because every query vector it needs is
-    built before the index is touched. A second pass per member would turn a
-    38-animal cohort into 77 reads of a 963 MB file."""
-    calls = {"n": 0}
-    real = retrieval._topk_cosine_matrix
+def test_a_pooled_query_scores_only_one_biological_query_in_one_scan(corpus, monkeypatch):
+    calls = []
+    scan = retrieval._topk_cosine_matrix
 
-    def counted(*a, **k):
-        calls["n"] += 1
-        return real(*a, **k)
+    def counted(*args, **kwargs):
+        calls.append(kwargs["q_mat"].copy())
+        return scan(*args, **kwargs)
 
     monkeypatch.setattr(retrieval, "_topk_cosine_matrix", counted)
-    retrieval.run_cohort_retrieval(_cohort_keys(corpus, 6), topk=5)
-    assert calls["n"] == 1, f"{calls['n']} passes over the memmap, expected 1"
+    keys = _cohort_keys(corpus, 6)
+    hits, rows = retrieval.run_cohort_retrieval(keys, topk=5)
+    assert len(hits) == 5
+    assert len(calls) == 1
+    assert calls[0].shape == (1, rows.shape[1])
 
 
 def test_a_geo_accession_keeps_its_prefix():

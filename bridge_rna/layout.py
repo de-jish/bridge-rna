@@ -170,13 +170,7 @@ def build_cohort_facet_chips() -> Any:
 
 
 def build_cohort_panel() -> Any:
-    """Cohort mode: define the group, search it, then read how far it held up.
-
-    That order is deliberate and changed on 2026-08-06. Result stability used to
-    be predicted from cohort size and shown here on selection; it is measured on
-    the query now, so it cannot appear until the search has run and it lives in
-    the inspector rather than on this rail.
-    """
+    """Define and inspect the member selection for pooled cohort retrieval."""
     return html.Div(
         id="mode-panel-cohort",
         className="mode-panel",
@@ -581,15 +575,6 @@ def build_view() -> html.Div:
                     html.Aside(
                         className="inspector",
                         children=[
-                            # Above the inspector, because it describes the whole
-                            # result rather than whichever node is open, and it
-                            # must not scroll away when a hit is clicked. Hidden
-                            # until a pooled cohort has actually been searched:
-                            # a single sample has nothing to leave out, so there
-                            # is no leave-one-out stability to report for it.
-                            html.Div(id="stability-panel",
-                                     className="panel stability-panel",
-                                     style={"display": "none"}),
                             html.Div(id="details-panel", className="panel details-panel"),
                             html.Details(
                                 className="panel ai-panel advanced-group",

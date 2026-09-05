@@ -10,7 +10,7 @@ The two repositories were merged on 2026-07-22 and it now covers the whole produ
 
 A second independent language and simulated researcher review consolidated the map's two result actions into one: Fit results in 2-D, View results in 3-D. The latter opens the same exact-cosine evidence panel without changing the camera. Closing returns focus to the same button in either dimension.
 
-Removed unconsumed Box Select and Lasso Select tools from Retrieve. Flattened cohort count cards into inline summaries, moved measured leave-one-out result stability and executed member lists into disclosures, and retained low-overlap warnings outside the hidden detail. Removed the query inspector's duplicate study-ID row. The map link now says View results on map, avoiding a summed A/B hit count that can double-count shared samples.
+Removed unconsumed Box Select and Lasso Select tools from Retrieve. Flattened cohort count cards into inline summaries, removed the Result stability feature entirely at the user's explicit request and moved executed member lists into a disclosure. The retired panel, callback, payload, diagnostic vectors, measurement helpers, and styles are gone. Pooled scoring retains numerical compatibility via inert matrix padding, since a naive single-vector scan reorders near ties. Removed the query inspector's duplicate study-ID row. The map link now says View results on map, avoiding a summed A/B hit count that can double-count shared samples.
 
 No preprocessing, embeddings, scoring, grouping, ranking, projection coordinates, metadata joins, or research data changed. See `docs/interface-simplification.md` for rationale and verification.
 

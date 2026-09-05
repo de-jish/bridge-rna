@@ -72,10 +72,7 @@ You can widen what counts as one cohort by dropping tissue or condition, which m
 Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
 Splitting finer than this is deliberately not offered: every further split makes the cohort smaller, and the gain above rises steeply with group size.
 
-**Once the search has run, the app tells you how far to trust that particular result, by measuring it.**
-It re-runs the same query with each animal left out in turn and reports how much of the list survives, alongside what one of those animals alone would have agreed with another, at whatever depth you are reading.
-That replaced a figure looked up from a curve of cohort size, which was a corpus-wide average being shown against one cohort's name: it told every group of five to nine animals 0.72, while real ones in that range measure anywhere from 0.32 to 0.85.
-A result that moves when one animal is dropped is flagged in amber, every member is listed with how far it sits from the rest, and you can exclude one and search again.
+The member list shows each sample's embedding agreement with the rest of its cohort. You can exclude a sample and search again. The inspector retains the members used in the executed query.
 An optional comparison runs a second cohort as its own separate query, so you can ask how much of the Earth that a study's flight animals resemble is also resembled by its ground controls.
 It is deliberately not a flight-minus-ground difference vector: a difference of two directions is not a transcriptome, and an earlier attempt at exactly that turned out to be measuring something else entirely.
 
@@ -84,7 +81,7 @@ The overlap the panel reports is a number about two *sets* of hits, and two arms
 Each cohort's pooled animals are drawn in its own color, its hits in its own ring shape, and a sample both cohorts retrieved carries both rings.
 You can untick either arm when the picture gets crowded.
 
-Full method and every measurement: [cohort retrieval](docs/design-notes.md#cohort-retrieval), and [live stability](docs/design-notes.md#live-stability) for how the trust number is measured.
+Full method: [cohort retrieval](docs/design-notes.md#cohort-retrieval). The result-stability diagnostic was removed from the application; its [historical measurements](docs/design-notes.md#live-stability) remain documented.
 
 ### The map
 

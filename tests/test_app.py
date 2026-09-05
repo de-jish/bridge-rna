@@ -380,8 +380,8 @@ def test_comparison_callback_keeps_independent_evidence_for_both_arms(
         C, "find_cohort", lambda cohort_id, facets=None: by_id.get(cohort_id)
     )
     results = {
-        cohort_a.members: (hits_a, neighborhood_a, rows, None),
-        cohort_b.members: (hits_b, neighborhood_b, rows, None),
+        cohort_a.members: (hits_a, neighborhood_a, rows),
+        cohort_b.members: (hits_b, neighborhood_b, rows),
     }
     monkeypatch.setattr(
         retrieval_callbacks,

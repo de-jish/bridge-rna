@@ -401,22 +401,21 @@ def _load_precomputed_osdr_queries(path: Path) -> pd.DataFrame:
 
 def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
                         block_bytes: int = 200_000_000,
-                        progress: Any = None) -> tuple[np.ndarray, np.ndarray]:
+                        progress: Any = None, *,
+                        preserve_matrix_product: bool = False,
+                        ) -> tuple[np.ndarray, np.ndarray]:
     """Top-k for `m` query vectors in **one** pass over the index.
 
     The single implementation of the cosine scan. Every path in this module
-    reaches the ARCHS4 index through here, so a pooled cohort query, each of its
-    leave-one-out variants, and a plain single sample are all scored by the same
-    code rather than by three that could drift.
+    reaches the ARCHS4 index through here, as do offline validation batches.
 
     Returns `(idx, scores)`, both `(m, k)`, each row sorted best first.
 
-    Scoring `m` queries at once is what makes live result stability affordable:
-    the read and the float16-to-float32 normalization dominate, and the matrix
-    multiply against `m` queries is nearly free beside them. Measured against
-    the real 963 MB memmap: 0.44 s at m=1, 0.50 s at m=11, 1.00 s at m=77, so
-    the largest cohort in the corpus costs about half a second more than the
-    single pooled query it already paid for.
+    ``preserve_matrix_product`` keeps a formerly batched query on BLAS's
+    matrix-matrix path. A single-column matrix can use matrix-vector arithmetic
+    instead; its float32 accumulation can reorder near-tied cohort matches.
+    One zero padding column preserves the matrix product and is discarded before
+    ranking. It represents no sample and never reaches the returned results.
 
     The top-k is kept as a running merge per query rather than by partitioning a
     full `(n, m)` score matrix, which would allocate 290 MB at m=77 and grow
@@ -442,6 +441,8 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
     m = Q.shape[0]
     k = max(1, min(int(k), n))
     Qt = np.ascontiguousarray(Q.T)                      # (d, m)
+    if preserve_matrix_product and m == 1:
+        Qt = np.column_stack((Qt, np.zeros((d, 1), dtype=Qt.dtype)))
 
     # The block *height* is derived from the query count, because the score
     # block is (rows x queries): a fixed 25,000 rows is 3.9 MB at m=39 and would
@@ -455,7 +456,7 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
         end = min(start + chunk, n)
         x = np.asarray(index_vecs[start:end], dtype=np.float32)
         x /= (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
-        block = (x @ Qt).T                              # (m, rows in block)
+        block = (x @ Qt).T[:m]                          # (m, rows in block)
 
         take = min(k, block.shape[1])
         part = np.argpartition(block, -take, axis=1)[:, -take:]
@@ -806,7 +807,7 @@ def run_cohort_retrieval_with_neighborhood(
     topk: int,
     *,
     neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
-) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray, Any]:
+) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     """Pool a cohort and return requested hits plus one evidence prefix.
 
     The pooled vector is the only new thing. The cosine scan, the offline
@@ -817,25 +818,11 @@ def run_cohort_retrieval_with_neighborhood(
     is why nothing downstream of the hits frame needs to know a cohort produced
     it.
 
-    **Result stability is measured here, not predicted.** The scan also scores
-    every leave-one-out pool and every member on its own, which answers "how
-    much of this list survives dropping one animal, and how much would one
-    animal alone have agreed with another" for *this* cohort at *this* depth. It
-    replaces a bucketed curve looked up by cohort size, which was a population
-    average being printed beside one cohort's name; `docs/design-notes.md#live-stability`
-    carries the measured spread that motivated the change.
-
-    Still **one memmap pass**, because all `2k+1` query vectors are built before
-    the index is touched and scored together. Measured: 0.44 s for the pooled
-    query alone, 1.00 s for the 77 vectors a 38-animal cohort needs, against a
-    963 MB read that dominates both.
-
-    Returns `(hits, neighborhood, rows, stability)`. The members' stacked
-    vectors come back so the caller can compute the cohort's geometry without
-    loading them twice; `stability` is a `cohorts.StabilityMeasurement`, or
-    None for a pool with nothing to leave out.
+    Only the pooled vector is ranked. Returns `(hits, neighborhood, rows)`;
+    member vectors remain available for the existing cohort geometry without
+    loading them twice.
     """
-    from .cohorts import cohort_query_vector, leave_one_out_vectors, measure_stability
+    from .cohorts import cohort_query_vector
 
     ids = [_safe_str(s) for s in sample_ids if _safe_str(s)]
     if not ids:
@@ -850,38 +837,28 @@ def run_cohort_retrieval_with_neighborhood(
             detail="Missing: " + ", ".join(missing[:20]),
         )
 
-    # Row 0 is the query whose hits are returned; the leave-one-out pools and
-    # the members' own vectors follow it, and exist only to measure the first.
-    loo = leave_one_out_vectors(rows)
-    q_mat = np.concatenate([cohort_query_vector(rows).reshape(1, -1), loo, rows])
+    q_mat = cohort_query_vector(rows).reshape(1, -1)
 
     index_vecs, _, _ = _load_archs4_index()
     scan_k = max(int(topk), int(neighborhood_depth))
-    idx, score = _topk_cosine_matrix(index_vecs=index_vecs, q_mat=q_mat, k=scan_k)
+    idx, score = _topk_cosine_matrix(
+        index_vecs=index_vecs, q_mat=q_mat, k=scan_k,
+        preserve_matrix_product=True)
 
     ranked = _annotate_from_cache(idx[0], score[0])
     ranked["archs4_index"] = idx[0].astype(int)
     hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
 
-    k = len(rows)
-    depth = int(topk)
-    stability = measure_stability(
-        members=ids,
-        pooled_top=idx[0, :depth],
-        loo_tops=idx[1:1 + len(loo), :depth],
-        member_tops=idx[1 + len(loo):1 + len(loo) + k, :depth],
-        depth=depth,
-    )
-    return hits, neighborhood, rows, stability
+    return hits, neighborhood, rows
 
 
 def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
-                         ) -> tuple[pd.DataFrame, np.ndarray, Any]:
+                         ) -> tuple[pd.DataFrame, np.ndarray]:
     """Pool a cohort's cached vectors into one requested-depth result."""
-    hits, _neighborhood, rows, stability = run_cohort_retrieval_with_neighborhood(
+    hits, _neighborhood, rows = run_cohort_retrieval_with_neighborhood(
         sample_ids, topk, neighborhood_depth=topk
     )
-    return hits, rows, stability
+    return hits, rows
 
 
 def search_hits(

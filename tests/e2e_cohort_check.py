@@ -6,7 +6,7 @@ deliberate exclusion from the pytest suite (which never touches the real
 artifacts), and the same reason for existing. `tests/test_cohorts.py` proves the
 estimator and the grouping against a synthetic corpus in a fraction of a second;
 `precompute/validate_cohorts.py` proves the science against the real memmap.
-Neither says whether a person can define a cohort, see how far to trust it, pool
+Neither says whether a person can define a cohort, inspect its members, pool
 it, compare two arms, and find the result on the map.
 
 It asserts on what the page reports about itself, not on what the server meant
@@ -72,53 +72,15 @@ NODES_JS = """() => {
   return out;
 }"""
 
-# Whether the stability panel actually contains what it is rendering. Measured
-# against the *content* box and the scroll box, because the border box is what
-# the first version of this check used and it is 20px of padding too generous -
-# see the comment at the assertion.
-PANEL_FIT_JS = """() => {
-  const p = document.querySelector('#stability-panel');
-  if (!p) return null;
-  const blocks = [...p.querySelectorAll('.stability-cohort')];
-  if (!blocks.length) return null;
-  const padBottom = parseFloat(getComputedStyle(p).paddingBottom);
-  const contentBottom = p.getBoundingClientRect().bottom - padBottom;
-  const last = blocks[blocks.length - 1].getBoundingClientRect();
-  const boxes = blocks.map(b => b.getBoundingClientRect());
-  const near = (xs) => Math.max(...xs) - Math.min(...xs) <= 1;
-  const valueTops = [...p.querySelectorAll('.stability-value')]
-    .map(n => +n.getBoundingClientRect().top.toFixed(1));
-  return {
-    scrollH: p.scrollHeight,
-    clientH: p.clientHeight,
-    overflow: p.scrollHeight - p.clientHeight,
-    lastBlockOverrun: +(last.bottom - contentBottom).toFixed(1),
-    tops: boxes.map(b => +b.top.toFixed(1)),
-    heights: boxes.map(b => +b.height.toFixed(1)),
-    sameTop: near(boxes.map(b => b.top)),
-    sameHeight: near(boxes.map(b => b.height)),
-    valueTops,
-    valuesShareABaseline: valueTops.length > 1 && near(valueTops),
-  };
-}"""
-
-# The same panel below 1180px, where the app grid collapses to one column and
-# the document scrolls instead of the panels.
-NARROW_FIT_JS = """() => {
-  const p = document.querySelector('#stability-panel');
+# The inspector must remain readable when the retrieval view stacks.
+INSPECTOR_FIT_JS = """() => {
   const d = document.querySelector('#details-panel');
-  if (!p || !d) return null;
-  const boxes = [...p.querySelectorAll('.stability-cohort')]
-    .map(b => b.getBoundingClientRect());
-  const near = xs => xs.length < 2 ? true
-    : Math.max(...xs) - Math.min(...xs) <= 1;
+  if (!d) return null;
   return {
     detailsH: +d.getBoundingClientRect().height.toFixed(1),
     detailsContent: d.scrollHeight,
     detailsHidden: d.scrollHeight - d.clientHeight,
-    armH: boxes.map(b => +b.height.toFixed(1)),
-    sameHeight: near(boxes.map(b => b.height)),
-    overflowX: p.scrollWidth - p.clientWidth > 1,
+    overflowX: document.documentElement.scrollWidth > innerWidth + 1,
   };
 }"""
 
@@ -310,29 +272,6 @@ def banner(page) -> str:
     return page.locator("#search-status").inner_text().replace("\n", " ")
 
 
-def stability_values(page) -> list[float]:
-    """Every measured stability on screen, read off the marks that carry them.
-
-    By class rather than by regex over the panel's text. The number lost its
-    in-line "RESULT STABILITY" label when the heading took over that job, and a
-    text pattern anchored on the label would have gone quietly empty rather than
-    failing loudly - which is exactly how a two-arm comparison could come to
-    report one number without anything noticing.
-    """
-    el = page.locator("#stability-panel .stability-value")
-    return [float(el.nth(i).inner_text().strip()) for i in range(el.count())]
-
-
-def open_stability(page) -> None:
-    """Read the optional diagnostics using the native keyboard disclosure."""
-    disclosure = page.locator("#stability-panel details.stability-details")
-    if disclosure.get_attribute("open") is None:
-        summary = disclosure.locator("summary").first
-        summary.focus()
-        summary.press("Enter")
-    page.locator("#stability-panel .stability-value").first.wait_for(state="visible")
-
-
 def _topk_handle(page):
     """Dash 4 renders dcc.Slider as a radix slider plus a *hidden* number input.
 
@@ -385,7 +324,7 @@ def wait_for_map(page) -> None:
     page.wait_for_timeout(3000)
 
 
-def run_cohort_search(page, timeout: int = 180_000) -> float:
+def run_cohort_search(page, c: "Checks", timeout: int = 180_000) -> float:
     """Click Search and wait for *this* search, not for evidence of any search.
 
     The obvious predicates - "the network has nodes", "the running indicator is
@@ -395,15 +334,24 @@ def run_cohort_search(page, timeout: int = 180_000) -> float:
     banner, which is exactly how the comparison step first appeared to fail
     while the app was doing the right thing.
 
-    So this waits for the banner to actually change. The running indicator is
-    watched too, but only as a secondary settle.
+    Wait for this callback's response and inspect its payload. The running
+    indicator and graph then settle before the visible result is read.
     """
-    before = page.locator("#search-status").inner_text()
     t0 = time.time()
-    page.locator("#cohort-search-button").click()
-    page.wait_for_function(
-        "prev => { const el = document.querySelector('#search-status');"
-        " return el && el.innerText !== prev; }", arg=before, timeout=timeout)
+    def is_cohort_response(response):
+        if response.request.method != "POST" or "/_dash-update-component" not in response.url:
+            return False
+        request = response.request.post_data_json or {}
+        return "cohort-search-button.n_clicks" in request.get("changedPropIds", [])
+
+    with page.expect_response(is_cohort_response, timeout=timeout) as response_info:
+        page.locator("#cohort-search-button").click()
+    payload = response_info.value.json()["response"]["hits-store"]["data"] or {}
+    c.ok(bool(payload and payload.get("hits")), "the cohort response carries retrieved hits")
+    c.ok("stability" not in payload and "stability" not in (payload.get("comparison") or {}),
+         "neither cohort result carries retired stability diagnostics")
+    c.ok(page.locator("#stability-panel").count() == 0,
+         "retrieval does not restore the retired stability panel")
     page.wait_for_function(NETWORK_READY_JS, timeout=timeout)
     page.wait_for_function(
         "() => { const el = document.querySelector('#cohort-running-indicator');"
@@ -420,7 +368,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     bug this suite was built around: both regressions it exists for were
     callbacks firing when they should not have, and both depended on what was on
     screen a moment earlier. State that survives one iteration into the next - a
-    stale hits-store, a stability panel that never cleared, a search that ran at
+    stale hits-store, an inspector that never cleared, a search that ran at
     remount - is invisible to a run that only ever starts from a cold load.
     """
     # ---- 1. the rail opens on Sample and stays quiet ----------------
@@ -493,12 +441,6 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     card = page.locator("#cohort-card").inner_text()
     c.ok("samples pooled into one query" in card,
          "the card states the pooled size")
-    # Result stability used to be quoted here, read out of a curve by cohort
-    # size. It is a population average, and printing it beside one cohort's
-    # name got it read as a property of that cohort: measured live, a cohort
-    # of 7 scores 0.316 and one of 6 scores 0.849, and the curve told both
-    # of them 0.72. It is measured during the search now and reported on the
-    # right afterwards. See docs/design-notes.md#live-stability.
     c.ok("STABILITY" not in card.upper(),
          f"and nothing about result stability: {card[:70]!r}")
     c.ok(page.locator("#cohort-card .cohort-meter").count() == 0,
@@ -510,8 +452,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # while looking like a grade.
     c.ok("GROUP TIGHTNESS" not in card.upper() and "R̄" not in card,
          "and no group-tightness figure either")
-    c.ok(not page.locator("#stability-panel").is_visible(),
-         "and the stability panel is not on screen before a search")
+    c.ok(page.locator("#stability-panel").count() == 0,
+         "the retired stability panel is absent from the layout")
 
     page.locator(".cohort-members-summary").click()
     page.wait_for_timeout(700)
@@ -523,7 +465,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
 
     # ---- 4. a pooled search ----------------------------------------
     print("\n=== 4. pooling and searching ===")
-    secs = run_cohort_search(page)
+    secs = run_cohort_search(page, c)
+    depth = topk_value(page)
     msg = banner(page)
     c.note(f"the pooled search took {secs:.1f}s")
     c.ok(secs < 30, f"a pooled query costs one memmap pass ({secs:.1f}s)")
@@ -544,55 +487,6 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"so does the subtitle: {subtitle[:60]!r}")
     shot(page, "04-pooled-search")
 
-    # ---- 4b. stability, measured on the query that just ran ---------
-    #
-    # The number the rail stopped quoting. It is the same statistic
-    # validate_cohorts.py measures over all 212 cohorts, computed here for
-    # this cohort alone, at the depth on screen, in the pass that fetched
-    # the hits. It cannot exist before the search, which is why it is here
-    # and not under the picker.
-    print("\n=== 4b. stability is measured, not looked up ===")
-    c.ok(page.locator("#stability-panel").is_visible(),
-         "the stability panel appears once there is a result to describe")
-    c.ok(page.locator("#stability-panel details").get_attribute("open") is None,
-         "optional stability diagnostics start collapsed")
-    c.ok(not page.locator("#stability-panel .stability-value").first.is_visible(),
-         "the detailed measurement does not compete with the results initially")
-    open_stability(page)
-    c.ok(page.locator("#stability-panel .stability-value").first.is_visible(),
-         "Enter on the summary opens the complete diagnostics")
-    # Upper-cased throughout, because `inner_text` reports what is rendered and
-    # several labels carry `text-transform: uppercase`. Matching the source
-    # casing here passed nothing and would have hidden the panel being absent.
-    panel = page.locator("#stability-panel").inner_text().upper()
-    c.ok("MEASURED ON THIS QUERY" in panel,
-         f"and says the number is a measurement: {panel[:70]!r}")
-    values = stability_values(page)
-    c.ok(len(values) == 1, f"it quotes one number: {values}")
-    if values:
-        c.ok(0.0 <= values[0] <= 1.0,
-             f"which is a share, not a score: {values[0]}")
-        c.note(f"measured stability {values[0]:.2f} at top-{topk_value(page)}")
-    c.ok(page.locator("#stability-panel .cohort-meter").count() == 1,
-         "the meter moved here with the number it fills")
-    depth = topk_value(page)
-    c.ok(f"THESE {depth} HITS" in panel,
-         f"and it names the depth it measured at (top-{depth}): {panel[:140]!r}")
-    c.ok("ANY ONE POOLED SAMPLE IS DROPPED" in panel,
-         "and what dropping one of them did")
-    # The scale, measured on this cohort in the same pass, which is what
-    # replaced the fixed 0.16 constant the rail used to quote.
-    c.ok("OVERLAPS ANOTHER BY" in panel or "AGREE ON A HIT ALONE" in panel,
-         f"and what one sample alone would have overlapped: {panel[:170]!r}")
-    # The heading names the statistic; a per-block label would repeat it twice
-    # over and push cohort B's measurement below the fold on a comparison.
-    c.ok(panel.count("RESULT STABILITY") == 1,
-         f"and the statistic is named once: {panel.count('RESULT STABILITY')}")
-    c.ok(page.locator("#stability-panel").count() == 1
-         and page.locator("#details-panel").count() == 1,
-         "the panel sits beside the inspector rather than replacing it")
-    shot(page, "04b-stability")
-
     # ---- 5. the inspector ------------------------------------------
     print("\n=== 5. the inspector describes a group ===")
     pos = page.evaluate(QUERY_NODE_JS)
@@ -611,12 +505,6 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          "the inspector opens it as a cohort, not as one blank sample")
     c.ok("Grouped by" in details, "it states the definition that made it")
     c.ok("Samples pooled" in details, "and the size")
-    # One number, one home. The Definition section carried a "Result
-    # stability" row too, directly under the panel that now reports it.
-    c.ok("Result stability" not in details,
-         "and does not restate the stability the panel above it carries")
-    c.ok(page.locator("#stability-panel").is_visible(),
-         "which is still on screen with a hit node open")
     c.ok("POOLED MEMBERS" in details.upper(),
          "and lists every member by name")
     c.ok("How this query was built" in details,
@@ -667,102 +555,29 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok(page.locator(".cohort-card.is-a").count() == 1
          and page.locator(".cohort-card.is-b").count() == 1,
          "each card carries its own role color")
-    # Arming the comparison must not leave the previous single-cohort
-    # measurement on screen describing a query nobody ran.
-    c.ok(page.locator("#stability-panel .stability-cohort").count() == 1,
-         "and the panel still describes the one query that has run")
-
-    run_cohort_search(page)
+    run_cohort_search(page, c)
     msg = banner(page)
     c.ok("Two pooled queries" in msg,
          f"the banner reports two queries: {msg[:100]!r}")
     c.ok("Jaccard overlap" in msg, "and quantifies their overlap")
     c.ok("differing by" in msg, "and names the facet they differ in")
 
-    # Two pooled queries, two measurements. STABILITY_BY_K was a function
-    # of size, so an overlap of 0.25 between two arms of twelve is not the
-    # same finding as 0.25 between one of twelve and one of two - and now
-    # neither arm's number is a function of size at all.
-    stab = page.locator("#stability-panel")
-    open_stability(page)
-    c.ok(stab.locator(".stability-cohort").count() == 2,
-         f"both arms are measured: {stab.locator('.stability-cohort').count()}")
-    panel = stab.inner_text().upper()
-    c.ok("COHORT A" in panel and "COHORT B" in panel,
-         f"each measurement names its arm: {panel[:80]!r}")
-    values = stability_values(page)
-    c.ok(len(values) == 2, f"two numbers, one per arm: {values}")
-    # Both have to be readable without scrolling, or measuring the second arm
-    # bought nothing.
-    #
-    # This is the second version of this check, and the first one passed while
-    # cohort B's last row was clipped at every viewport the app is used at. It
-    # compared the last block's bottom against `bounding_box()`, which is the
-    # *border* box, so a block was allowed to run through the panel's own 20px
-    # bottom padding and stop 1px short of its border. At 1600x1000 the last
-    # block ended 9.9px below the content box and 10.1px above the border box,
-    # which is to say the assertion was satisfied by exactly the margin that hid
-    # the failure. It also never compared scrollHeight against clientHeight, so
-    # 11px of unreachable content was invisible to it.
-    #
-    # `PANEL_FIT_JS` measures the content box and the scroll box instead. Both
-    # matter: a panel can scroll internally while every block's border box still
-    # sits inside it.
-    fit = page.evaluate(PANEL_FIT_JS)
-    c.ok(bool(fit) and fit["overflow"] <= 1,
-         f"the panel does not scroll internally: {fit and fit['scrollH']}px of "
-         f"content in {fit and fit['clientH']}px")
-    c.ok(bool(fit) and fit["lastBlockOverrun"] <= 1,
-         f"and the second arm's last row is inside the panel's content box, "
-         f"not its padding: overruns by {fit and fit['lastBlockOverrun']}px")
-    # An even split is a measurement, not an intention. The two arms have to
-    # start on the same line and be the same height, or one of them is again the
-    # footnote to the other.
-    c.ok(bool(fit) and fit["sameTop"] and fit["sameHeight"],
-         f"the two arms are an even split: tops {fit and fit['tops']}, "
-         f"heights {fit and fit['heights']}")
-    c.ok(bool(fit) and fit["valuesShareABaseline"],
-         f"and the two numbers sit on one baseline, which is the whole reason "
-         f"to measure two: {fit and fit['valueTops']}")
-    c.ok(stab.locator(".stability-cohort.is-a").count() == 1
-         and stab.locator(".stability-cohort.is-b").count() == 1,
-         "and each carries the role color its card and its glyphs carry")
-    # The facet moved from cohort B's role line into the header when the two
-    # arms went side by side: it describes the pair, and hanging it under B's
-    # letter started B's name a line below A's.
-    c.ok("DIFFER BY" in panel and panel.count("DIFFER BY") == 1,
-         "with the facet the pair differs in stated once, above both arms")
-    c.ok(page.locator("#stability-panel .stability-pair.is-pair").count() == 1,
-         "and the two arms are laid out as one even pair rather than stacked")
-
-    # The same panel at the widths where the app grid collapses to one column
-    # and the document scrolls. Two things are checked that only exist there.
-    #
-    # The details panel must size to its content, not to a leftover. `flex: 1 1
-    # 0` is right in the fixed-height desktop column and wrong the moment the
-    # column's height comes from its contents, because a zero-basis item adds
-    # nothing to that height - which pinned this panel to its 120px floor with
-    # 372px hidden. That regression shipped in the same change as the even split
-    # and was invisible to every desktop measurement of it.
-    #
-    # And 320px is the width where the "moves it most" label and its score stop
-    # fitting on one line in a column, so the label has to wrap rather than run
-    # into the other arm.
+    # Preserve responsive metadata access after removing the diagnostic panel.
     was = page.viewport_size
     for width in (900, 390, 320):
         page.set_viewport_size({"width": width, "height": 950})
         page.wait_for_timeout(700)
-        narrow = page.evaluate(NARROW_FIT_JS)
+        narrow = page.evaluate(INSPECTOR_FIT_JS)
         c.ok(bool(narrow) and narrow["detailsHidden"] <= 1,
-             f"at {width}px the page scrolls and the inspector is not clipped: "
-             f"details panel {narrow and narrow['detailsH']}px holds "
+             f"at {width}px the inspector is not clipped: "
+             f"{narrow and narrow['detailsH']}px holds "
              f"{narrow and narrow['detailsContent']}px")
-        c.ok(bool(narrow) and narrow["sameHeight"] and not narrow["overflowX"],
-             f"and the two arms are still an even split at {width}px: "
-             f"{narrow and narrow['armH']}")
+        c.ok(bool(narrow) and not narrow["overflowX"],
+             f"the comparison has no horizontal page overflow at {width}px")
+        if width == 390:
+            page.screenshot(path=str(SHOTS / "06-comparison-mobile.png"), full_page=True)
     page.set_viewport_size(was)
     page.wait_for_timeout(700)
-    shot(page, "07b-two-measurements")
 
     nodes = page.evaluate(NODES_JS) or {}
     c.ok(nodes.get("query", 0) == 1 and nodes.get("query2", 0) == 1,
@@ -1208,7 +1023,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         choose(page, "study-dropdown", study, exact=True)
         set_topk(page, topk)
         label = page.locator("#cohort-dropdown").inner_text()
-        secs = run_cohort_search(page)
+        secs = run_cohort_search(page, c)
         msg = banner(page)
         c.ok("pooled mean" in msg,
              f"{study} at k={topk} answered from the pooled path "
@@ -1216,13 +1031,6 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         nodes = page.evaluate(NODES_JS) or {}
         c.ok(nodes.get("gsm", 0) == topk,
              f"and drew exactly {topk} hits, saw {nodes.get('gsm')}")
-        # The measurement follows the slider. The curve it replaced was fixed
-        # at top-5 whatever the reader was actually looking at, which is the
-        # other half of why it could not describe the list on screen.
-        open_stability(page)
-        panel = page.locator("#stability-panel").inner_text().upper()
-        c.ok(f"THESE {topk} HITS" in panel,
-             f"and measured stability over those {topk}: {panel[:90]!r}")
         page.locator("#see-on-map").click()
         wait_for_map(page)
         drawn = page.evaluate(MAP_QUERY_JS) or {}

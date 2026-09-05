@@ -1,3 +1,5 @@
+> Current interface note (2026-09-05): the Result stability feature and runtime diagnostics described historically below were removed at the user's request. Cohort pooling, comparison overlap, sample exclusions, and offline validation remain. See [interface simplification](interface-simplification.md).
+
 # Bridge RNA design notes
 
 Every design decision in this repository that needed more than a code comment, in one file.

@@ -96,8 +96,7 @@ MIN_COHORT_SIZE = 2
 #
 # This is a statement about *size*, and it is made in the one place where size
 # is the only thing known: the cohort picker, before any search has run. It is
-# no longer used to predict a result's stability, because that prediction is
-# now a measurement - see `StabilityMeasurement` below and `docs/design-notes.md#live-stability`.
+# not used to predict or display result stability in the application.
 #
 # Measured 2026-08-05 over all 212 cohorts. Rerun with:
 #   .venv/bin/python precompute/validate_cohorts.py --stability
@@ -114,41 +113,9 @@ def size_tier(k: int) -> str:
     return TIER_LOW_N if k < LOW_N_THRESHOLD else TIER_OK
 
 
-# Below this, the result moved enough when an animal was dropped that the list
-# should be read as a neighbourhood rather than as a ranking.
-#
-# It is the same 0.70 that picked `LOW_N_THRESHOLD`, applied one step closer to
-# the thing it was always about. The knee was defined as the first size bucket
-# whose *measured* stability reached 0.70; this applies that threshold to the
-# measurement itself rather than to size as a proxy for it. A cohort under it is
-# flagged in amber, not red, for the reason the map's coverage bar is amber: a
-# result that moves when you drop an animal is reporting correctly, not failing.
-#
-# The threshold is depth-independent by measurement rather than by assumption.
-# Across 22 real cohorts, one per distinct size, mean stability is 0.745 at
-# top-5, 0.774 at top-20 and 0.791 at top-30, so the same floor means very
-# nearly the same thing everywhere the retrieval-depth slider can sit.
+# Retained for the offline corpus validation's size/stability curve.
+# The application no longer computes or displays result-stability diagnostics.
 STABILITY_FLOOR = 0.70
-
-# A bucketed `STABILITY_BY_K` curve used to live here, looked up by cohort size,
-# and it was the only number on the rail's cohort card. It was deleted on
-# 2026-08-06 along with `expected_stability` and the `SINGLE_SAMPLE_STABILITY`
-# constant that scaled it, because it is a population average that was being
-# printed beside one cohort's name and read as a property of that cohort.
-#
-# The spread inside a bucket is most of the range. Measured live: a cohort of 7
-# scoring 0.316 and a cohort of 6 scoring 0.849 were both told 0.72, and a
-# cohort of 10 measuring 1.000 was told 0.81. Reading a curve fitted to other
-# cohorts and printing it against this one is the same class of error as the
-# status banner that announced every cached result as subprocess output.
-#
-# The curve is not wrong and is not lost. It is still the right answer to "how
-# large should a cohort be", which is why `LOW_N_THRESHOLD` still comes from it
-# and `precompute/validate_cohorts.py` check 5 still measures it. What replaced
-# it is the same statistic computed on the query that just ran, at the depth on
-# screen: `StabilityMeasurement`, below. The evidence is in
-# `docs/design-notes.md#live-stability`.
-
 
 # --- The estimator ----------------------------------------------------------
 
@@ -191,24 +158,6 @@ def _unit_rows(arr: np.ndarray) -> np.ndarray:
     return arr / np.maximum(norms, 1e-12)
 
 
-def leave_one_out_vectors(rows: np.ndarray) -> np.ndarray:
-    """The pooled query each member's absence would have produced.
-
-    Row `i` is `cohort_query_vector` over every member except `i`, which is the
-    query that answers "what would this search have returned without this
-    animal?". Scoring all of them is what turns result stability from a lookup
-    into a measurement.
-
-    Returns a `(0, d)` array for a cohort too small to leave anything out of.
-    """
-    arr = np.asarray(rows, dtype=np.float32)
-    k = arr.shape[0]
-    if k < MIN_COHORT_SIZE:
-        return np.zeros((0, arr.shape[1] if arr.ndim == 2 else 0), dtype=np.float32)
-    keep = ~np.eye(k, dtype=bool)
-    return np.stack([cohort_query_vector(arr[keep[i]]) for i in range(k)])
-
-
 def top_k_agreement(a, b) -> float:
     """Jaccard overlap of two hit lists: how much of one survives in the other.
 
@@ -224,127 +173,8 @@ def top_k_agreement(a, b) -> float:
     return len(sa & sb) / union if union else 0.0
 
 
-@dataclass(frozen=True)
-class StabilityMeasurement:
-    """How far this pooled result survives dropping one of its own members.
-
-    Measured on the query that just ran, at the depth on screen, rather than
-    looked up from a curve fitted to other cohorts. `docs/design-notes.md#live-stability`
-    carries the evidence and the measured spread that motivated the change.
-
-    `per_member[i]` is the Jaccard overlap between the result on screen and the
-    result member `i`'s absence would have produced, so it is aligned with
-    `members` and names an animal. `single_sample` is the mean pairwise overlap
-    between the members' own single-sample results, measured in the same pass at
-    the same depth, and it is the scale that makes the headline readable.
-    """
-
-    depth: int
-    members: tuple[str, ...]
-    per_member: tuple[float, ...]
-    single_sample: float
-
-    @property
-    def size(self) -> int:
-        return len(self.members)
-
-    @property
-    def pooled(self) -> float:
-        """The headline: mean agreement across every member that could be dropped."""
-        return float(np.mean(self.per_member)) if self.per_member else 0.0
-
-    @property
-    def is_low(self) -> bool:
-        return self.pooled < STABILITY_FLOOR
-
-    @property
-    def gain(self) -> float | None:
-        """How much pooling bought, or None when one sample retrieves nothing shared.
-
-        A zero baseline is a real and reportable answer - one cohort of four
-        measured members whose single-sample lists are mutually disjoint - and
-        dividing by it would print an eight-digit ratio for it. The caller says
-        "no two members share a hit" instead.
-        """
-        if self.single_sample <= 0.0:
-            return None
-        return self.pooled / self.single_sample
-
-    @property
-    def weakest_member(self) -> tuple[str, float] | None:
-        """The member whose absence moves the result furthest, and by how much.
-
-        Free, because `per_member` is already computed, and kept for the reason
-        the per-member leave-one-out cosine stayed in the member list when `R̄`
-        was deleted: it varies, and it points at a specific animal. None when
-        every member matters equally, since naming one would be arbitrary.
-        """
-        if not self.per_member:
-            return None
-        lo = min(self.per_member)
-        if lo >= max(self.per_member):
-            return None
-        return self.members[self.per_member.index(lo)], float(lo)
-
-    def as_dict(self) -> dict[str, Any]:
-        """A JSON-safe view for `hits-store`, which is where the panel reads it."""
-        weakest = self.weakest_member
-        return {
-            "depth": int(self.depth),
-            "size": int(self.size),
-            "pooled": float(self.pooled),
-            "single_sample": float(self.single_sample),
-            "gain": None if self.gain is None else float(self.gain),
-            "is_low": bool(self.is_low),
-            "weakest_member": None if weakest is None else weakest[0],
-            "weakest_value": None if weakest is None else weakest[1],
-        }
-
-
-def measure_stability(members: list[str] | tuple[str, ...],
-                      pooled_top: np.ndarray,
-                      loo_tops: np.ndarray,
-                      member_tops: np.ndarray,
-                      depth: int) -> StabilityMeasurement | None:
-    """Assemble the measurement from rankings the caller scored.
-
-    Deliberately takes rankings rather than vectors, so this module still opens
-    no memmap: `retrieval.run_cohort_retrieval` does the one scan that produces
-    all of them, and this does the set arithmetic. Returns None for a cohort
-    with nothing to leave out.
-    """
-    members = tuple(_safe_str(m) for m in members)
-    k = len(members)
-    if k < MIN_COHORT_SIZE or len(loo_tops) != k:
-        return None
-    d = max(1, int(depth))
-    full = np.asarray(pooled_top).reshape(-1)[:d]
-    per_member = tuple(float(top_k_agreement(full, np.asarray(lo).reshape(-1)[:d]))
-                       for lo in loo_tops)
-    tops = [np.asarray(m).reshape(-1)[:d] for m in member_tops]
-    pairs = [top_k_agreement(tops[i], tops[j])
-             for i in range(len(tops)) for j in range(i + 1, len(tops))]
-    return StabilityMeasurement(
-        depth=d,
-        members=members,
-        per_member=per_member,
-        single_sample=float(np.mean(pairs)) if pairs else 0.0,
-    )
-
-
-# A group-level tightness statistic used to live here: `R̄`, the vMF resultant
-# length `|mean(unit vectors)|`, in [0, 1]. It was measured over all 212 real
-# cohorts and it is essentially constant - median 0.9991, and no lower for a
-# cohort of two than for one of thirty - so it never separated a group worth
-# trusting from one that was not, while sitting on the card looking like a
-# grade. It is deleted rather than hidden; `docs/design-notes.md#cohort-pooling` keeps the
-# measurement. What replaced it is nothing, because the honest confidence number
-# was already beside it - and that one has since been replaced in turn, by
-# `StabilityMeasurement`, which measures rather than predicts it.
-#
-# The per-member statistic below is deliberately *not* the same kind of thing
-# and stays. It varies within a cohort and names an individual animal, which is
-# something a user can act on.
+# Per-member embedding agreement remains available when choosing exclusions.
+# It is distinct from the retired result-removal stability diagnostic.
 
 
 def leave_one_out_cosines(rows: np.ndarray) -> np.ndarray:

@@ -276,8 +276,7 @@ def test_cohort_geometry_bundles_what_the_interface_reads(rng):
     assert len(g.loo_cosines) == 4 and len(g.outliers) == 4
     assert g.tier == C.size_tier(4)
     assert not hasattr(g, "stability"), (
-        "geometry describes the group, not the result. Stability is measured "
-        "during the search now, by retrieval.run_cohort_retrieval.")
+        "geometry describes members; result stability is not an app feature")
 
 
 # --- Low N -------------------------------------------------------------------
@@ -301,23 +300,17 @@ def test_the_precomputed_stability_curve_is_gone():
     which is what this test exists to make someone read."""
     for name in ("STABILITY_BY_K", "expected_stability", "SINGLE_SAMPLE_STABILITY"):
         assert not hasattr(C, name), (
-            f"{name} is back. The measured replacement is StabilityMeasurement; "
-            "see docs/design-notes.md#live-stability section 5.")
+            f"{name} reintroduces a retired result-stability diagnostic")
 
 
 def test_the_caution_floor_is_the_threshold_that_set_low_n():
     """0.70 picked LOW_N_THRESHOLD as the first size bucket to reach it. The
-    floor applies that same threshold to the measurement itself rather than to
-    size standing in for it, so the two must not drift apart."""
+    floor remains available to the offline cohort validator."""
     assert C.STABILITY_FLOOR == 0.70
     assert 0.0 < C.STABILITY_FLOOR < 1.0
 
 
-# --- Result stability, measured rather than predicted -------------------------
-#
-# The set arithmetic lives here because it is arithmetic; the scan that feeds it
-# is exercised against the fixture memmap in test_retrieval.py, and the
-# corpus-scale claim is `precompute/validate_cohorts.py` check 2.
+# --- Cohort retrieval and agreement ------------------------------------------
 
 
 def _cohort_keys(corpus, k: int) -> list[str]:
@@ -340,53 +333,43 @@ def fixture_retrieval(monkeypatch, corpus):
     retrieval._ARCHS4_CACHE.clear()
 
 
-def test_cohort_evidence_is_250_but_stability_uses_requested_depth(
-    monkeypatch, corpus, fixture_retrieval
+def test_cohort_evidence_preserves_requested_hits_and_member_rows(
+    corpus, fixture_retrieval
 ):
-    real_measure = C.measure_stability
-    captured = {}
-
-    def measure(**kwargs):
-        captured.update(kwargs)
-        return real_measure(**kwargs)
-
-    monkeypatch.setattr(C, "measure_stability", measure)
-    hits, neighborhood, rows, stability = (
-        retrieval.run_cohort_retrieval_with_neighborhood(
-            _cohort_keys(corpus, 4), topk=6, neighborhood_depth=250
-        )
+    keys = _cohort_keys(corpus, 4)
+    hits, neighborhood, rows = retrieval.run_cohort_retrieval_with_neighborhood(
+        keys, topk=6, neighborhood_depth=250
     )
     assert len(hits) == 6 and len(neighborhood) == 250
-    assert hits["archs4_index"].tolist() == (
-        neighborhood.head(6)["archs4_index"].tolist()
-    )
-    assert len(captured["pooled_top"]) == 6
-    assert all(len(row) == 6 for row in captured["loo_tops"])
-    assert stability.depth == 6
+    assert hits["archs4_index"].tolist() == neighborhood.head(6)["archs4_index"].tolist()
+    assert np.array_equal(rows, retrieval.cached_query_vectors(keys)[0])
+    short_hits, short_rows = retrieval.run_cohort_retrieval(keys, topk=6)
+    assert short_hits["archs4_index"].tolist() == hits["archs4_index"].tolist()
+    assert np.allclose(short_hits["score"], hits["score"])
+    assert np.array_equal(short_rows, rows)
 
 
-def test_cohort_evidence_and_stability_share_one_scan(
+def test_cohort_requested_hits_and_evidence_share_one_pooled_scan(
     monkeypatch, corpus, fixture_retrieval
 ):
     calls = []
     real_scan = retrieval._topk_cosine_matrix
 
     def counted(*args, **kwargs):
-        calls.append(kwargs.get("k", args[2] if len(args) > 2 else None))
+        queries = kwargs.get("q_mat", args[1] if len(args) > 1 else None)
+        calls.append((kwargs.get("k", args[2] if len(args) > 2 else None),
+                      queries.shape[0], kwargs.get("preserve_matrix_product")))
         return real_scan(*args, **kwargs)
 
     monkeypatch.setattr(retrieval, "_topk_cosine_matrix", counted)
     retrieval.run_cohort_retrieval_with_neighborhood(
         _cohort_keys(corpus, 4), topk=6, neighborhood_depth=250
     )
-    assert calls == [250]
+    assert calls == [(250, 1, True)], "only the pooled biological query is scored"
 
 
 def test_agreement_is_jaccard_and_agrees_with_the_validators_definition():
-    """One statistic in both places it appears. The number the inspector prints
-    after a search and the number validate_cohorts.py computes over all 212
-    cohorts have to be the same thing, or neither can be read against the
-    other."""
+    """Comparisons and offline validation share the same set-overlap definition."""
     assert C.top_k_agreement([1, 2, 3], [1, 2, 3]) == 1.0
     assert C.top_k_agreement([1, 2, 3], [4, 5, 6]) == 0.0
     # Two of three shared: intersection 2, union 4.
@@ -402,111 +385,6 @@ def test_agreement_is_symmetric_and_bounded(rng):
         got = C.top_k_agreement(a, b)
         assert 0.0 <= got <= 1.0
         assert got == pytest.approx(C.top_k_agreement(b, a))
-
-
-def test_leave_one_out_vectors_are_the_pools_each_absence_would_produce(rng):
-    rows = rng.normal(size=(5, 512)).astype(np.float32)
-    loo = C.leave_one_out_vectors(rows)
-    assert loo.shape == (5, 512)
-    for i in range(5):
-        expected = C.cohort_query_vector(np.delete(rows, i, axis=0))
-        assert np.allclose(loo[i], expected, atol=1e-6)
-    assert np.allclose(np.linalg.norm(loo, axis=1), 1.0, atol=1e-5), (
-        "each one is a query vector, so each one is a unit direction")
-
-
-def test_a_cohort_with_nothing_to_leave_out_produces_no_variants(rng):
-    rows = rng.normal(size=(1, 512)).astype(np.float32)
-    assert C.leave_one_out_vectors(rows).shape[0] == 0
-    assert C.measure_stability(["only"], [1, 2], [], [[1, 2]], depth=2) is None
-
-
-def test_measure_stability_reports_the_mean_over_droppable_members():
-    """Three members. Dropping the first leaves the list alone; dropping the
-    third replaces two of three hits."""
-    m = C.measure_stability(
-        members=["a", "b", "c"],
-        pooled_top=[1, 2, 3],
-        loo_tops=[[1, 2, 3], [1, 2, 9], [1, 8, 9]],
-        member_tops=[[1, 2, 3], [1, 2, 3], [7, 8, 9]],
-        depth=3,
-    )
-    assert m.size == 3 and m.depth == 3
-    assert m.per_member == pytest.approx((1.0, 0.5, 0.2))
-    assert m.pooled == pytest.approx((1.0 + 0.5 + 0.2) / 3)
-    # Members a and b agree completely; neither agrees with c at all.
-    assert m.single_sample == pytest.approx(1.0 / 3)
-    assert m.gain == pytest.approx(m.pooled / m.single_sample)
-    assert m.weakest_member == ("c", pytest.approx(0.2))
-
-
-def test_stability_is_measured_at_the_depth_on_screen():
-    """The offline curve was fixed at top-5 because it had to pick one. The list
-    a reader is looking at is `topk` deep, and that is the list whose stability
-    they are being told about."""
-    shallow = C.measure_stability(
-        members=["a", "b"], pooled_top=[1, 2, 3, 4], loo_tops=[[1, 2, 8, 9]] * 2,
-        member_tops=[[1, 2, 3, 4], [1, 2, 3, 4]], depth=2)
-    deep = C.measure_stability(
-        members=["a", "b"], pooled_top=[1, 2, 3, 4], loo_tops=[[1, 2, 8, 9]] * 2,
-        member_tops=[[1, 2, 3, 4], [1, 2, 3, 4]], depth=4)
-    assert shallow.depth == 2 and shallow.pooled == pytest.approx(1.0), (
-        "the top 2 are untouched")
-    assert deep.depth == 4 and deep.pooled == pytest.approx(1.0 / 3)
-
-
-def test_a_zero_baseline_is_reported_rather_than_divided_by():
-    """One real cohort of four measured a single-sample baseline of exactly
-    0.000: no two of its members share a hit. Dividing by it printed a
-    nine-digit gain."""
-    m = C.measure_stability(
-        members=["a", "b"], pooled_top=[1, 2], loo_tops=[[1, 2], [1, 2]],
-        member_tops=[[1, 2], [3, 4]], depth=2)
-    assert m.single_sample == 0.0
-    assert m.gain is None
-    assert m.as_dict()["gain"] is None
-
-
-def test_no_member_is_named_when_they_all_move_it_equally():
-    m = C.measure_stability(
-        members=["a", "b", "c"], pooled_top=[1, 2], loo_tops=[[1, 9]] * 3,
-        member_tops=[[1, 2]] * 3, depth=2)
-    assert m.weakest_member is None, (
-        "naming one of three identical members would be arbitrary")
-
-
-def test_the_caution_flag_follows_the_measurement_not_the_size():
-    strong = C.measure_stability(
-        members=["a", "b"], pooled_top=[1, 2], loo_tops=[[1, 2], [1, 2]],
-        member_tops=[[1, 2], [1, 2]], depth=2)
-    weak = C.measure_stability(
-        members=[f"m{i}" for i in range(6)], pooled_top=[1, 2],
-        loo_tops=[[8, 9]] * 6, member_tops=[[1, 2]] * 6, depth=2)
-    assert strong.pooled == 1.0 and not strong.is_low, (
-        "a pair whose result does not move is not flagged for being a pair")
-    assert weak.pooled == 0.0 and weak.is_low, (
-        "and six samples do not exempt a result that moves completely")
-
-
-def test_the_measurement_survives_the_json_store():
-    """It travels in `hits-store`, which is JSON, so every field has to be a
-    plain type - and the panel is rebuilt from the dict after the router
-    destroys the view."""
-    import json
-
-    m = C.measure_stability(
-        members=["a", "b", "c"], pooled_top=[1, 2, 3],
-        loo_tops=[[1, 2, 3], [1, 2, 9], [1, 8, 9]],
-        member_tops=[[1, 2, 3], [1, 2, 3], [7, 8, 9]], depth=3)
-    d = json.loads(json.dumps(m.as_dict()))
-    assert d["size"] == 3 and d["depth"] == 3
-    assert d["pooled"] == pytest.approx(m.pooled)
-    assert d["single_sample"] == pytest.approx(m.single_sample)
-    assert d["weakest_member"] == "c"
-    assert d["weakest_value"] == pytest.approx(0.2)
-    # 0.57 mean, under the floor, and it has to survive as a plain bool rather
-    # than as numpy's - json.dumps refuses np.bool_ outright.
-    assert d["is_low"] is True and d["is_low"] == m.is_low
 
 
 # --- Comparison --------------------------------------------------------------
@@ -714,9 +592,8 @@ def test_each_arm_of_a_comparison_names_itself_and_its_hue():
 def test_the_rail_card_says_nothing_about_result_stability():
     """The rail speaks before the search, when the only thing known about the
     result is how many samples are going into it. It used to quote a stability
-    figure looked up from a curve by cohort size, which is a population average
-    printed beside one cohort's name; the number is measured during the search
-    now and reported on the right afterwards."""
+    figure looked up from a curve by cohort size. Retired result diagnostics
+    must not return as a substitute for the group's actual member count."""
     from bridge_rna.panels import build_cohort_card
 
     cohort, geometry = _one_cohort()
@@ -731,363 +608,6 @@ def test_the_rail_card_says_nothing_about_result_stability():
         assert "samples pooled into one query" in text
 
 
-# --- The stability panel ------------------------------------------------------
-
-
-def _measured(pooled=0.8, single=0.2, size=6, depth=10, weakest="OSD-1|m3"):
-    return {"depth": depth, "size": size, "pooled": pooled,
-            "single_sample": single, "gain": None if not single else pooled / single,
-            "is_low": pooled < C.STABILITY_FLOOR,
-            "weakest_member": weakest, "weakest_value": 0.4}
-
-
-def test_no_stability_panel_until_a_cohort_has_been_searched():
-    """A single sample and an uploaded file have nothing to leave out, so there
-    is no leave-one-out stability for them and an empty panel would be the same
-    empty promise the map link avoids before a search."""
-    from bridge_rna.panels import build_stability_panel
-
-    for payload in (None, {}, {"mode": "cached", "hits": [{"gsm": "GSM1"}]},
-                    {"mode": "uploaded"}, {"mode": "cohort", "stability": None}):
-        children, style = build_stability_panel(payload)
-        assert children == []
-        assert style == {"display": "none"}
-
-
-def test_the_panel_reports_the_measured_number_and_its_scale():
-    from bridge_rna.panels import build_stability_panel
-
-    children, style = build_stability_panel({
-        "mode": "cohort", "stability": _measured(),
-        "query": {"cohort_label": "Liver · Space Flight"}})
-    text = _series(children)
-    assert style == {}
-    assert "Result stability" in text
-    assert "0.80" in text, "the headline is quoted, not reduced to a word"
-    assert "Measured on this query" in text
-    assert "10 hits" in text, "the depth measured at is stated, once"
-    assert "of 10" in text, "and rides the number, so the share has a unit"
-    assert "6 pooled" in text, "the block says how many went in"
-    assert "4.0x" in text, "and what pooling bought, measured on this cohort"
-    assert "m3" in text, "and names the member that moves it most"
-    # The accession is dropped from that name: every member of a cohort shares
-    # it, and carrying it wrapped the name onto a second line for nothing.
-    assert "OSD-1|m3" not in text
-    # "Result stability" is the panel's heading and appears exactly once. It
-    # used to label every block as well, which pushed cohort B off screen.
-    assert text.lower().count("result stability") == 1
-
-
-@pytest.mark.parametrize("low_a,low_b", [(True, False), (False, True), (True, True)])
-def test_closed_stability_disclosure_keeps_each_low_arm_warning_visible(low_a, low_b):
-    """Hiding diagnostics must not hide a warning about either compared result."""
-    from dash import html
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort",
-        "query": {"cohort_label": "Liver · Space Flight"},
-        "stability": _measured(pooled=0.3 if low_a else 0.9),
-        "comparison": {
-            "query_b": {"cohort_label": "Liver · Ground Control"},
-            "stability": _measured(pooled=0.3 if low_b else 0.9),
-        },
-    })
-    disclosure = _find(children, "stability-details")[0]
-    assert isinstance(disclosure, html.Details)
-    assert not getattr(disclosure, "open", False)
-    summary = disclosure.children[0]
-    assert isinstance(summary, html.Summary)
-    text = _series(summary)
-    assert "Result stability" in text
-    import re
-    assert bool(re.search(r"\bA\b", text)) == low_a
-    assert bool(re.search(r"\bB\b", text)) == low_b
-    assert len(_find(disclosure, "stability-cohort")) == 2
-
-
-def test_steady_cohort_diagnostics_start_closed_without_a_warning():
-    from dash import html
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort", "stability": _measured(pooled=0.9)})
-    disclosure = _find(children, "stability-details")[0]
-    assert isinstance(disclosure, html.Details)
-    assert not getattr(disclosure, "open", False)
-    assert _series(disclosure.children[0]).strip() == "Result stability"
-    assert "0.90" in _series(disclosure.children[1:])
-
-
-def test_a_zero_baseline_is_described_rather_than_divided_by():
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort", "stability": _measured(single=0.0)})
-    text = _series(children)
-    assert "agree on a hit alone" in text
-    assert "x gain" not in text and "inf" not in text.lower()
-
-
-def test_a_baseline_too_small_for_two_decimals_is_not_printed_as_zero():
-    """The baseline and the gain it produced share one sentence, so rounding the
-    baseline to 0.00 beside a 340x ratio makes the sentence contradict itself.
-    Reachable: a large cohort's members can agree on almost nothing alone, which
-    is exactly the case where the gain is most worth stating."""
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort", "stability": _measured(pooled=0.85, single=0.0025)})
-    text = _series(children)
-    assert "overlaps another by 0.00," not in text
-    assert "overlaps another by 0.003," in text
-    assert "340.0x" in text
-
-
-def test_the_caution_is_amber_and_fires_on_the_measurement():
-    from bridge_rna.panels import build_stability_panel
-
-    steady, _ = build_stability_panel({"mode": "cohort",
-                                       "stability": _measured(pooled=0.9)})
-    shaky, _ = build_stability_panel({"mode": "cohort",
-                                      "stability": _measured(pooled=0.3)})
-    assert "cohort-flag" not in _classes(steady)
-    assert "is-low" not in _classes(steady)
-    shaky_text, shaky_classes = _series(shaky), _classes(shaky)
-    assert "cohort-flag" in shaky_classes
-    assert "neighbourhood" in shaky_text
-    # The sentence quotes the constant that triggered it, so the two cannot drift.
-    assert f"{round(C.STABILITY_FLOOR * 100)}%" in shaky_text
-    assert "is-low" in shaky_classes, "the meter goes amber with it"
-
-
-def test_a_comparison_measures_both_arms_separately():
-    """An overlap of 0.25 between two arms measuring 0.86 means something quite
-    different from the same 0.25 between one at 0.86 and one at 0.31, and the
-    number that decides which it is has to be on screen for both."""
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort",
-        "stability": _measured(pooled=0.86, size=12, weakest="OSD-1|a2"),
-        "query": {"cohort_label": "Liver · Space Flight"},
-        "comparison": {
-            "facet": "spaceflight arm",
-            "query_b": {"cohort_label": "Liver · Ground Control"},
-            "stability": _measured(pooled=0.31, size=2, weakest="OSD-1|b1"),
-        },
-    })
-    text = _series(children)
-    assert "Cohort A" in text and "Cohort B" in text
-    assert "0.86" in text and "0.31" in text
-    # Each arm is named beside its own mark, because cohort B's hex cannot agree
-    # across the retrieval network and the map.
-    assert "Liver · Space Flight" in text and "Liver · Ground Control" in text
-    # The facet the two differ in is a fact about the pair, so it is stated with
-    # the heading and the subtitle rather than hanging off cohort B's letter,
-    # where it made B's name start a line below A's once the two went side by
-    # side. Once, either way.
-    assert "differ by spaceflight arm" in text
-    assert text.count("spaceflight arm") == 1
-    classes = _classes(children)
-    assert "is-a" in classes and "is-b" in classes
-    # Cohort B is the shakier arm here and says so on its own block.
-    assert "cohort-flag" in classes
-
-
-def _find(node, want: str):
-    """Every node in the tree carrying `want` among its classes, in tree order.
-
-    Tree order matters: these tests assert which arm carries which row, so a
-    traversal that returned cohort B first would pass on the wrong evidence.
-    """
-    found = []
-
-    def walk(n):
-        if n is None:
-            return
-        if isinstance(n, (list, tuple)):
-            for child in n:
-                walk(child)
-            return
-        if want in (getattr(n, "className", "") or "").split():
-            found.append(n)
-        walk(getattr(n, "children", None))
-
-    walk(node)
-    return found
-
-
-def test_two_arms_are_laid_out_as_an_even_pair_and_one_arm_is_not():
-    """Stacked, the two arms got visibly unequal treatment: cohort A rendered
-    complete and cohort B's last row was clipped by the panel's own fold at every
-    viewport measured, 7.8px at 1680x1050 and 65.6px at 1280x800. `is-pair` is
-    what makes them two even columns, and a lone cohort must not get it - a
-    single block in a two-column grid is a half-empty table."""
-    from bridge_rna.panels import build_stability_panel
-
-    paired, _ = build_stability_panel({
-        "mode": "cohort", "stability": _measured(),
-        "query": {"cohort_label": "Liver · Space Flight"},
-        "comparison": {"facet": "spaceflight arm",
-                       "query_b": {"cohort_label": "Liver · Ground Control"},
-                       "stability": _measured(pooled=0.7)}})
-    pair = _find(paired, "stability-pair")
-    assert len(pair) == 1, "both arms live in one grid, so their rows can align"
-    assert "is-pair" in (pair[0].className or "")
-    assert len(_find(pair[0], "stability-cohort")) == 2
-
-    alone, _ = build_stability_panel({
-        "mode": "cohort", "stability": _measured(),
-        "query": {"cohort_label": "Liver · Space Flight"}})
-    solo = _find(alone, "stability-pair")
-    assert len(solo) == 1
-    assert "is-pair" not in (solo[0].className or "")
-    assert len(_find(solo[0], "stability-cohort")) == 1
-
-
-def test_every_row_of_an_arm_is_addressable_so_the_columns_can_align():
-    """`subgrid` aligns the two arms row by row, and the rows are assigned by
-    class rather than by child order. Either of the last two can be missing from
-    either arm - a cohort whose members all matter equally names none, and only a
-    shaky arm is flagged - so counting children would let cohort B's flag land in
-    the row holding cohort A's member name."""
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort",
-        "stability": _measured(pooled=0.86, weakest="OSD-1|a2"),
-        "query": {"cohort_label": "Liver · Space Flight"},
-        "comparison": {
-            "facet": "spaceflight arm",
-            "query_b": {"cohort_label": "Liver · Ground Control"},
-            # No weakest member, and low enough to be flagged: the mirror image
-            # of arm A's rows.
-            "stability": _measured(pooled=0.31, weakest=None)}})
-    arms = _find(children, "stability-cohort")
-    assert len(arms) == 2
-    rows_a = {c for row in ("stability-name", "cohort-stat", "stability-weakest",
-                            "cohort-flag") for c in [row] if _find(arms[0], row)}
-    rows_b = {c for row in ("stability-name", "cohort-stat", "stability-weakest",
-                            "cohort-flag") for c in [row] if _find(arms[1], row)}
-    # The weakest row is on both arms - arm B's says there is no such member
-    # rather than going missing. The flag is on the shaky arm only, and stays
-    # that way: the counterpart badge an equalized flag would need is a pass mark
-    # for a healthy cohort, which is the grade `R̄` was deleted for being.
-    assert rows_a == {"stability-name", "cohort-stat", "stability-weakest"}
-    assert rows_b == {"stability-name", "cohort-stat", "stability-weakest",
-                      "cohort-flag"}
-    # Each row is a direct child of its arm, which is what `grid-row` needs: a
-    # row nested one level deeper would not be a grid item at all.
-    for arm in arms:
-        direct = {c for kid in (arm.children or [])
-                  for c in (getattr(kid, "className", "") or "").split()}
-        assert {"stability-name", "cohort-stat"} <= direct
-
-
-def test_every_row_the_pair_grid_places_has_a_rule_that_places_it():
-    """A fifth row added to an arm would shear the two columns, silently.
-
-    `subgrid` aligns only the rows the parent declares and the child places. A
-    direct child with no `grid-row` lands in an implicit track, which the other
-    column does not have unless it emits the same row - so one arm's flag could
-    end up beside the other arm's member name, which is the failure that
-    addressing rows by class exists to prevent.
-
-    Nothing else guards this: `test_app.py`'s stylesheet check filters to `bm-`
-    and `app-` prefixes, so no `stability-*` class is covered by it.
-    """
-    import re
-    from pathlib import Path
-
-    from bridge_rna.panels import build_stability_panel
-
-    css = (Path(__file__).resolve().parent.parent
-           / "assets" / "retrieve.css").read_text()
-
-    placed = {}
-    for m in re.finditer(
-            r"\.stability-pair\.is-pair\s*>\s*\.stability-cohort\s*>\s*"
-            r"\.([a-z-]+)\s*\{[^}]*grid-row:\s*(\d+)", css):
-        placed[m.group(1)] = int(m.group(2))
-    assert placed, "no row is placed at all; the columns cannot align"
-
-    # The mirror-image payload, so both optional rows are represented: arm A
-    # names a member and arm B is flagged instead.
-    children, _ = build_stability_panel({
-        "mode": "cohort",
-        "stability": _measured(pooled=0.86, weakest="OSD-1|a2"),
-        "query": {"cohort_label": "Liver · Space Flight"},
-        "comparison": {"facet": "spaceflight arm",
-                       "query_b": {"cohort_label": "Liver · Ground Control"},
-                       "stability": _measured(pooled=0.31, weakest=None)}})
-    emitted = set()
-    for arm in _find(children, "stability-cohort"):
-        for kid in (arm.children or []):
-            emitted.update(c for c in
-                           (getattr(kid, "className", "") or "").split()
-                           if c)
-
-    missing = emitted - set(placed)
-    assert not missing, (
-        f"{sorted(missing)} are direct children of an arm with no `grid-row` "
-        f"rule, so each lands in an implicit track the other column does not "
-        f"have and the two arms shear apart")
-    stale = set(placed) - emitted
-    assert not stale, (
-        f"{sorted(stale)} are placed in the pair grid but nothing emits them")
-
-    tracks = re.search(r"\.stability-pair\.is-pair\s*\{[^}]*grid-template-rows:"
-                       r"\s*([^;]+);", css)
-    assert tracks, "the pair grid declares no rows for its arms to borrow"
-    assert len(tracks.group(1).split()) >= max(placed.values()), (
-        f"row {max(placed.values())} is placed but only "
-        f"{len(tracks.group(1).split())} tracks are declared, so it falls into "
-        f"an implicit one that `subgrid` does not align")
-
-
-def test_the_member_that_moves_it_most_puts_its_name_on_its_own_line():
-    """Label, score and a 27-character sample key shared one baseline row while
-    the panel was a single 322px column. In a 155px one they cannot: the label
-    and the value are fixed width, which left about 29px for the key and - since
-    it wraps rather than truncates, deliberately - broke it one character per
-    line into a 400px column."""
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort",
-        "stability": _measured(weakest="OSD-137|Mmus_C57-6J_EYE_GC_Rep1_M33")})
-    weakest = _find(children, "stability-weakest")
-    assert len(weakest) == 1
-    row = _find(weakest[0], "stability-weakest-row")
-    assert len(row) == 1, "the label and the score share one line"
-    assert _find(row[0], "stability-weakest-label")
-    assert _find(row[0], "stability-weakest-value")
-    # The name is a sibling of that row, not a third item inside it.
-    assert not _find(row[0], "stability-weakest-name")
-    assert _find(weakest[0], "stability-weakest-name")
-
-
-def test_a_cohort_with_no_weakest_member_says_so_rather_than_dropping_the_row():
-    """`cohorts.weakest_member` returns None when every member's absence moves
-    the list equally far. That is an answer, not a gap - and an absent row and a
-    clipped row look identical on screen, which is the exact ambiguity the even
-    split was built to remove."""
-    from bridge_rna.panels import build_stability_panel
-
-    children, _ = build_stability_panel({
-        "mode": "cohort", "stability": _measured(weakest=None)})
-    weakest = _find(children, "stability-weakest")
-    assert len(weakest) == 1, "the row is drawn even with nobody to name"
-    text = _series(weakest[0])
-    assert "Moves it most" in text
-    assert "every member equally" in text
-    # No score, because there is no member for one to belong to.
-    assert not _find(weakest[0], "stability-weakest-value")
-    # And it is not dressed as a sample key: it is prose, not an accession.
-    assert "is-none" in _classes(weakest[0])
-
-
 def test_the_inspector_names_which_arm_it_is_opening_only_in_a_comparison():
     """Opening on cohort A used to read as *the* pooled query rather than as one
     of two, with nothing saying the other star leads to its twin."""
@@ -1097,7 +617,7 @@ def test_the_inspector_names_which_arm_it_is_opening_only_in_a_comparison():
 
     query = pd.Series({"cohort_label": "Liver · Space Flight", "is_cohort": "1",
                        "study_id": "OSD-1", "members": "a|1\na|2",
-                       "grouped_by": "Study, Tissue", "stability": "0.34 at k = 2"})
+                       "grouped_by": "Study, Tissue"})
     assert "Cohort A" not in _series(build_cohort_details(query))
     assert "Cohort A" in _series(build_cohort_details(query, role="a"))
     assert "Cohort B" in _series(build_cohort_details(query, role="b"))
