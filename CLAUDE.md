@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+For interface work, also follow [AGENTS.md](AGENTS.md). Every agent must load both
+**taste** (`design-taste-frontend`) and **impeccable** before UI/UX planning or
+implementation and apply both during final review. Preserve the scientific
+workflows and use contextual disclosure to simplify secondary information.
+
 ## What this repo is
 
 **Bridge RNA is one application with two views**, developed by the Space Biosciences Research Branch at NASA Ames Research Center.

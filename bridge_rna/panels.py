@@ -26,8 +26,27 @@ def _detail_row(label: str, value: Any, mono: bool = False) -> Any:
     """A single label / value row for the details panel."""
     text = _safe_str(value)
     cls = "value" + (" mono" if mono else "")
-    val = html.Span(text, className=cls) if text else html.Span("—", className=cls + " empty")
+    val = html.Span(text, className=cls) if text else html.Span("Not recorded", className=cls + " empty")
     return html.Div(className="detail-row", children=[html.Span(label, className="label"), val])
+
+
+def _accession_row(label: str, accession: str) -> Any:
+    """Link recognized source identifiers, retaining their recorded spelling."""
+    osdr = re.fullmatch(r"(?:OSD-|GLDS-)(\d+)", accession)
+    if osdr:
+        url = f"https://osdr.nasa.gov/bio/repo/data/studies/OSD-{osdr.group(1)}"
+        source = "OSDR"
+    elif re.fullmatch(r"G(?:SM|SE)\d+", accession):
+        url = f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}"
+        source = "GEO"
+    else:
+        return _detail_row(label, accession, mono=True)
+    return html.Div(className="detail-row", children=[
+        html.Span(label, className="label"),
+        html.Span(className="value mono", children=html.A(
+            accession, href=url, target="_blank", rel="noopener noreferrer",
+            title=f"Open {accession} in {source}")),
+    ])
 
 
 def _detail_link_row(label: str, url: str) -> Any:
@@ -78,7 +97,8 @@ def _details_head(kicker: str, heading: str, score: float | None = None) -> Any:
         )
     ]
     if score is not None:
-        children.append(html.Span(f"{score:.4f}", className="score-badge"))
+        children.append(html.Span(f"Cosine {score:.4f}", className="score-badge",
+                                  title="Cosine similarity between query and sample embeddings"))
     return html.Div(className="details-head", children=children)
 
 
@@ -536,7 +556,7 @@ def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
         _detail_section(
             "Definition",
             [
-                _detail_row("Study", study, mono=True),
+                _accession_row("Study", study),
                 _detail_row("Grouped by", _safe_str(query.get("grouped_by"))),
                 _detail_row("Samples pooled", str(len(members))),
                 # Result stability used to be a fourth row here. It is measured
@@ -619,7 +639,7 @@ def _build_osdr_query_metadata_block(query: pd.Series) -> list[Any]:
     section = _detail_section(
         "OSDR study",
         [
-            _detail_row("Study ID", study_id, mono=True),
+            _accession_row("Study ID", study_id),
             _detail_row("Study title", study_title),
         ],
     )
@@ -640,7 +660,7 @@ def _build_query_details(query: pd.Series, compact: bool,
     # path would show one blank sample name where a group belongs.
     if _safe_str(query.get("is_cohort")) == "1":
         return build_cohort_details(query, role=role)
-    heading = _safe_str(query.get("sample_name")) or _safe_str(query.get("sample_id")) or "OSDR query"
+    heading = _safe_str(query.get("sample_name")) or _safe_str(query.get("sample_id")) or "Query sample"
     biology_rows = [
         _detail_row("Species", "Mus musculus"),
         _detail_row("Tissue", _safe_str(query.get("tissue"))),
@@ -653,12 +673,12 @@ def _build_query_details(query: pd.Series, compact: bool,
             _detail_row("Duration", _safe_str(query.get("duration"))),
         ]
     parts: list[Any] = [
-        _details_head("OSDR query", heading),
+        _details_head("Query sample", heading),
         _detail_section(
             "Identity",
             [
                 _detail_row("Sample ID", _safe_str(query.get("sample_id")), mono=True),
-                _detail_row("Study ID", _safe_str(query.get("study_id")), mono=True),
+                _accession_row("Study ID", _safe_str(query.get("study_id"))),
             ],
         ),
         _detail_section("Biology", biology_rows),
@@ -698,6 +718,7 @@ def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | Non
         examples = ", ".join(df["gsm"].head(8).astype(str).tolist())
         return [
             _details_head("GSE study", node_id),
+            _accession_row("Study", node_id),
             _detail_section(
                 "Overview",
                 [
@@ -741,8 +762,8 @@ def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | Non
         _detail_section(
             "Identity",
             [
-                _detail_row("GSM", _safe_str(r.get("gsm")), mono=True),
-                _detail_row("GSE", gse, mono=True),
+                _accession_row("GSM", _safe_str(r.get("gsm"))),
+                _accession_row("GSE", gse),
                 _detail_row("Title", title),
             ],
         ),

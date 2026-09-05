@@ -19,7 +19,7 @@ from . import cohorts as C
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
 from .figures import _empty_network_figure
 from .osdr import _eligible_osdr_count, load_osdr_samples
-from .panels import build_gene_list_banner, build_setup_banner, build_status_banner
+from .panels import build_gene_list_banner, build_setup_banner
 from .retrieval import _archs4_sample_count
 from .util import _safe_str
 
@@ -185,8 +185,7 @@ def build_cohort_panel() -> Any:
         children=[
             _labelled(
                 "cohort-facets-label",
-                ["Group by ",
-                 html.Span("what makes these one cohort", className="control-hint")],
+                "Group by",
                 build_cohort_facet_chips(),
                 # The rail's rule: the fact that qualifies a control sits
                 # directly under that control. This says what the current
@@ -210,7 +209,7 @@ def build_cohort_panel() -> Any:
                         className="cohort-members-body",
                         children=[
                             html.Div(
-                                "Untick a sample to leave it out of the pool.",
+                                "Clear a sample to exclude it from the pooled query.",
                                 className="control-hint"),
                             dcc.Checklist(id="cohort-members",
                                           className="member-list",
@@ -224,7 +223,7 @@ def build_cohort_panel() -> Any:
                 ["Compare against ",
                  html.Span("optional", className="control-hint")],
                 dcc.Dropdown(id="cohort-compare-dropdown", clearable=True,
-                             placeholder="Nothing - search this cohort alone"),
+                             placeholder="No comparison"),
                 html.Div(id="cohort-compare-hint", className="control-hint"),
             ),
             # The second pooled query gets its own card, under its own picker,
@@ -240,16 +239,11 @@ def build_cohort_panel() -> Any:
     )
 
 
-# What the canvas is showing, said two ways: the strip above the plot and the
-# subtitle in the panel header. Both are driven from here so they cannot drift
-# apart, and so neither can keep describing a single-query network while a
-# two-cohort comparison is on screen - which is the same failure as a status
-# banner naming the wrong retrieval path.
+# The subtitle explains interpretation; the legend identifies the marks.
 CANVAS_SUBTITLES = {
-    "sample": "OSDR query → nearest ARCHS4 GSM samples → GSE studies",
-    "cohort": "Pooled OSDR cohort → nearest ARCHS4 GSM samples → GSE studies",
-    "comparison": "Two pooled cohorts, scored separately → what each retrieved, "
-                  "and what both did",
+    "sample": "Ranked by embedding cosine similarity, not biological equivalence.",
+    "cohort": "Pooled OSDR cohort matches ranked by embedding cosine similarity.",
+    "comparison": "Two pooled cohorts searched separately; shared hits appear once.",
 }
 
 
@@ -260,7 +254,7 @@ def build_graph_legend(kind: str = "sample") -> Any:
     carry meaning, so it gets a different strip: the color key lives in the
     figure's own legend, and this one is left to say what the marks are.
     """
-    query_label = {"sample": "OSDR query",
+    query_label = {"sample": "Query sample",
                    "cohort": "Pooled cohort query",
                    "comparison": "Pooled cohort queries (2)"}[kind]
     items: list[Any] = [
@@ -312,7 +306,7 @@ def build_view() -> html.Div:
                     html.Aside(
                         className="sidebar",
                         children=[
-                            html.H2("Search controls", className="sidebar-title"),
+                            html.H2("Search controls", className="visually-hidden"),
                             html.Div(
                                 className="control-group control-group--query",
                                 children=[
@@ -391,9 +385,8 @@ def build_view() -> html.Div:
                             html.Div(
                                 className="control-group",
                                 children=[
-                                    html.Div("Retrieval", className="control-group-title"),
                                     _labelled(
-                                        "topk-slider-label", "Top-k neighbors",
+                                        "topk-slider-label", "Number of matches",
                                         html.Div(
                                             className="control-slider",
                                             children=[
@@ -413,8 +406,7 @@ def build_view() -> html.Div:
                                     html.Summary(
                                         className="advanced-summary",
                                         children=[
-                                            html.Span("Metadata enrichment", className="control-group-title"),
-                                            html.Span("Optional", className="advanced-badge"),
+                                            html.Span("Metadata options", className="control-group-title"),
                                         ],
                                     ),
                                     html.Div(
@@ -431,10 +423,7 @@ def build_view() -> html.Div:
                                                     # association is available
                                                     # here and is stronger.
                                                     html.Label(
-                                                        [
-                                                            "Entrez email ",
-                                                            html.Span("(GEO / PubMed lookups)", className="control-hint"),
-                                                        ],
+                                                        "Email for NCBI lookups",
                                                         htmlFor="entrez-email-input",
                                                         className="control-label",
                                                     ),
@@ -464,7 +453,7 @@ def build_view() -> html.Div:
                                             # That cost used to be spelled out in
                                             # a hint under the tick. It is gone:
                                             # the toggle sits inside a disclosure
-                                            # already labelled Optional, the
+                                            # for metadata options, the
                                             # default is off, and the sentence
                                             # was three lines of rail explaining
                                             # a control most searches never open.
@@ -514,7 +503,7 @@ def build_view() -> html.Div:
                                         id="action-slot-upload",
                                         style={"display": "none"},
                                         children=[
-                                            html.Button("Embed & search uploaded sample",
+                                            html.Button("Embed & search",
                                                         id="upload-search-button",
                                                         className="btn-primary",
                                                         n_clicks=0, disabled=True),
@@ -524,7 +513,7 @@ def build_view() -> html.Div:
                                     ),
                                     html.Div(
                                         id="search-status",
-                                        children=build_status_banner("Select a sample and run a search.", kind="info"),
+                                        children=None,
                                     ),
                                     # The second act, offered only once there is
                                     # something to see there. Hidden until a
@@ -536,7 +525,7 @@ def build_view() -> html.Div:
                                         href="/map",
                                         className="btn-ghost",
                                         style={"display": "none"},
-                                        children="See these hits on the map →",
+                                        children="View matches on map",
                                     ),
                                 ],
                             ),
@@ -557,7 +546,6 @@ def build_view() -> html.Div:
                                     html.Div(
                                         className="panel-header",
                                         children=[
-                                            html.Span(className="panel-dot"),
                                             html.Div(
                                                 children=[
                                                     html.H2("Retrieval network", className="panel-title"),
@@ -602,16 +590,16 @@ def build_view() -> html.Div:
                                      className="panel stability-panel",
                                      style={"display": "none"}),
                             html.Div(id="details-panel", className="panel details-panel"),
-                            html.Div(
-                                className="panel ai-panel",
+                            html.Details(
+                                className="panel ai-panel advanced-group",
                                 children=[
-                                    html.Div(
-                                        className="panel-header",
-                                        children=[
-                                            html.Span(className="panel-dot panel-dot--warm"),
-                                            html.H2("AI hypothesis", className="panel-title"),
-                                            html.Span("Beta", className="app-header-chip"),
-                                        ],
+                                    html.Summary(
+                                        "AI summary", className="advanced-summary",
+                                    ),
+                                    html.P(
+                                        "Generated interpretation of the primary query and its matches. "
+                                        "Check claims against the source records; similarity does not establish a shared mechanism.",
+                                        className="details-empty-hint",
                                     ),
                                     html.Button(
                                         "Generate AI summary",

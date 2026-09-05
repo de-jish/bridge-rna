@@ -248,7 +248,12 @@ def control_rail() -> html.Aside:
             _group(
                 "projection-label", "Projection",
                 _segmented("method", method_options(), default_method()),
-                html.Div(id="method-params", className="bm-params"),
+                html.Details(className="bm-method-details", children=[
+                    html.Summary("Projection details"),
+                    html.Div(id="method-params", className="bm-params"),
+                    html.P("Projected distances differ from the embedding cosine similarity used for retrieval.",
+                           className="bm-hint"),
+                ]),
             ),
             _group(
                 "dims-label", "Dimensions",
@@ -381,10 +386,10 @@ def control_rail() -> html.Aside:
                     html.Div(
                         id="find-suggestions", className="bm-suggest",
                         role="listbox",
-                        **{"aria-label": "Matching samples"},
+                        **{"aria-label": "Matching studies"},
                     ),
                     html.Div(id="find-status", className="bm-hint"),
-                    html.Button("Frame it", id="frame-find", n_clicks=0,
+                    html.Button("Fit study", id="frame-find", n_clicks=0,
                                 className="bm-button",
                                 style={"display": "none"}),
                 ],
@@ -415,7 +420,7 @@ def control_rail() -> html.Aside:
                     className="bm-checklist",
                 ),
                 html.Div(id="retrieval-summary", className="bm-hint"),
-                html.Button("Frame the retrieval", id="frame-retrieval",
+                html.Button("Fit results", id="frame-retrieval",
                             n_clicks=0, className="bm-button"),
                 html.Button("Explore neighborhood", id="explore-neighborhood",
                             n_clicks=0, className="bm-button"),
@@ -697,7 +702,7 @@ def selected_panel_children(record: dict | None) -> list:
     ]
     if record.get("sample_key"):
         children.append(dcc.Link(
-            "Retrieve its Earth analogs →", className="bm-button",
+            "Find related ARCHS4 samples", className="bm-button",
             href=f"/?q={quote(str(record['sample_key']))}"))
     elif record.get("geo"):
         children.append(html.A(
@@ -890,7 +895,7 @@ def neighborhood_overview_children(summary: dict) -> list:
     median = score.get("median")
     minimum = score.get("minimum")
     maximum = score.get("maximum")
-    score_value = "—" if median is None else f"{float(median):.3f}"
+    score_value = "Unavailable" if median is None else f"{float(median):.3f}"
     score_range = ("No numeric scores" if minimum is None or maximum is None else
                    f"Range {float(minimum):.3f}–{float(maximum):.3f}")
     top_three = int(summary.get("top_three_study_samples") or 0)
@@ -922,7 +927,7 @@ def neighborhood_overview_children(summary: dict) -> list:
                className="bm-neighborhood-summary"),
         html.Div(className="bm-neighborhood-coverage", children=[
             html.Span(
-                f"Tissue metadata {int(tissue.get('covered') or 0):,} of {depth:,}"),
+                f"Tissue categories {int(tissue.get('covered') or 0):,} of {depth:,}"),
             html.Span(
                 f"Species metadata {int(species.get('covered') or 0):,} of {depth:,}"),
         ]),
@@ -941,7 +946,7 @@ def neighborhood_overview_children(summary: dict) -> list:
                 html.Small(score_range),
             ]),
         ]),
-        composition("Tissue composition", tissue),
+        composition("Tissue categories", tissue),
         composition("Species composition", species),
         html.Div(className="bm-neighborhood-leading", children=[
             html.H3("Leading studies", className="bm-neighborhood-section-title"),
@@ -976,7 +981,8 @@ def neighborhood_studies_children(groups: list[dict],
         focus_value = gse or NO_GSE_FOCUS_VALUE
         count = int(group.get("sample_count") or 0)
         rank = int(group.get("best_rank") or 0)
-        title = str(group.get("title") or "Study title not recorded")
+        title = (f"Example sample: {group['title']}" if group.get("title")
+                 else "Sample title not recorded")
         tissue = str(group.get("dominant_tissue") or "Tissue not recorded")
         tissue_count = int(group.get("dominant_tissue_count") or 0)
         tissue_covered = int(group.get("tissue_covered") or 0)
@@ -1044,7 +1050,7 @@ def neighborhood_samples_children(rows: list[dict],
         title = str(row.get("title") or "Title not recorded")
         rank = int(row.get("rank") or 0)
         score = row.get("score")
-        score_text = "—" if score is None else f"{float(score):.3f}"
+        score_text = "Unavailable" if score is None else f"{float(score):.3f}"
         children.append(_neighborhood_row(
             "sample", gsm, gsm, f"{gse} · {tissue} · {species} · {title}",
             f"#{rank:,} · {score_text}", gsm == selected_gsm,
@@ -1170,7 +1176,7 @@ def build_view() -> html.Div:
                         className="bm-neighborhood-body",
                     ),
                     html.Div(
-                        "Nearest in 512-D—not everything inside the visible frame.",
+                        "Ranked by cosine similarity in 512-D. Map position does not determine rank.",
                         className="bm-neighborhood-foot",
                     ),
                 ],

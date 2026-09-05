@@ -108,6 +108,46 @@ def _id_key(component_id):
     return component_id
 
 
+def test_new_results_clear_ai_text_without_requesting_a_summary(app, monkeypatch):
+    from types import SimpleNamespace
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    monkeypatch.setattr(retrieval_callbacks, "ctx",
+                        SimpleNamespace(triggered_id="hits-store"))
+    def unexpected_request():
+        pytest.fail("Changing results must not request an AI service")
+    monkeypatch.setattr(retrieval_callbacks, "unavailable_reason", unexpected_request)
+    callback = _callback_for(app, "ai-summary-button")
+    assert callback(1, {"sample_id": "new query", "hits": []}) == ("", "")
+    assert callback(1, None) == ("", "")
+
+
+def test_source_identifiers_link_to_the_record_without_changing_metadata(monkeypatch):
+    import pandas as pd
+    from bridge_rna import panels
+
+    monkeypatch.setattr(panels, "_fetch_osdr_study_summary", lambda _: {})
+    query = pd.Series({"study_id": "OSD-100", "sample_name": "eye sample",
+                       "sample_id": "OSD-100|eye sample"})
+    hits = pd.DataFrame([{"gsm": "GSM4256053", "gse": "GSE143281",
+                          "title": "Source title — unchanged", "score": 0.99}])
+    expected_urls = {
+        "OSD-100": "https://osdr.nasa.gov/bio/repo/data/studies/OSD-100",
+        "GSM4256053": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM4256053",
+        "GSE143281": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE143281",
+    }
+    for selected, accession in [(None, "OSD-100"),
+                                ({"kind": "gsm", "node_id": "GSM4256053"}, "GSM4256053"),
+                                ({"kind": "gse", "node_id": "GSE143281"}, "GSE143281")]:
+        tree = html.Div(panels.build_details_panel(query, selected, hits))
+        links = [c for c in _walk(tree) if isinstance(c, html.A)]
+        assert any(c.children == accession and c.href == expected_urls[accession]
+                   for c in links)
+        assert all(c.href.startswith("https://") for c in links)
+        if accession == "GSM4256053":
+            assert "Source title — unchanged" in _text(tree)
+
+
 # The wildcard sentinels Dash serializes into a pattern-matching id.
 _WILDCARDS = ("ALL", "MATCH", "ALLSMALLER")
 
@@ -596,7 +636,7 @@ def test_neighborhood_overview_renders_metrics_coverage_and_ranked_groups():
     classes = _classes(children)
 
     assert summary["sentence"] in text
-    assert "Tissue metadata 3 of 4" in text
+    assert "Tissue categories 3 of 4" in text
     assert "Species metadata 3 of 4" in text
     assert all(value in text for value in ("4", "2", "0.975"))
     assert "GSE10" in text and "GSE20" in text
@@ -629,7 +669,7 @@ def test_neighborhood_studies_use_separate_buttons_and_geo_links():
     assert getattr(buttons[1], "aria-pressed") == "false"
     assert buttons[1].disabled is False
     assert "Retina study · Eye · 2 of 2 with tissue metadata" in _text(buttons[0])
-    assert "Study title not recorded · Tissue not recorded · 0 of 0 with tissue metadata" \
+    assert "Sample title not recorded · Tissue not recorded · 0 of 0 with tissue metadata" \
         in _text(buttons[1])
     assert len(links) == 1
     assert links[0].href.endswith("?acc=GSE10")

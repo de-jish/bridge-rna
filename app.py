@@ -33,7 +33,7 @@ from bridge_rna.util import _format_count
 # from the same list and cannot drift apart.
 ROUTES = [
     {"path": "/", "key": "retrieve", "label": "Retrieve",
-     "title": "Bridge RNA - retrieve Earth analogs for a NASA sample"},
+     "title": "Bridge RNA - find related ARCHS4 samples"},
     {"path": "/map", "key": "map", "label": "Map",
      "title": "Bridge RNA - the embedding map"},
 ]
@@ -83,7 +83,7 @@ def header(active: str) -> html.Header:
                         className="app-brand-text",
                         children=[
                             html.H1("Bridge RNA", className="app-title"),
-                            html.P("NASA spaceflight transcriptomes, against all of Earth's",
+                            html.P("Compare mouse OSDR RNA-seq with ARCHS4",
                                    className="app-subtitle"),
                         ],
                     ),

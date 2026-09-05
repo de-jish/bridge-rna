@@ -49,7 +49,6 @@ from .neighborhoods import (
     unavailable_payload,
 )
 from .panels import (
-    _details_head,
     build_cohort_card,
     build_details_panel,
     build_stability_panel,
@@ -478,7 +477,7 @@ def register(app) -> None:
         State("biopython-toggle", "value"),
         running=[
             (Output("search-button", "disabled"), True, False),
-            (Output("query-running-indicator", "children"), "Query running... retrieving nearest neighbors and metadata.", ""),
+            (Output("query-running-indicator", "children"), "Finding related ARCHS4 samples...", ""),
         ],
     )
     def run_search(
@@ -492,7 +491,7 @@ def register(app) -> None:
             return (
                 _empty_network_figure("Select an OSDR sample, then run a search."),
                 None,
-                build_status_banner("Select a sample to start.", kind="info"),
+                None,
             )
 
         q_row = samples_df.loc[samples_df["sample_id"] == sample_id].iloc[0]
@@ -1172,17 +1171,21 @@ def register(app) -> None:
         Output("ai-summary-output", "children"),
         Output("ai-summary-status", "children"),
         Input("ai-summary-button", "n_clicks"),
-        State("hits-store", "data"),
+        Input("hits-store", "data"),
         running=[
             (Output("ai-summary-button", "disabled"), True, False),
-            (Output("ai-summary-status", "children"), "Generating hypothesis...", ""),
+            (Output("ai-summary-status", "children"), "Generating summary...", ""),
             (Output("ai-summary-status", "className"), "ai-status ai-status--loading", "ai-status"),
         ],
         prevent_initial_call=True,
     )
     def generate_ai_summary(_: int, hits_payload: dict[str, Any] | None):
+        # One callback owns both generation and invalidation. Dash discards an
+        # older response when a result change schedules this newer invocation.
+        if ctx.triggered_id == "hits-store":
+            return "", ""
         if not hits_payload:
-            return "", "Run a retrieval first so metadata is available."
+            return "", "Run a search before generating a summary."
 
         query_row = _query_series(hits_payload)
         if query_row is None:
@@ -1290,7 +1293,7 @@ def register(app) -> None:
         if not locatable:
             return {"display": "none"}, ""
         n = len(locatable)
-        return {}, f"See {n} hit{'s' if n != 1 else ''} on the map →"
+        return {}, f"View {n} match{'es' if n != 1 else ''} on map"
 
     @app.callback(
         Output("selected-node-store", "data"),
@@ -1316,9 +1319,9 @@ def register(app) -> None:
     def render_details(hits_payload: dict[str, Any] | None, selected_node: dict[str, Any] | None):
         if not hits_payload:
             return [
-                _details_head("Inspector", "Details"),
-                html.P("Run a search to load the retrieval network.", className="details-empty"),
-                html.P("Then click any node - the query, a GSM hit, or a GSE study - to inspect its metadata here.", className="details-empty-hint"),
+                html.H2("Details", className="panel-title"),
+                html.P("Select a query, sample, or study in the network to inspect its metadata.",
+                       className="details-empty"),
             ]
 
         entrez_email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL

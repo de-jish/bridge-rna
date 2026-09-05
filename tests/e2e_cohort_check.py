@@ -438,7 +438,10 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     msg = banner(page)
     c.ok("failed" not in msg.lower() and "Upload a counts file" not in msg,
          f"no search ran at page load: {msg[:70]!r}")
-    c.ok("Select" in msg, "the banner invites a search instead")
+    c.ok(not msg.strip(), "the status area stays empty before a search")
+    c.ok("Select an OSDR sample, then run a search." in
+         page.locator("#network-graph").inner_text(),
+         "the empty network gives the next step")
     shot(page, "01-sample-mode")
 
     # ---- 2. defining a cohort --------------------------------------

@@ -122,7 +122,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
             "size": 28,
             "color": GRAPH_THEME["query"],
             "symbol": "star",
-            "hover": f"OSDR query<br>{q_label}<br>{q_id}",
+            "hover": f"Query<br>{q_label}<br>{q_id}",
         }
     )
 

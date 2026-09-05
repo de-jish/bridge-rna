@@ -257,7 +257,6 @@
   /* Optical centre of the 18px title's first line, not the top of it. */
   margin-top: 7px;
 }
-.panel-dot--warm { background: var(--accent-warm); }
 /* Teal, because GRAPH_THEME's `cohort_a` is teal and this panel is about a
    pooled cohort. With one cohort on screen it is the only teal mark in the
    inspector; with two, the per-cohort role dots inside carry the distinction. */
@@ -279,11 +278,7 @@
 .sample-preview { margin-top: var(--space-1); }
 .sample-preview-empty { margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
 .sample-preview-card {
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--accent-teal);
-  border-radius: var(--radius-sm);
-  background: var(--bg-inset);
-  padding: var(--space-3);
+  padding: var(--space-2) 0;
 }
 .sample-preview-name {
   font-family: var(--font-mono);
@@ -318,27 +313,10 @@
 }
 .advanced-summary::-webkit-details-marker { display: none; }
 .advanced-summary .control-group-title { margin: 0; }
-.advanced-badge,
-.app-header-chip {
-  margin-left: auto;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  padding: 1px 7px;
-}
-
-/* The "Beta" chip beside the AI panel title. It had no rule at all and was
-   rendering as plain body text - caught by widening the stylesheet check to
-   cover the retrieval view's classes, not only the map's. It sits next to a
-   heading rather than in a flex summary, so it does not take the auto margin. */
-.app-header-chip { margin-left: var(--space-2); align-self: center; }
 .advanced-summary::after {
   content: "";
   flex: none;
+  margin-left: auto;
   width: 7px;
   height: 7px;
   border-right: 2px solid var(--text-muted);
@@ -539,10 +517,12 @@
 
 .ai-panel {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
   max-height: 46%;
+  overflow-y: auto;
 }
+.ai-panel > summary { font-weight: 600; }
+.ai-panel:not([open]) > :not(summary) { display: none; }
+.ai-panel .details-empty-hint { margin: var(--space-3) 0; }
 .ai-status {
   display: flex;
   align-items: center;

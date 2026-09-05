@@ -116,18 +116,16 @@ _ARCHS4_META_NEEDS = (data.archs4_metadata_available, ARCHS4_META_HINT)
 
 REGISTRY: tuple[ColorBy, ...] = (
     # --- Whole map: every point gets a real category. -----------------------
-    # No hint. The shared tissue vocabulary is the point of the field, but the
-    # menu already says "whole map", the legend names every bucket, and the
-    # sentence that used to sit here was a paragraph of method under a control
-    # that had already answered the question.
+    # Categories are harmonized from metadata, not measured tissue annotations.
     ColorBy(
         key="tissue", label="Tissue", scope=(ARCHS4, OSDR), resolver=_tissue,
+        hint="Tissue categories group OSDR labels and keyword matches from GEO metadata. "
+             "Other: no category matched. Unknown: no tissue text.",
         needs=_ARCHS4_META_NEEDS,
     ),
     ColorBy(
         key="species", label="Species", scope=(ARCHS4, OSDR), resolver=_species,
-        hint="The cleanest partition on the map, and the reference for what a "
-             "working color-by looks like. OSDR is entirely mouse.",
+        hint="OSDR samples are mouse; ARCHS4 includes mouse and human samples.",
     ),
     # There is deliberately no unsupervised-cluster color-by here. A k-means
     # partition of the same 512-d vectors the projection was fit on was built,

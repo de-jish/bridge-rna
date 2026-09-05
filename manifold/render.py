@@ -725,7 +725,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
                                              recede_residual=True, opacity=dim):
                 fig.add_trace(trace)
             drawn.append(archs4_codes)
-            badges.append(f"ARCHS4 live: <b>{len(idx):,}</b>")
+            badges.append(f"ARCHS4 shown: <b>{len(idx):,}</b>")
         else:
             # These points have no value under this field, so they are drawn as
             # scenery: one faint color, no legend row, nothing that could be

@@ -1,6 +1,6 @@
 # Bridge RNA
 
-**Bridge RNA takes one RNA-seq sample flown on a NASA mission and finds the Earth studies that look most like it**, out of a collection of 940,455 samples.
+**Bridge RNA finds related terrestrial RNA-seq samples in ARCHS4 for mouse data from NASA's Open Science Data Repository (OSDR).** Queries can use an OSDR sample, a pooled cohort, or an uploaded counts column. Results are ranked by embedding cosine similarity, which does not establish biological equivalence.
 
 Developed by the **Space Biosciences Research Branch at NASA Ames Research Center**.
 
@@ -10,8 +10,8 @@ Bridge RNA is one app with two pages.
 
 ### Retrieve (`/`)
 
-Pick a sample from NASA's Open Science Data Repository (OSDR).
-Bridge RNA returns its nearest Earth neighbours, drawn as a network of matches and the studies they came from, with an inspector and an optional AI summary.
+Select an OSDR sample or cohort, including flight and ground-control groups, or upload mouse counts to embed and search.
+Bridge RNA searches the 940,455-sample ARCHS4 index and shows matches and their GEO studies in a network. The inspector links to source records; optional AI interpretation is available under **AI summary**.
 
 ![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours and the three GEO studies they came from drawn as a network, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)
 
@@ -21,13 +21,16 @@ Nothing in the pipeline was told the query was an eye; it found the retina on it
 
 ### Map (`/map`)
 
-The same space, seen all at once.
-Both collections - 2,108 NASA samples and 940,455 Earth samples - are placed in one shared projection and drawn as live points, colored by tissue.
+Both collections, 2,108 OSDR samples and 940,455 ARCHS4 samples, have coordinates in a shared projection. The 2-D view can draw the full corpus; the 3-D view draws up to 40,000 ARCHS4 points plus OSDR samples to keep rotation responsive. This display limit does not change retrieval.
 You can rotate it, switch between 2-D and 3-D, recolor it, and overlay a retrieval to see where a query and its matches sit.
 From that retrieval, **Explore neighborhood** opens its exact top-250 cosine neighbors with deterministic tissue and study summaries, plus complete GSE and GSM lists that can be searched and focused on the map.
 The subtle teal evidence marks are the nearest samples in the original 512-dimensional embedding; they are not a census of everything inside the framed 2-D or 3-D projection.
 
-![The Bridge RNA map: all 942,563 samples from both collections in one 3-D UMAP projection, colored by tissue, with the 2,108 NASA samples drawn as diamonds over the Earth cloud](docs/bridge-rna-map.png)
+![The Bridge RNA map: a 3-D UMAP view of OSDR and ARCHS4 embeddings, colored by derived tissue category, with OSDR samples drawn as diamonds](docs/bridge-rna-map.png)
+
+**Projection details** retains the recorded fit settings beside the projection selector. Tissue colors are standardized categories derived from OSDR labels and GEO text, not new measured annotations. Original metadata remains available in the inspector.
+
+The plot toolbar downloads figures as PNG images. The app currently has no tabular result export. See [the interface cleanup notes](docs/interface-cleanup.md) for the review scope and preserved capabilities.
 
 ## How it works
 

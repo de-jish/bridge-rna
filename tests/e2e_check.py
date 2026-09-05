@@ -471,7 +471,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     before_frame = _map_x_range(page)
     with page.expect_response(
             _figure_response_for("viewport-store.data"), timeout=90_000):
-        page.get_by_role("button", name="Frame the retrieval").click()
+        page.get_by_role("button", name="Fit results").click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
     _wait_for_evidence(page, "scattergl")
     before_frame_span = abs(before_frame[1] - before_frame[0])
@@ -508,7 +508,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
         " return gd && (gd._fullData || []).some(t => t.name === 'query'"
         " && t.type === 'scatter3d'); }", timeout=90_000)
     _wait_for_evidence(page, "scatter3d")
-    c.ok(not page.get_by_role("button", name="Frame the retrieval").is_visible(),
+    c.ok(not page.get_by_role("button", name="Fit results").is_visible(),
          "3-D hides Frame, whose 2-D ranges its camera would ignore")
     c.ok(explore.is_visible(), "Explore remains visible in 3-D")
     reached_fallback_close = _tab_until(
@@ -878,6 +878,9 @@ def main() -> int:
             print("\n=== 6b. t-SNE, and the parameter readout on the rail ===")
 
             def params_text() -> str:
+                details = page.locator(".bm-method-details")
+                if details.get_attribute("open") is None:
+                    details.locator("summary").click()
                 return page.locator("#method-params").inner_text().replace("\n", " ")
 
             pca_params = params_text()

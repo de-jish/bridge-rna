@@ -64,4 +64,4 @@ def _extract_gse(value: str) -> str:
     m = re.search(r"(GSE\d+)", value or "", flags=re.IGNORECASE)
     return m.group(1).upper() if m else ""
 def _format_count(value: int | None) -> str:
-    return f"{value:,}" if isinstance(value, int) else "—"
+    return f"{value:,}" if isinstance(value, int) else "Unavailable"
