@@ -6,6 +6,9 @@ For interface work, also follow [AGENTS.md](AGENTS.md). Every agent must load bo
 **taste** (`design-taste-frontend`) and **impeccable** before UI/UX planning or
 implementation and apply both during final review. Preserve the scientific
 workflows and use contextual disclosure to simplify secondary information.
+The map has one results action: **Fit results** in 2-D, **View results** in 3-D.
+Cohort result-stability diagnostics and executed membership are disclosures;
+low-overlap warnings remain visible when stability details are closed.
 
 ## What this repo is
 

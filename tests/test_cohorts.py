@@ -778,6 +778,47 @@ def test_the_panel_reports_the_measured_number_and_its_scale():
     assert text.lower().count("result stability") == 1
 
 
+@pytest.mark.parametrize("low_a,low_b", [(True, False), (False, True), (True, True)])
+def test_closed_stability_disclosure_keeps_each_low_arm_warning_visible(low_a, low_b):
+    """Hiding diagnostics must not hide a warning about either compared result."""
+    from dash import html
+    from bridge_rna.panels import build_stability_panel
+
+    children, _ = build_stability_panel({
+        "mode": "cohort",
+        "query": {"cohort_label": "Liver · Space Flight"},
+        "stability": _measured(pooled=0.3 if low_a else 0.9),
+        "comparison": {
+            "query_b": {"cohort_label": "Liver · Ground Control"},
+            "stability": _measured(pooled=0.3 if low_b else 0.9),
+        },
+    })
+    disclosure = _find(children, "stability-details")[0]
+    assert isinstance(disclosure, html.Details)
+    assert not getattr(disclosure, "open", False)
+    summary = disclosure.children[0]
+    assert isinstance(summary, html.Summary)
+    text = _series(summary)
+    assert "Result stability" in text
+    import re
+    assert bool(re.search(r"\bA\b", text)) == low_a
+    assert bool(re.search(r"\bB\b", text)) == low_b
+    assert len(_find(disclosure, "stability-cohort")) == 2
+
+
+def test_steady_cohort_diagnostics_start_closed_without_a_warning():
+    from dash import html
+    from bridge_rna.panels import build_stability_panel
+
+    children, _ = build_stability_panel({
+        "mode": "cohort", "stability": _measured(pooled=0.9)})
+    disclosure = _find(children, "stability-details")[0]
+    assert isinstance(disclosure, html.Details)
+    assert not getattr(disclosure, "open", False)
+    assert _series(disclosure.children[0]).strip() == "Result stability"
+    assert "0.90" in _series(disclosure.children[1:])
+
+
 def test_a_zero_baseline_is_described_rather_than_divided_by():
     from bridge_rna.panels import build_stability_panel
 

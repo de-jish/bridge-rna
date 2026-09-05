@@ -422,8 +422,6 @@ def control_rail() -> html.Aside:
                 html.Div(id="retrieval-summary", className="bm-hint"),
                 html.Button("Fit results", id="frame-retrieval",
                             n_clicks=0, className="bm-button"),
-                html.Button("Explore neighborhood", id="explore-neighborhood",
-                            n_clicks=0, className="bm-button"),
                 # What each mark means lives in the key on the plot, beside the
                 # marks. Nothing else belongs here.
                 #
@@ -1203,7 +1201,7 @@ def build_view() -> html.Div:
         dcc.Store(id="find-chosen"),
         dcc.Store(
             id="neighborhood-open-store",
-            data={"open": False, "opener": "explore-neighborhood",
+            data={"open": False, "opener": "frame-retrieval",
                   "focus_target": None},
         ),
         dcc.Store(id="neighborhood-focus-store"),

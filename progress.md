@@ -6,6 +6,14 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-09-05 (remove redundant controls and cohort cards)
+
+A second independent language and simulated researcher review consolidated the map's two result actions into one: Fit results in 2-D, View results in 3-D. The latter opens the same exact-cosine evidence panel without changing the camera. Closing returns focus to the same button in either dimension.
+
+Removed unconsumed Box Select and Lasso Select tools from Retrieve. Flattened cohort count cards into inline summaries, moved measured leave-one-out result stability and executed member lists into disclosures, and retained low-overlap warnings outside the hidden detail. Removed the query inspector's duplicate study-ID row. The map link now says View results on map, avoiding a summed A/B hit count that can double-count shared samples.
+
+No preprocessing, embeddings, scoring, grouping, ranking, projection coordinates, metadata joins, or research data changed. See `docs/interface-simplification.md` for rationale and verification.
+
 ## 2026-09-02 (the map can inspect the exact retrieval neighborhood)
 
 The map now distinguishes three things that used to collapse into one picture: the OSDR query, the 3–30 hits the reader requested, and a fixed **250-sample evidence neighborhood** from the original 512-dimensional cosine ranking.

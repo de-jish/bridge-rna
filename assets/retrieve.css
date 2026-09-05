@@ -324,7 +324,7 @@
   transform: rotate(-45deg);
   transition: transform 160ms ease;
 }
-.advanced-group[open] .advanced-summary::after { transform: rotate(45deg); }
+details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .advanced-body { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-3); }
 
 /* Graph legend strip */
@@ -955,36 +955,17 @@ summary:focus-visible,
 .facet-summary strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .facet-summary-warn { color: var(--status-warn); }
 
-/* --- The confidence card --------------------------------------------------- */
-
+/* Cohort size qualifies the picker; it does not need a separate card. */
 .cohort-card-slot { margin-top: -2px; }
 .cohort-card {
-  padding: var(--space-3);
-  background: var(--bg-inset);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-}
-.cohort-card--empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-2);
   font-size: var(--text-sm);
   color: var(--text-secondary);
-  line-height: 1.45;
 }
-.cohort-card-note { line-height: 1.45; }
-
-/* --- Two pooled queries, named ---------------------------------------------
-   A comparison runs two independent pooled queries, and each one gets its own
-   card under its own picker: the selected cohort under the cohort dropdown,
-   the sibling under "Compare against". The rail's standing rule, applied to a
-   feature that had grown a second query without a second description.
-
-   The dot and the left rule are the binding between a card and a glyph. Their
-   hues are literally GRAPH_THEME's `cohort_a` and `cohort_b`, which are
-   --accent-teal and --accent-warm, and a test pins that pair - Plotly cannot
-   read a CSS variable, so the figure and the card would otherwise be free to
-   drift apart. A lone cohort gets no role line at all: with no second arm on
-   screen there is nothing for a letter to distinguish it from. */
-.cohort-card.is-a { border-left: 3px solid var(--accent-teal); }
-.cohort-card.is-b { border-left: 3px solid var(--accent-warm); }
+.cohort-card--empty, .cohort-card-note { line-height: 1.45; }
 
 .cohort-role {
   display: flex;
@@ -1032,10 +1013,10 @@ summary:focus-visible,
   display: flex;
   align-items: baseline;
   gap: 7px;
-  margin-bottom: var(--space-3);
+  margin: 0;
 }
 .cohort-card-k {
-  font-size: 22px;
+  font-size: var(--text-sm);
   font-weight: 700;
   line-height: 1;
   color: var(--text-primary);
@@ -1096,35 +1077,17 @@ summary:focus-visible,
    line rather than a title over a body when two arms had to fit on screen at
    once, and nothing has emitted a body since. */
 
-/* --- The stability panel ----------------------------------------------------
-   Result stability is measured during the search rather than looked up from a
-   curve, so it cannot live on the rail beside the picker: it does not exist
-   until the query runs. It sits at the top of the inspector instead, above the
-   details panel, because it describes the whole result rather than whichever
-   node is open - clicking a hit must not scroll it away.
-
-   `flex: 0 1 auto` with a cap rather than `0 0 auto`, and the cap is now the
-   backstop it was always meant to be rather than the thing holding the panel
-   together. A comparison used to want 456px and the details panel below it was
-   left with 264px for 506px of content; side-by-side columns brought that to
-   354px, so at 1600x1000 the panel asks for well under the 65% it is allowed and
-   the details panel gets about 100px back. The cap still earns its place on a
-   genuinely short window, where two flagged arms reach 409px and the panel should
-   scroll itself rather than push the AI panel off the bottom. The details panel
-   yields first either way - see its `flex: 1 1 0`. */
+/* Result diagnostics stay optional; low overlap remains visible when closed. */
 .stability-panel {
   flex: 0 1 auto;
   max-height: 65%;
   overflow-y: auto;
 }
-/* The heading names the statistic once and the subtitle says what was measured
-   once, so a block carries only what differs between the two arms. Before that,
-   every block repeated "RESULT STABILITY" and the full definition, and cohort
-   B's measurement sat entirely below the fold on a comparison - which is the
-   one thing a two-arm measurement exists to put side by side. */
-.stability-panel .panel-header { align-items: flex-start; }
-.stability-panel .panel-dot { margin-top: 6px; }
-.stability-panel .panel-subtitle { max-width: 42ch; }
+.stability-details > summary { flex-wrap: wrap; }
+.stability-warning { color: var(--status-warn); font-size: var(--text-sm); }
+.stability-body { padding-top: var(--space-3); }
+.stability-body > .panel-subtitle { margin: 0 0 var(--space-3); }
+.stability-details:not([open]) > .stability-body { display: none; }
 /* The facet the two arms differ in. It sits with the heading and the subtitle
    because it is the one fact in the panel that belongs to neither arm: it
    describes the pair. It hung off cohort B's role line until the blocks went

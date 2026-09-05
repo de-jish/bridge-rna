@@ -253,12 +253,12 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.wait_for_function(MAP_RETRIEVAL_READY_JS, timeout=180_000)
 
     print("\n=== 7b. exact retrieval neighborhood explorer ===")
-    explore = page.get_by_role("button", name="Explore neighborhood")
-    c.ok(explore.is_visible(), "Explore neighborhood is offered for a real retrieval")
-    reached_explore = _tab_until(
-        page, "() => document.activeElement.id === 'explore-neighborhood'")
-    if not c.ok(reached_explore,
-                "Tab reaches Explore neighborhood without synthetic focus"):
+    results = page.locator("#frame-retrieval")
+    c.ok(results.is_visible(), "Fit results is the single entry point for a real retrieval")
+    reached_results = _tab_until(
+        page, "() => document.activeElement.id === 'frame-retrieval'")
+    if not c.ok(reached_results,
+                "Tab reaches Fit results without synthetic focus"):
         return
     before = _map_x_range(page)
     retrieval_runs = dash_changes.count("search-button.n_clicks")
@@ -273,8 +273,10 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.note(f"first neighborhood open and evidence render in {first_open:.2f}s")
 
     after = _map_x_range(page)
-    c.ok(max(abs(a - b) for a, b in zip(before, after)) < 0.05,
-         f"Explore opens without moving the viewport ({before} -> {after})")
+    c.ok(abs(after[1] - after[0]) < abs(before[1] - before[0]),
+         f"Fit results opens the drawer and narrows the viewport ({before} -> {after})")
+    c.ok(page.locator("#explore-neighborhood").count() == 0,
+         "the redundant Explore neighborhood button is absent")
     heading = page.locator("#neighborhood-heading").inner_text().strip()
     c.ok(bool(heading), f"the drawer names the active query: {heading!r}")
     c.ok(page.get_by_role("complementary", name=heading).count() == 1,
@@ -438,7 +440,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
     page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
     page.wait_for_function(
-        "() => document.activeElement.id === 'explore-neighborhood'",
+        "() => document.activeElement.id === 'frame-retrieval'",
         timeout=30_000)
     closed = _trace_state(page)
     white = {"#fff", "#ffffff", "rgb(255, 255, 255)", "white"}
@@ -448,19 +450,19 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
          and all(str(colour).lower() in white
                  for colour in closed["requestedColours"]),
          "Close preserves the requested white hit rings")
-    c.ok(page.evaluate("() => document.activeElement.id") == "explore-neighborhood",
-         "Close after Explore returns focus to Explore")
+    c.ok(page.evaluate("() => document.activeElement.id") == "frame-retrieval",
+         "Close returns focus to Fit results")
 
     before_reopen = _map_x_range(page)
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
-        explore.click()
+        results.click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
     _wait_for_evidence(page, "scattergl")
     after_reopen = _map_x_range(page)
     c.ok(max(abs(a - b) for a, b in zip(before_reopen, after_reopen)) < 0.05,
-         "Explore reopens without changing the viewport")
+         "Repeated Fit results reopens without changing the fitted viewport")
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
@@ -468,6 +470,11 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
     page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
 
+    # Fit results already framed this query on the first open. Restore the
+    # whole map before checking that the same action can narrow it again.
+    with page.expect_response(
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.get_by_role("button", name="Reset view", exact=True).click()
     before_frame = _map_x_range(page)
     with page.expect_response(
             _figure_response_for("viewport-store.data"), timeout=90_000):
@@ -508,9 +515,8 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
         " return gd && (gd._fullData || []).some(t => t.name === 'query'"
         " && t.type === 'scatter3d'); }", timeout=90_000)
     _wait_for_evidence(page, "scatter3d")
-    c.ok(not page.get_by_role("button", name="Fit results").is_visible(),
-         "3-D hides Frame, whose 2-D ranges its camera would ignore")
-    c.ok(explore.is_visible(), "Explore remains visible in 3-D")
+    c.ok(results.is_visible() and results.inner_text() == "View results",
+         "the same results button remains visible as View results in 3-D")
     reached_fallback_close = _tab_until(
         page, "() => document.activeElement.id === 'neighborhood-close'",
         max_presses=220)
@@ -524,10 +530,17 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
     page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
     page.wait_for_function(
-        "() => document.activeElement.id === 'explore-neighborhood'",
+        "() => document.activeElement.id === 'frame-retrieval'",
         timeout=30_000)
-    c.ok(page.evaluate("() => document.activeElement.id") == "explore-neighborhood",
-         "3-D fallback returns focus to Explore when Frame is hidden")
+    c.ok(page.evaluate("() => document.activeElement.id") == "frame-retrieval",
+         "Close returns focus to the same results button in 3-D")
+    camera_js = """() => {
+      const camera = document.querySelector('#manifold-graph .js-plotly-plot')
+        ._fullLayout.scene.camera;
+      return ['eye', 'center', 'up'].flatMap(key =>
+        ['x', 'y', 'z'].map(axis => camera[key][axis]));
+    }"""
+    camera_before = page.evaluate(camera_js)
 
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
@@ -537,7 +550,10 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     three_d = _wait_for_evidence(page, "scatter3d")
     c.ok(three_d["evidenceTraces"] == 1
          and three_d["evidenceTypes"] == ["scatter3d"],
-         f"Explore draws the evidence once in 3-D ({three_d['evidenceTypes']})")
+         f"View results draws the evidence once in 3-D ({three_d['evidenceTypes']})")
+    camera_after = page.evaluate(camera_js)
+    c.ok(max(abs(a - b) for a, b in zip(camera_before, camera_after)) < 1e-6,
+         "View results preserves the 3-D camera")
 
     set_segment(page, "Dimensions", "2D")
     page.wait_for_function(

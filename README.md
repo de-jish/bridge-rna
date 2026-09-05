@@ -23,7 +23,7 @@ Nothing in the pipeline was told the query was an eye; it found the retina on it
 
 Both collections, 2,108 OSDR samples and 940,455 ARCHS4 samples, have coordinates in a shared projection. The 2-D view can draw the full corpus; the 3-D view draws up to 40,000 ARCHS4 points plus OSDR samples to keep rotation responsive. This display limit does not change retrieval.
 You can rotate it, switch between 2-D and 3-D, recolor it, and overlay a retrieval to see where a query and its matches sit.
-From that retrieval, **Explore neighborhood** opens its exact top-250 cosine neighbors with deterministic tissue and study summaries, plus complete GSE and GSM lists that can be searched and focused on the map.
+From that retrieval, **Fit results** opens its exact top-250 cosine neighbors and frames the 2-D map. In 3-D, the same control is labelled **View results** and preserves the camera. The results panel provides deterministic tissue and study summaries, plus complete GSE and GSM lists that can be searched and focused on the map.
 The subtle teal evidence marks are the nearest samples in the original 512-dimensional embedding; they are not a census of everything inside the framed 2-D or 3-D projection.
 
 ![The Bridge RNA map: a 3-D UMAP view of OSDR and ARCHS4 embeddings, colored by derived tissue category, with OSDR samples drawn as diamonds](docs/bridge-rna-map.png)

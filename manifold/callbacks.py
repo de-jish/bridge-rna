@@ -159,9 +159,7 @@ def next_neighborhood_open_state(trigger: str | None, previous: dict | None,
     """Apply one open/close event without giving the store another writer."""
     old = previous if isinstance(previous, dict) else {}
     opened = bool(old.get("open"))
-    opener = str(old.get("opener") or "explore-neighborhood")
-    if opener not in ("frame-retrieval", "explore-neighborhood"):
-        opener = "explore-neighborhood"
+    opener = "frame-retrieval"
     if trigger == "hits-store":
         return {"open": False, "opener": opener, "focus_target": None}
     if trigger == "neighborhood-close":
@@ -170,7 +168,7 @@ def next_neighborhood_open_state(trigger: str | None, previous: dict | None,
             "opener": opener,
             "focus_target": opener if opened else None,
         }
-    if trigger in ("frame-retrieval", "explore-neighborhood") and has_retrieval:
+    if trigger == "frame-retrieval" and has_retrieval:
         return {
             "open": True,
             "opener": trigger,
@@ -920,8 +918,7 @@ def register(app):
 
     @app.callback(
         Output("retrieval-group", "style"),
-        Output("frame-retrieval", "style"),
-        Output("explore-neighborhood", "style"),
+        Output("frame-retrieval", "children"),
         Output("show-retrieval", "options"),
         Output("show-retrieval", "value"),
         Input("hits-store", "data"),
@@ -933,15 +930,9 @@ def register(app):
         An always-visible control that does nothing until you have searched
         somewhere else is worse than no control: it reads as broken.
 
-        The same argument hides the frame button in 3-D. Framing works by
-        pinning the 2-D axis ranges, which the 3-D camera ignores, so the
-        button would have been a click with no visible effect - the thing this
-        map removed the lasso for.
-
-        The ticks are only *reset* when the retrieval itself changes. This
-        callback also fires on a dimensionality switch, because the frame button
-        is 2-D only, and reasserting the value there would silently re-tick an
-        arm the user had hidden the moment they looked at it in 3-D.
+        One action opens the results drawer in either dimension and also fits
+        the map in 2-D. Its label describes that difference. Dimensionality
+        changes preserve the user's visible-arm choices.
 
         A comparison turns the single "Show it on the map" tick into one tick
         per cohort, each carrying that cohort's own name. It is the same control
@@ -960,29 +951,26 @@ def register(app):
 
         overlay = _retrieval_overlay(hits_payload)
         if overlay is None:
-            return ({"display": "none"}, {"display": "none"},
-                    {"display": "none"},
-                    *ticks(single, ["on"]))
+            return ({"display": "none"}, "Fit results", *ticks(single, ["on"]))
 
-        frame_style = {} if dims == "2d" else {"display": "none"}
+        action_label = "Fit results" if dims == "2d" else "View results"
         if len(overlay["cohorts"]) < 2:
-            return {}, frame_style, {}, *ticks(single, ["on"])
+            return {}, action_label, *ticks(single, ["on"])
         options = [
             {"label": f"  {c['label'] or 'cohort'}", "value": key}
             for c, key in zip(overlay["cohorts"], ("on", ROLE_B))
         ]
-        return {}, frame_style, {}, *ticks(options, ["on", ROLE_B])
+        return {}, action_label, *ticks(options, ["on", ROLE_B])
 
     @app.callback(
         Output("neighborhood-open-store", "data"),
         Input("frame-retrieval", "n_clicks"),
-        Input("explore-neighborhood", "n_clicks"),
         Input("neighborhood-close", "n_clicks"),
         Input("hits-store", "data"),
         State("neighborhood-open-store", "data"),
         prevent_initial_call=True,
     )
-    def set_neighborhood_open(_frame, _explore, _close, hits_payload, previous):
+    def set_neighborhood_open(_frame, _close, hits_payload, previous):
         has_retrieval = _retrieval_overlay(hits_payload) is not None
         return next_neighborhood_open_state(
             ctx.triggered_id, previous, has_retrieval)
@@ -1011,13 +999,6 @@ def register(app):
                 if (target && target.offsetParent !== null) {
                     target.focus();
                     return;
-                }
-                if (!opened) {
-                    const fallback = document.getElementById("explore-neighborhood");
-                    if (fallback && fallback.offsetParent !== null) {
-                        fallback.focus();
-                        return;
-                    }
                 }
                 attempts += 1;
                 if (attempts < 30) {
@@ -1183,7 +1164,8 @@ def register(app):
             return None
         if ctx.triggered_id == "frame-retrieval":
             roles = _roles_from_checklist(show_retrieval) or (ROLE_A, ROLE_B)
-            return _frame_for(hits_payload, method_state, dims_state, roles)
+            window = _frame_for(hits_payload, method_state, dims_state, roles)
+            return window if window else no_update
         if ctx.triggered_id == "frame-find":
             # `no_update`, never None. None is this callback's "reset to the
             # whole corpus", so a frame click with nothing found - or in 3-D,

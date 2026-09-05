@@ -323,6 +323,16 @@ def stability_values(page) -> list[float]:
     return [float(el.nth(i).inner_text().strip()) for i in range(el.count())]
 
 
+def open_stability(page) -> None:
+    """Read the optional diagnostics using the native keyboard disclosure."""
+    disclosure = page.locator("#stability-panel details.stability-details")
+    if disclosure.get_attribute("open") is None:
+        summary = disclosure.locator("summary").first
+        summary.focus()
+        summary.press("Enter")
+    page.locator("#stability-panel .stability-value").first.wait_for(state="visible")
+
+
 def _topk_handle(page):
     """Dash 4 renders dcc.Slider as a radix slider plus a *hidden* number input.
 
@@ -544,6 +554,13 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     print("\n=== 4b. stability is measured, not looked up ===")
     c.ok(page.locator("#stability-panel").is_visible(),
          "the stability panel appears once there is a result to describe")
+    c.ok(page.locator("#stability-panel details").get_attribute("open") is None,
+         "optional stability diagnostics start collapsed")
+    c.ok(not page.locator("#stability-panel .stability-value").first.is_visible(),
+         "the detailed measurement does not compete with the results initially")
+    open_stability(page)
+    c.ok(page.locator("#stability-panel .stability-value").first.is_visible(),
+         "Enter on the summary opens the complete diagnostics")
     # Upper-cased throughout, because `inner_text` reports what is rendered and
     # several labels carry `text-transform: uppercase`. Matching the source
     # casing here passed nothing and would have hidden the panel being absent.
@@ -582,6 +599,13 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     if c.ok(pos is not None, "the query node is locatable"):
         page.mouse.click(pos["x"], pos["y"])
         page.wait_for_timeout(1500)
+    members = page.locator("#details-panel summary", has_text="Pooled members")
+    c.ok(members.count() == 1, "executed query members have one disclosure")
+    if members.count():
+        c.ok(members.locator("..").get_attribute("open") is None,
+             "the executed member list starts collapsed")
+        members.focus()
+        members.press("Enter")
     details = page.locator("#details-panel").inner_text()
     c.ok("POOLED OSDR COHORT" in details.upper(),
          "the inspector opens it as a cohort, not as one blank sample")
@@ -660,6 +684,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # same finding as 0.25 between one of twelve and one of two - and now
     # neither arm's number is a function of size at all.
     stab = page.locator("#stability-panel")
+    open_stability(page)
     c.ok(stab.locator(".stability-cohort").count() == 2,
          f"both arms are measured: {stab.locator('.stability-cohort').count()}")
     panel = stab.inner_text().upper()
@@ -777,8 +802,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok(page.locator("#see-on-map").is_visible(),
          "the map is offered once there is something to show")
     offer = page.locator("#see-on-map").inner_text()
-    c.ok(offer_count(offer) > topk_value(page),
-         f"the offer counts both cohorts' hits: {offer!r}")
+    c.ok(offer == "View results on map",
+         f"the map link does not double-count shared comparison samples: {offer!r}")
     page.locator("#see-on-map").click()
     wait_for_map(page)
     drawn = page.evaluate(MAP_QUERY_JS) or {}
@@ -869,7 +894,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000) as response_info:
-        page.get_by_role("button", name="Explore neighborhood").click()
+        page.locator("#frame-retrieval").click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
     evidence_gsms_a = _response_evidence_gsms(response_info.value)
     evidence_a = _wait_for_evidence_gsms(page, evidence_gsms_a)
@@ -1194,6 +1219,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         # The measurement follows the slider. The curve it replaced was fixed
         # at top-5 whatever the reader was actually looking at, which is the
         # other half of why it could not describe the list on screen.
+        open_stability(page)
         panel = page.locator("#stability-panel").inner_text().upper()
         c.ok(f"THESE {topk} HITS" in panel,
              f"and measured stability over those {topk}: {panel[:90]!r}")

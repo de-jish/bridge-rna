@@ -1284,16 +1284,14 @@ def register(app) -> None:
         someone to a map that draws nothing and looks broken.
         """
         payload = hits_payload or {}
-        # A comparison retrieved two hit lists and the map now draws both, so
-        # the offer counts both. Counting cohort A's alone would send someone to
-        # a map showing more than the link promised.
+        # Both arms must be checked for locatable results. Their hit lists can
+        # overlap, so the link does not present their summed lengths as a count.
         hits = list(payload.get("hits") or [])
         hits += list((payload.get("comparison") or {}).get("hits_b") or [])
         locatable = [h for h in hits if h.get("archs4_index") is not None]
         if not locatable:
             return {"display": "none"}, ""
-        n = len(locatable)
-        return {}, f"View {n} match{'es' if n != 1 else ''} on map"
+        return {}, "View results on map"
 
     @app.callback(
         Output("selected-node-store", "data"),

@@ -252,11 +252,9 @@ def build_cohort_card(cohort, geometry, role: str = "",
     evidence and the rejected alternatives.
 
     ``role`` names which arm of a comparison this is, and is empty when only one
-    cohort is being pooled. When it is set the card gains a colored role line
-    and the cohort's own name, because a comparison runs **two** pooled queries
-    and describing only the selected one left the second with a color on two
-    canvases and a size nowhere. ``contrast`` is the one facet the two differ
-    in, stated on the second card because it is a property of the pair.
+    cohort is being pooled. A comparison gains a colored role line; the
+    selector already names the cohort, so the inline count does not repeat it.
+    ``contrast`` is the facet the two differ in, stated beside the second role.
     """
     from .cohorts import TIER_SINGLETON
 
@@ -274,7 +272,7 @@ def build_cohort_card(cohort, geometry, role: str = "",
     return html.Div(
         className="cohort-card" + role_class,
         children=[
-            *_cohort_role_head(cohort.label, role, contrast),
+            *_cohort_role_head(cohort.label, role, contrast)[:1],
             html.Div(
                 className="cohort-card-head",
                 children=[
@@ -440,36 +438,10 @@ def _stability_block(measurement: dict[str, Any], label: str = "",
 
 
 def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], dict[str, Any]]:
-    """The inspector's stability panel, and whether to show it at all.
+    """Optional result-sensitivity diagnostics, with low-overlap warnings visible.
 
-    Returns `(children, style)`. The panel is hidden outright unless the
-    retrieval on screen is a pooled cohort that carries a measurement, because
-    there is no such thing as leave-one-out stability for a single sample or an
-    uploaded file: there is nothing to leave out. Offering an empty panel for
-    those modes would be the same empty promise as the map link before a search.
-
-    It lives here, on the right, rather than on the control rail, because it is
-    a property of the **result** and not of the selection. It cannot exist until
-    the query has run, and a live number under the picker would either turn every
-    dropdown change into a memmap pass or show the previous cohort's figure.
-
-    A comparison ran two independent pooled queries and gets two blocks, each
-    under its own role dot and its own name, for the reason the rail carries two
-    cards: stability is a property of each arm separately, and an overlap of 0.25
-    between two arms measuring 0.86 means something quite different from the same
-    0.25 between one at 0.86 and one at 0.31.
-
-    **The two blocks sit side by side, in even columns, with their rows aligned.**
-    They were stacked until 2026-08-06, and stacking gave the two arms visibly
-    unequal treatment: cohort A rendered complete and cohort B's last row was
-    clipped by the panel's own fold at every viewport measured, from 7.8 px at
-    1680x1050 to 65.6 px at 1280x800. The row that went was the one naming the
-    animal whose absence moves the result furthest, which is the only actionable
-    line in the block. Side by side the panel holds 354 px of content where it
-    held 456, so nothing is clipped, the two arms are the same size by
-    construction rather than by coincidence, and 0.89 sits on the same baseline
-    as 0.94 instead of 160 px below it - which is the comparison this panel
-    exists to support. `docs/design-notes.md#stability-panel-even-split` has the measurements.
+    Measurements travel with the executed query. Closing the disclosure hides
+    detail without recomputing or changing either arm's result or provenance.
     """
     payload = payload or {}
     primary = payload.get("stability")
@@ -491,43 +463,35 @@ def build_stability_panel(payload: dict[str, Any] | None) -> tuple[list[Any], di
         blocks.append(_stability_block(
             second, label=_safe_str(query_b.get("cohort_label")), role="b"))
 
-    # Both arms are retrieved at the same depth, so what was measured is said
-    # once, in the subtitle, rather than in every block. That is what keeps two
-    # measurements on screen together, which is the whole point of measuring two.
-    #
-    # The facet the two differ in is said here for the same reason, and it moved
-    # here from cohort B's role line when the blocks went side by side. It is a
-    # fact about the pair, not about either arm - the one thing in the panel that
-    # is neither shared nor differing - and hanging it under B's letter made B's
-    # name start a line lower than A's, which is exactly the ragged edge that
-    # side-by-side columns exist to remove.
     depth = int(primary.get("depth") or 0)
-    return (
-        [
-            html.Div(
-                className="panel-header",
-                children=[
-                    html.Span(className="panel-dot panel-dot--teal"),
-                    html.Div(children=[
-                        html.H2("Result stability", className="panel-title"),
-                        html.P(
-                            f"Measured on this query: how much of these {depth} "
-                            f"hits comes back when any one pooled sample is "
-                            f"dropped, averaged over all of them.",
-                            className="panel-subtitle"),
-                        (html.P(f"The two arms differ by {contrast}.",
-                                className="stability-contrast")
-                         if paired and contrast else None),
-                    ]),
-                ],
-            ),
-            html.Div(
-                className="stability-pair" + (" is-pair" if paired else ""),
-                children=blocks,
-            ),
+    low_arms = [name for name, measurement in
+                (("Cohort A", primary), ("Cohort B", second if paired else {}))
+                if measurement.get("is_low")]
+    warning = ("Low overlap" + (f": {' and '.join(low_arms)}" if paired else "")
+               if low_arms else "")
+    return ([html.Details(
+        className="stability-details",
+        children=[
+            html.Summary(className="advanced-summary", children=[
+                html.Span("Result stability"),
+                html.Span(warning, className="stability-warning") if warning else None,
+            ]),
+            html.Div(className="stability-body", children=[
+                html.P(
+                    f"Measured on this query: how much of these {depth} hits "
+                    "comes back when any one pooled sample is dropped, "
+                    "averaged over all of them.",
+                    className="panel-subtitle"),
+                (html.P(f"The two arms differ by {contrast}.",
+                        className="stability-contrast")
+                 if paired and contrast else None),
+                html.Div(
+                    className="stability-pair" + (" is-pair" if paired else ""),
+                    children=blocks,
+                ),
+            ]),
         ],
-        {},
-    )
+    )], {})
 
 
 def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
@@ -569,11 +533,11 @@ def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
     ]
 
     if members:
-        parts.append(html.Div(
+        parts.append(html.Details(
             className="details-section",
             children=[
-                html.Div(f"Pooled members ({len(members)})",
-                         className="details-section-title"),
+                html.Summary(f"Pooled members ({len(members)})",
+                             className="advanced-summary"),
                 html.Ul(
                     className="cohort-member-list",
                     children=[
@@ -639,7 +603,6 @@ def _build_osdr_query_metadata_block(query: pd.Series) -> list[Any]:
     section = _detail_section(
         "OSDR study",
         [
-            _accession_row("Study ID", study_id),
             _detail_row("Study title", study_title),
         ],
     )

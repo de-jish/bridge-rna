@@ -92,7 +92,7 @@ async def check(url: str, out: Path):
             timeout=20000)
 
         await page.locator("#see-on-map").click()
-        await expect(page.locator("#explore-neighborhood")).to_be_visible(timeout=60000)
+        await expect(page.locator("#frame-retrieval")).to_be_visible(timeout=60000)
         await page.wait_for_function("""() => {
             const gd = document.querySelector('#manifold-graph .js-plotly-plot');
             return gd && gd._fullData && gd._fullData.reduce(
@@ -106,7 +106,7 @@ async def check(url: str, out: Path):
         await details.locator("summary").click()
         await page.locator("#projection-label").click()
         await page.screenshot(path=str(out / "after-map.png"))
-        await page.locator("#explore-neighborhood").click()
+        await page.locator("#frame-retrieval").click()
         await expect(page.locator("#neighborhood-drawer")).to_be_visible()
         await expect(page.locator("#neighborhood-body")).to_contain_text("GEO studies")
         await page.wait_for_function("""() => {

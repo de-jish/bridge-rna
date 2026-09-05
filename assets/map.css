@@ -670,7 +670,7 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
   min-width: 0;
   min-height: 0;
 }
-.bm-map-workspace > .bm-plot-wrap { min-width: 0; }
+.bm-map-workspace > .bm-plot-wrap { min-width: 0; overflow: hidden; }
 
 .bm-neighborhood {
   width: 390px;

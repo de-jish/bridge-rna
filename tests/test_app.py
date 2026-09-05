@@ -535,13 +535,17 @@ def test_legend_parts_are_static_so_dash_can_validate_them(map_view):
 def test_neighborhood_explorer_parts_are_static_so_dash_can_validate_them(map_view):
     ids = {getattr(c, "id", None) for c in _walk(map_view)}
     required = {
-        "explore-neighborhood", "neighborhood-drawer", "neighborhood-close",
+        "frame-retrieval", "neighborhood-drawer", "neighborhood-close",
         "neighborhood-heading", "neighborhood-arm", "neighborhood-tab",
         "neighborhood-search", "neighborhood-body",
         "neighborhood-open-store", "neighborhood-focus-store",
         "neighborhood-focus-sink",
     }
     assert required <= ids, f"layout is missing {sorted(required - ids)}"
+    assert "explore-neighborhood" not in ids
+    open_store = next(c for c in _walk(map_view)
+                      if getattr(c, "id", None) == "neighborhood-open-store")
+    assert open_store.data["opener"] == "frame-retrieval"
 
 
 def test_one_callback_owns_neighborhood_open_state(app):
@@ -549,8 +553,8 @@ def test_one_callback_owns_neighborhood_open_state(app):
                if "neighborhood-open-store.data" in k]
     assert len(writers) == 1
     inputs = {i["id"] for i in app.callback_map[writers[0]]["inputs"]}
-    assert {"frame-retrieval", "explore-neighborhood", "neighborhood-close",
-            "hits-store"} <= inputs
+    assert {"frame-retrieval", "neighborhood-close", "hits-store"} <= inputs
+    assert "explore-neighborhood" not in inputs
 
 
 def test_explorer_does_not_make_the_viewport_multi_writer(app):
@@ -574,13 +578,13 @@ def test_tab_and_search_changes_do_not_redraw_the_map(app):
     "trigger,previous,has_retrieval,expected",
     [
         (None, None, False,
-         {"open": False, "opener": "explore-neighborhood",
+         {"open": False, "opener": "frame-retrieval",
           "focus_target": None}),
         ("frame-retrieval", None, True,
          {"open": True, "opener": "frame-retrieval",
           "focus_target": "neighborhood-heading"}),
-        ("explore-neighborhood", {"open": False, "opener": "frame-retrieval"},
-         True, {"open": True, "opener": "explore-neighborhood",
+        ("frame-retrieval", {"open": True, "opener": "frame-retrieval"},
+         True, {"open": True, "opener": "frame-retrieval",
                 "focus_target": "neighborhood-heading"}),
         ("neighborhood-close", {"open": True, "opener": "frame-retrieval"},
          True, {"open": False, "opener": "frame-retrieval",
@@ -589,14 +593,14 @@ def test_tab_and_search_changes_do_not_redraw_the_map(app):
                                 "opener": "frame-retrieval"},
          True, {"open": False, "opener": "frame-retrieval",
                 "focus_target": None}),
-        ("hits-store", {"open": True, "opener": "explore-neighborhood"},
-         True, {"open": False, "opener": "explore-neighborhood",
+        ("hits-store", {"open": True, "opener": "frame-retrieval"},
+         True, {"open": False, "opener": "frame-retrieval",
                 "focus_target": None}),
         ("hits-store", {"open": False, "opener": "frame-retrieval"},
          True, {"open": False, "opener": "frame-retrieval",
                 "focus_target": None}),
-        ("frame-retrieval", {"open": False, "opener": "explore-neighborhood"},
-         False, {"open": False, "opener": "explore-neighborhood",
+        ("frame-retrieval", {"open": False, "opener": "frame-retrieval"},
+         False, {"open": False, "opener": "frame-retrieval",
                  "focus_target": None}),
     ],
 )
@@ -1211,6 +1215,17 @@ def test_legend_filter_survives_an_empty_store():
     assert callbacks.filtered_legend_rows(None, None) == []
 
 
+def test_retrieval_network_offers_inspection_navigation_and_export_without_selection():
+    from bridge_rna import layout as retrieval_layout
+
+    graph = next(c for c in _walk(retrieval_layout.build_view())
+                 if getattr(c, "id", None) == "network-graph")
+    removed = set(graph.config.get("modeBarButtonsToRemove", []))
+    assert {"select2d", "lasso2d"} <= removed
+    assert removed.isdisjoint({"toImage", "pan2d", "zoom2d", "resetScale2d"})
+    assert graph.config["responsive"] is True
+
+
 def test_graph_offers_no_selection_tool(map_view):
     """Both selection tools must be gone from the modebar and the drag mode.
 
@@ -1355,7 +1370,7 @@ def test_the_reset_is_offered_only_when_the_map_is_framed():
 
 
 def test_2d_aspect_constraint_preserves_ranges_when_the_canvas_resizes():
-    """Docking a drawer must not turn an Explore click into a hidden zoom.
+    """Docking or closing a drawer must not add an unintended zoom.
 
     The x/y scales remain equal, but Plotly must absorb a new canvas aspect
     ratio in the axis domains.  Its default ``range`` constraint instead
