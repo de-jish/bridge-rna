@@ -1084,3 +1084,28 @@ summary:focus-visible,
   color: var(--text-muted);
   text-decoration: line-through;
 }
+
+
+/* Comparison context stays in A/B order above the selected result. */
+.comparison-cohort > summary { align-items: flex-start; }
+.comparison-cohort > summary > div { min-width: 0; }
+.comparison-cohort > summary::after { margin-top: var(--space-2); }
+.comparison-cohort .details-head { margin-bottom: var(--space-1); }
+.comparison-cohort .details-heading { overflow-wrap: anywhere; }
+.comparison-cohort .details-kicker::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--space-2);
+  border-radius: 50%;
+  background: var(--accent-teal);
+}
+.comparison-cohort.is-b .details-kicker::before { background: var(--accent-warm); }
+.comparison-cohort + .comparison-cohort,
+.comparison-selected-details {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.comparison-cohort-body > :last-child { margin-bottom: 0; }

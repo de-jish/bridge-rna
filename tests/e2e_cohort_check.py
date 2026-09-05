@@ -562,6 +562,39 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok("Jaccard overlap" in msg, "and quantifies their overlap")
     c.ok("differing by" in msg, "and names the facet they differ in")
 
+    # Both executed cohorts are visible without clicking either query star.
+    paired = page.locator("#details-panel > .comparison-cohort")
+    paired.nth(1).wait_for(state="visible")
+    c.ok(paired.count() == 2, "the inspector shows both cohort definitions")
+    c.ok(page.locator(".comparison-cohort[open]").count() == 2,
+         "both definitions open after a comparison search")
+    bounds = page.evaluate("""() => {
+        const p = document.querySelector('#details-panel').getBoundingClientRect();
+        return [...document.querySelectorAll('.comparison-cohort')].every(el => {
+            const r = el.getBoundingClientRect();
+            return r.top >= p.top && r.bottom <= p.bottom;
+        });
+    }""")
+    c.ok(bounds, "both cohort definitions fit visibly in the desktop inspector")
+    shot(page, "06-both-cohorts")
+    hit = page.evaluate(QUERY_NODE_JS.replace("!== 'query'", "!== 'gsm'"))
+    c.ok(hit is not None, "a match is available for inspector interaction")
+    if hit:
+        page.mouse.click(hit["x"], hit["y"])
+        page.locator(".comparison-selected-details").wait_for(state="visible", timeout=60000)
+        c.ok(paired.count() == 2 and page.locator(".comparison-cohort[open]").count() == 0,
+             "both cohort summaries remain above selected match metadata")
+        c.ok("GSM" in page.locator(".comparison-selected-details").inner_text(),
+             "selected match metadata remains accessible")
+        summary_b = paired.nth(1).locator(":scope > summary")
+        summary_b.focus()
+        summary_b.press("Enter")
+        c.ok(paired.nth(1).get_attribute("open") is not None,
+             "Cohort B definitions expand from the keyboard while inspecting a match")
+        pos = page.evaluate(QUERY_NODE_JS)
+        page.mouse.click(pos["x"], pos["y"])
+        page.wait_for_function("document.querySelectorAll('.comparison-cohort[open]').length === 2")
+
     # Preserve responsive metadata access after removing the diagnostic panel.
     was = page.viewport_size
     for width in (900, 390, 320):
@@ -596,14 +629,12 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     subtitle = page.locator("#canvas-subtitle").inner_text()
     c.ok("Two pooled cohorts" in subtitle, "so does the subtitle")
 
-    # The inspector opens on cohort A. Without the letter it reads as
-    # *the* pooled query rather than as one of two, with nothing saying
-    # the other star on the canvas leads to its twin.
+    # Cohort roles remain explicit in the combined inspector.
     # .details-kicker is uppercased by CSS, so read it case-insensitively
     # the way this file's other kicker checks already do.
     details = page.locator("#details-panel").inner_text()
-    c.ok("COHORT A" in details.upper(),
-         f"the inspector says which arm it opened on: {details[:60]!r}")
+    c.ok("COHORT A" in details.upper() and "COHORT B" in details.upper(),
+         f"the inspector names both comparison arms: {details[:60]!r}")
     shot(page, "06-comparison")
 
     # ---- 8. the map draws BOTH cohorts ------------------------------

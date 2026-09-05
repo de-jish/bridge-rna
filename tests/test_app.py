@@ -2491,7 +2491,7 @@ def test_the_second_query_star_opens_the_second_cohort(corpus):
     # assertions below could never match and would pass vacuously.
     text = json.dumps(panel, default=str, ensure_ascii=False)
     assert "Liver · Ground" in text, "the second star must open the second cohort"
-    assert "Liver · Flight" not in text, "and not the first"
+    assert "Liver · Flight" in text, "the other cohort remains visible too"
 
 
 def test_a_comparison_without_a_second_query_says_so_rather_than_raising(corpus):
@@ -2504,3 +2504,29 @@ def test_a_comparison_without_a_second_query_says_so_rather_than_raising(corpus)
         hits_df=pd.DataFrame([{"gsm": "GSM1", "score": 0.9}]), query_b=None)
     assert "no second cohort" in json.dumps(panel, default=str,
                                             ensure_ascii=False)
+
+
+@pytest.mark.parametrize("selected", [None, {"kind": "query"}, {"kind": "query2"},
+                                       {"kind": "gsm", "node_id": "GSM1"}])
+def test_comparison_inspector_keeps_both_executed_cohorts(selected):
+    import pandas as pd
+    from bridge_rna import panels
+
+    a = pd.Series({"is_cohort": "1", "cohort_label": "Liver Flight",
+                   "study_id": "OSD-137", "members": "A1\nA2", "excluded": "A3"})
+    b = pd.Series({"is_cohort": "1", "cohort_label": "Liver Ground",
+                   "study_id": "OSD-137", "members": "B1\nB2\nB3", "excluded": ""})
+    hits = pd.DataFrame([{"gsm": "GSM1", "score": 0.9, "gse": "GSE1"}])
+    tree = html.Div(panels.build_details_panel(a, selected, hits, b))
+    sections = [c for c in _walk(tree)
+                if "comparison-cohort" in getattr(c, "className", "").split()]
+    assert len(sections) == 2
+    expanded = not selected or selected["kind"] in ("query", "query2")
+    for section, own, other, count in zip(sections, ("A1", "B1"), ("B1", "A1"), (2, 3)):
+        assert isinstance(section, html.Details)
+        assert section.open == expanded
+        text = json.dumps(section, default=str)
+        assert own in text and other not in text
+        assert f"{count} samples pooled" in json.dumps(section.children[0], default=str)
+    if selected and selected["kind"] == "gsm":
+        assert "GSM1" in json.dumps(tree, default=str)

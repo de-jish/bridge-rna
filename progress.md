@@ -6,6 +6,12 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-09-05 (show both compared cohorts in the inspector)
+
+Comparison searches now open both Cohort A and Cohort B definitions in the right inspector, stacked in the same order as the query roles. Each retains its own name, sample count, source link, membership and exclusions. Selecting a hit or study keeps both cohort summaries above the selected metadata; native disclosures allow either definition to be opened from the keyboard. Single-cohort and sample inspection are unchanged. No retrieval, ranking, membership, or metadata semantics changed.
+
+Validated with focused application/cohort unit coverage, real-data cohort browser checks including both visible definitions, match inspection, keyboard access and narrow layouts, plus taste/impeccable final review.
+
 ## 2026-09-05 (remove redundant controls and cohort cards)
 
 A second independent language and simulated researcher review consolidated the map's two result actions into one: Fit results in 2-D, View results in 3-D. The latter opens the same exact-cosine evidence panel without changing the camera. Closing returns focus to the same button in either dimension.

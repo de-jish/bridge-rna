@@ -262,7 +262,8 @@ def build_cohort_card(cohort, geometry, role: str = "",
     )
 
 
-def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
+def build_cohort_details(query: pd.Series, role: str = "", *,
+                         show_size: bool = True) -> list[Any]:
     """Inspector view of a pooled cohort query node.
 
     The single-sample panel would render this as one sample with a blank name,
@@ -290,7 +291,7 @@ def build_cohort_details(query: pd.Series, role: str = "") -> list[Any]:
             [
                 _accession_row("Study", study),
                 _detail_row("Grouped by", _safe_str(query.get("grouped_by"))),
-                _detail_row("Samples pooled", str(len(members))),
+                _detail_row("Samples pooled", str(len(members))) if show_size else None,
             ],
         ),
     ]
@@ -414,6 +415,39 @@ def _build_query_details(query: pd.Series, compact: bool,
 
 
 def build_details_panel(query: pd.Series, selected_payload: dict[str, Any] | None,
+                        hits_df: pd.DataFrame,
+                        query_b: pd.Series | None = None) -> list[Any]:
+    """Keep both executed cohorts visible while inspecting a comparison."""
+    if query_b is None:
+        return _build_selected_details(query, selected_payload, hits_df)
+
+    kind = _safe_str((selected_payload or {}).get("kind"))
+    expanded = not selected_payload or kind in ("query", "query2")
+    cohorts = []
+    for row, role in ((query, "a"), (query_b, "b")):
+        parts = build_cohort_details(row, role, show_size=False)
+        size = len([m for m in _safe_str(row.get("members")).split("\n") if m])
+        cohorts.append(html.Details(
+            className=f"comparison-cohort is-{role}", open=expanded,
+            **{"aria-label": COHORT_ROLES[role]},
+            children=[
+                html.Summary(className="advanced-summary", children=[
+                    html.Div(children=[parts[0], html.Div(
+                        f"{size} samples pooled", className="control-hint")]),
+                ]),
+                html.Div(parts[1:], className="comparison-cohort-body"),
+            ],
+        ))
+    if not expanded:
+        cohorts.append(html.Section(
+            _build_selected_details(query, selected_payload, hits_df, query_b),
+            className="comparison-selected-details",
+            **{"aria-label": "Selected result"},
+        ))
+    return cohorts
+
+
+def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] | None,
                         hits_df: pd.DataFrame,
                         query_b: pd.Series | None = None) -> list[Any]:
     node_kind = _safe_str(selected_payload.get("kind")) if selected_payload else ""
