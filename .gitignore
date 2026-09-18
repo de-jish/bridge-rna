@@ -42,3 +42,10 @@ cache/
 # `--compare` scored and lost. Same reasoning as cache/: reproducible from the
 # precompute scripts, and tens of MB per candidate.
 cache_compare_*/
+
+# Local release payloads, archives, validation environments and deployment records
+.releases/
+deploy/local.json
+
+# Transfer-only shipping records, code backups and validation environment
+.ships/

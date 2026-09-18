@@ -75,32 +75,13 @@ def _empty_network_figure(message: str = "Run a search to build the retrieval ne
     return fig
 
 
-# Cosine similarities among retrieved hits live in a narrow high band - the
-# top five for the exemplar query span 0.9970 to 0.9954, a spread of 0.0016 -
-# and every edge maps onto this fixed domain rather than onto the min and max
-# of the current result set. A min-max rescale made the thinnest hit 1.5 px and
-# the thickest 8 px *regardless of the actual scores*, so a 0.0016 spread and a
-# 0.4 spread drew identically and the width encoded rank, not similarity. On a
-# fixed domain, near-equal scores draw near-equal widths - which is the honest
-# picture, and the same reason the map draws every hit ring identically.
-EDGE_WIDTH_DOMAIN = (0.90, 1.0)
-EDGE_WIDTH_RANGE = (1.5, 8.0)
+# Edges express connections; cosine scores remain in hover and the inspector.
+EDGE_WIDTH = 3.0
 
 #: Above this many hit nodes the comparison network stops writing accessions on
 #: the figure. Its two arms share one vertical rhythm, so the node count is
 #: `2 * k` in the worst case and the labels would collide long before k = 30.
 COMPARISON_MAX_LABELS = 20
-
-
-def _edge_width(scores: pd.Series) -> list[float]:
-    lo, hi = EDGE_WIDTH_DOMAIN
-    wlo, whi = EDGE_WIDTH_RANGE
-    span = hi - lo
-    out = []
-    for s in scores:
-        frac = min(1.0, max(0.0, (float(s) - lo) / span))
-        out.append(wlo + (whi - wlo) * frac)
-    return out
 
 
 def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
@@ -129,7 +110,6 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
     y_space = 1.4
     gsm_count = len(hits_df)
     gsm_y_start = (gsm_count - 1) * 0.5 * y_space
-    widths = _edge_width(hits_df["score"]) if "score" in hits_df else [3.0] * len(hits_df)
 
     for i, (_, row) in enumerate(hits_df.iterrows()):
         y = gsm_y_start - i * y_space
@@ -159,17 +139,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 "kind": "gsm",
                 "x": 1.0,
                 "y": y,
-                # Constant, and that is the fix. It used to be
-                # `16 + (score - min(score)) * 20`, which is a second encoding
-                # of the quantity the edge width already carries, on a
-                # different scale, keyed nowhere - the legend names the edge
-                # and says nothing about node size. It was also the min-max
-                # rescale `_edge_width` exists to avoid, and it inherited that
-                # rescale's dishonesty in reverse: over the 0.0016 spread these
-                # scores actually have, it varied the diameter by three
-                # hundredths of a pixel, so it looked like a constant while
-                # claiming to be a measurement. One quantity, one channel, and
-                # that channel is in the key.
+                # Node size is constant; scores are numerical metadata.
                 "size": 16,
                 "color": GRAPH_THEME["gsm"],
                 "symbol": "circle",
@@ -183,7 +153,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 "y0": 0.0,
                 "x1": 1.0,
                 "y1": y,
-                "width": widths[i],
+                "width": EDGE_WIDTH,
                 "color": GRAPH_THEME["edge"],
             }
         )
@@ -213,7 +183,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                     "y0": y,
                     "x1": 2.1,
                     "y1": g_y,
-                    "width": max(1.0, widths[i] * 0.7),
+                    "width": EDGE_WIDTH,
                     "color": GRAPH_THEME["edge_gse"],
                 }
             )
@@ -373,16 +343,16 @@ def build_comparison_figure(query_a: pd.Series, hits_a: pd.DataFrame,
 
     fig = go.Figure()
 
-    def _edges(ids: list[str], qy: float, color: str, scores: dict[str, float]):
+    def _edges(ids: list[str], qy: float, color: str):
         for g in ids:
             fig.add_trace(go.Scatter(
                 x=[0.0, 1.0], y=[qy, positions[g]], mode="lines",
-                line={"width": _edge_width([scores.get(g, 0.95)])[0] * 0.6,
+                line={"width": EDGE_WIDTH,
                       "color": color},
                 hoverinfo="skip", showlegend=False))
 
-    _edges(a_only + shared, qa_y, GRAPH_THEME["edge_cohort_a"], score_a)
-    _edges(b_only + shared, qb_y, GRAPH_THEME["edge_cohort_b"], score_b)
+    _edges(a_only + shared, qa_y, GRAPH_THEME["edge_cohort_a"])
+    _edges(b_only + shared, qb_y, GRAPH_THEME["edge_cohort_b"])
 
     def _hover(g: str) -> str:
         r = meta.get(g)

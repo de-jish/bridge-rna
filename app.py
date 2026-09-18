@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bridge RNA - one app, two views.
 
-    python app.py              # http://127.0.0.1:8050
+    python app.py              # http://127.0.0.1:8000
 
 `/` retrieves the closest Earth analogs for one NASA OSDR spaceflight sample.
 `/map` draws all 942,563 points of the joint embedding space the retrieval
@@ -307,8 +307,8 @@ def main() -> int:
              "Use 0.0.0.0 to expose the app on your network, but only on a "
              "network you trust and never together with --debug.")
     parser.add_argument(
-        "--port", type=int, default=int(os.environ.get("DASH_PORT", "8050")),
-        help="Port to serve on (default: 8050).")
+        "--port", type=int, default=int(os.environ.get("DASH_PORT", "8000")),
+        help="Port to serve on (default: 8000).")
     parser.add_argument(
         "--debug", action="store_true", default=_env_flag("DASH_DEBUG", False),
         help="Enable hot reload and the Werkzeug debugger. Development only: "

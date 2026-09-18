@@ -470,5 +470,8 @@ Stacked, the plot takes `68vh` with a 420 px floor and the document scrolls, whi
 **A `dcc.Graph` whose container can change size needs `responsive: True`** - the map's did not have it, so Plotly kept the geometry it was first laid out with and drew a quadrant of the corpus into the whole canvas after any resize or breakpoint crossing.
 
 **One quantity gets one channel, and that channel is in the key.**
-The retrieval network sized each hit node by `16 + (score - min(score)) * 20`: a second encoding of what the edge width already carries, on a different scale, keyed nowhere, and the exact min-max rescale `_edge_width` exists to avoid. Over the 0.0016 spread these scores have it moved the diameter three hundredths of a pixel, so it looked constant while claiming to measure. It is constant.
+The retrieval network uses constant node sizes and a constant 3 px width for every edge, including study links and both comparison arms. Cosine similarity remains numerical metadata in hover and the inspector; no legend entry claims that width encodes it.
+
+The map's evidence explorer draws both cohorts' independent top-250 cosine neighborhoods together: blue-green open circles for A and larger open squares for B. Shared samples carry both outlines at the same coordinate, with both ranks and scores in hover. The explorer's A/B selector controls details and focus, while the map visibility checkboxes control which cohorts are drawn. Clicking an evidence mark opens its cohort's sample details. No retrieval, pooling, preprocessing or projection calculation changes.
+
 The comparison network, by contrast, was missing a label it should have had: it named none of its hits, so the accessions existed only in a tooltip and the figure carried no identities on paper. They are drawn up to `COMPARISON_MAX_LABELS` (20) nodes and dropped above it, the same rule as the map's `RETRIEVAL_MAX_NUMERALS`.

@@ -501,12 +501,13 @@ def _key_glyph(kind: str, color: str | None = None):
     `kind` selects the shape from the stylesheet; `color` is the fill for the
     shapes that have one, applied inline so it can come straight from `theme`.
     """
-    if kind == "neighborhood":
+    if kind in ("neighborhood", "neighborhood-b"):
         # A distinct open dot, with its hue sourced from the same theme token
         # as Plotly rather than mirrored into the stylesheet.
         return html.Span(
-            className="bm-key-glyph is-neighborhood",
-            style={"border": f"2px solid {color}", "borderRadius": "50%",
+            className=f"bm-key-glyph is-{kind}",
+            style={"border": f"2px solid {color}",
+                   "borderRadius": "0" if kind == "neighborhood-b" else "50%",
                    "boxSizing": "border-box"})
     fill = ([html.Span(className="bm-key-glyph-fill",
                        style={"background": color})] if color else [])
@@ -562,12 +563,22 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     two rows and no headings, because with one query on screen there is nothing
     for a name or a group to distinguish it from.
     """
-    n_evidence = int((neighborhood or {}).get("locatable") or 0)
-    evidence_row = (_key_row(
-        "neighborhood", "512-D evidence neighbor", n_evidence,
-        theme.NEIGHBORHOOD_COLOR) if n_evidence else None)
+    evidence = (neighborhood or {}).get("cohorts", [neighborhood or {}])
+    comparing = len((overlay or {}).get("cohorts", [])) > 1 or len(evidence) > 1
+    evidence_rows = []
+    for cohort in evidence:
+        count = int(cohort.get("locatable") or 0)
+        if count:
+            role = cohort.get("role", "a")
+            label = (f"{role.upper()} · {cohort.get('label') or 'cohort'}"
+                     if comparing else "512-D evidence neighbor")
+            evidence_rows.append(_key_row(
+                "neighborhood-b" if role == "b" else "neighborhood",
+                label, count, theme.NEIGHBORHOOD_COLOR))
+    if comparing and evidence_rows:
+        evidence_rows.insert(0, html.Div("512-D evidence neighbors", className="bm-key-head"))
     if not overlay or not overlay.get("cohorts"):
-        rows = [evidence_row] if evidence_row is not None else []
+        rows = evidence_rows
         return ([html.Div(className="bm-key bm-key--retrieval", children=rows)]
                 if rows else [])
 
@@ -593,8 +604,7 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
                 shape, "pooled member" if n_members > 1 else "the query sample",
                 "hidden" if hidden else n_members, theme.RETRIEVAL_QUERY,
                 hidden=hidden))
-        if evidence_row is not None:
-            rows.append(evidence_row)
+        rows.extend(evidence_rows)
         rows.append(_key_row("hit-a", "retrieved hit",
                              "hidden" if hidden else len(c["hit_points"]),
                              hidden=hidden))
@@ -611,8 +621,7 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     rows = [html.Div("Pooled members", className="bm-key-head")]
     rows += [arm(c, shape, len(c["query_points"]), hues[c["role"]])
              for c in cohorts]
-    if evidence_row is not None:
-        rows.append(evidence_row)
+    rows.extend(evidence_rows)
     rows.append(html.Div("Retrieved hits", className="bm-key-head"))
     rows += [arm(c, hit_shapes[c["role"]], len(c["hit_points"]))
              for c in cohorts]
@@ -882,21 +891,13 @@ def _neighborhood_category_rows(category: dict) -> list:
 
 
 def neighborhood_overview_children(summary: dict) -> list:
-    """Render the deterministic, denominator-explicit evidence summary."""
+    """Render the evidence summary, compositions, and leading studies."""
     depth = int(summary.get("depth") or 0)
     if not depth:
         return _neighborhood_empty("No samples are available in this neighborhood.")
 
     tissue = summary.get("tissue") or {}
     species = summary.get("species") or {}
-    score = summary.get("score") or {}
-    median = score.get("median")
-    minimum = score.get("minimum")
-    maximum = score.get("maximum")
-    score_value = "Unavailable" if median is None else f"{float(median):.3f}"
-    score_range = ("No numeric scores" if minimum is None or maximum is None else
-                   f"Range {float(minimum):.3f}–{float(maximum):.3f}")
-    top_three = int(summary.get("top_three_study_samples") or 0)
 
     def composition(title: str, category: dict) -> html.Div:
         rows = _neighborhood_category_rows(category)
@@ -923,27 +924,6 @@ def neighborhood_overview_children(summary: dict) -> list:
     return [
         html.P(str(summary.get("sentence") or ""),
                className="bm-neighborhood-summary"),
-        html.Div(className="bm-neighborhood-coverage", children=[
-            html.Span(
-                f"Tissue categories {int(tissue.get('covered') or 0):,} of {depth:,}"),
-            html.Span(
-                f"Species metadata {int(species.get('covered') or 0):,} of {depth:,}"),
-        ]),
-        html.Div(className="bm-neighborhood-metrics", children=[
-            html.Div(className="bm-neighborhood-metric", children=[
-                html.Strong(f"{int(summary.get('study_count') or 0):,}"),
-                html.Span("GEO studies"),
-            ]),
-            html.Div(className="bm-neighborhood-metric", children=[
-                html.Strong(f"{top_three:,} of {depth:,}"),
-                html.Span("in top 3 studies"),
-            ]),
-            html.Div(className="bm-neighborhood-metric", children=[
-                html.Strong(score_value),
-                html.Span("median cosine"),
-                html.Small(score_range),
-            ]),
-        ]),
         composition("Tissue categories", tissue),
         composition("Species composition", species),
         html.Div(className="bm-neighborhood-leading", children=[
@@ -1143,7 +1123,6 @@ def build_view() -> html.Div:
                             **{"aria-label": "Close neighborhood explorer"},
                         ),
                         html.H2(id="neighborhood-heading", tabIndex=-1),
-                        html.Div(id="neighborhood-meta", className="bm-hint"),
                         dcc.RadioItems(
                             id="neighborhood-arm", value="a",
                             className="bm-seg bm-neighborhood-arm",
@@ -1172,10 +1151,6 @@ def build_view() -> html.Div:
                     html.Div(
                         id="neighborhood-body",
                         className="bm-neighborhood-body",
-                    ),
-                    html.Div(
-                        "Ranked by cosine similarity in 512-D. Map position does not determine rank.",
-                        className="bm-neighborhood-foot",
                     ),
                 ],
             ),

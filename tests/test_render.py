@@ -50,7 +50,7 @@ def test_evidence_neighborhood_is_one_uniform_open_trace_with_optional_focus(
     """Evidence is rank metadata, not a rank ramp or projected boundary.
 
     A scalar marker style and markers-only mode prevent color/size gradients,
-    connecting lines, and hull-like geometry.  The seven-field customdata row
+    connecting lines, and hull-like geometry.  The customdata row
     is also the click/hover contract consumed by the explorer.
     """
     from manifold import render, theme
@@ -67,7 +67,7 @@ def test_evidence_neighborhood_is_one_uniform_open_trace_with_optional_focus(
     assert isinstance(base.marker.color, str)
     assert "lines" not in (base.mode or "")
     assert list(base.customdata[0]) == [
-        "neighborhood", 1, "GSM1", "GSE1", .99, "Eye", "mouse"]
+        "neighborhood", 1, "GSM1", "GSE1", .99, "Eye", "mouse", "a", ""]
     assert len(base.customdata) == 3
 
     assert focus is not None
@@ -131,7 +131,7 @@ def test_evidence_sits_behind_requested_hits_and_focus_sits_above_them(corpus):
     assert hit_positions
     assert evidence_at < min(hit_positions)
     assert focus_at > max(hit_positions)
-    assert "Evidence neighborhood: <b>1</b> of 3 locatable" in badges
+    assert not any("Evidence neighborhood" in b or "Showing" in b for b in badges)
 
 
 @pytest.mark.parametrize("dims,is_3d", [("2d", False), ("3d", True)])
@@ -508,6 +508,26 @@ def test_viewport_restricts_the_sample_to_the_window(corpus):
     assert len(pts) > 0
     assert (pts[:, 0] >= x0 - 1e-4).all() and (pts[:, 0] <= x1 + 1e-4).all()
     assert (pts[:, 1] >= y0 - 1e-4).all() and (pts[:, 1] <= y1 + 1e-4).all()
+
+
+def test_osdr_shown_counts_the_viewport_without_changing_sample_traces(corpus):
+    coords = data.coords("pca", "2d")[corpus["n_archs4"]:]
+    x_mid = float(np.median(coords[:, 0]))
+    viewport = (float(coords[:, 0].min()), x_mid,
+                float(coords[:, 1].min()), float(coords[:, 1].max()))
+    expected = int((coords[:, 0] <= x_mid).sum())
+    assert 0 < expected < corpus["n_osdr"]
+    full, _, full_badges = render.build_figure(
+        "pca", "2d", "species", ["osdr"], 1000, None)
+    zoomed, _, zoom_badges = render.build_figure(
+        "pca", "2d", "species", ["osdr"], 1000, viewport)
+    _, _, empty_badges = render.build_figure(
+        "pca", "2d", "species", ["osdr"], 1000,
+        (1e6, 1e6 + 1, 1e6, 1e6 + 1))
+    assert full_badges == [f"OSDR shown: <b>{corpus['n_osdr']:,}</b>"]
+    assert zoom_badges == [f"OSDR shown: <b>{expected:,}</b>"]
+    assert empty_badges == ["OSDR shown: <b>0</b>"]
+    assert full.to_json() == zoomed.to_json()
 
 
 # --- Legend -----------------------------------------------------------------
