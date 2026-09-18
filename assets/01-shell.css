@@ -41,7 +41,7 @@
   gap: var(--space-4);
   padding: 12px var(--space-4);
   background: var(--header-bg);
-  border-bottom: 2px solid var(--header-line);
+  border-bottom: 2px solid var(--header-bg);
   color: var(--header-fg);
   flex: none;
 }
@@ -59,19 +59,14 @@
 }
 .app-brand:hover .app-title { color: #ffffff; }
 
-/* The one place white type stays on the identity blue at 3.76:1. WCAG 1.4.3
-   exempts text that is part of a logo or brand name, and this tile is the
-   brand mark - it is not read as content and it carries no information the
-   wordmark beside it does not. Every other white-on-blue surface in the app
-   moved to --accent-text; this one is deliberately not that, so please do not
-   "fix" it to match. */
+/* NASA insignia in the existing compact brand slot. */
 .app-brand-mark {
   display: grid;
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
-  background: var(--accent);
+  border-radius: 0;
+  background: transparent;
   color: #ffffff;
   font-weight: 700;
   font-size: 13px;
@@ -106,15 +101,15 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid transparent;
 }
 
 .app-nav-item {
   display: block;
   padding: 6px 18px;
-  border-radius: 999px;
+  border-radius: 0;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -127,14 +122,15 @@
 .app-nav-item:hover { color: var(--header-fg); background: rgba(255, 255, 255, 0.08); }
 
 .app-nav-item.is-active {
-  background: var(--header-fg);
-  color: var(--header-bg);
+  background: transparent;
+  color: var(--header-fg);
+  box-shadow: inset 0 -2px var(--hds-color-nasa-red);
 }
-.app-nav-item.is-active:hover { background: #ffffff; color: var(--header-bg); }
+.app-nav-item.is-active:hover { background: #2e2e32; color: #ffffff; }
 
 .app-nav-item:focus-visible,
 .app-brand:focus-visible {
-  outline: 2px solid var(--header-line);
+  outline: 2px solid var(--header-fg);
   outline-offset: 2px;
 }
 
@@ -157,7 +153,7 @@
   line-height: 1.1;
   letter-spacing: -0.01em;
 }
-.header-stat-value--accent { color: var(--header-line); }
+.header-stat-value--accent { color: var(--header-fg); }
 
 .header-stat-label {
   font-size: 10px;
@@ -183,3 +179,6 @@
   .app-subtitle { display: none; }
   .app-nav-item { padding: 6px 12px; }
 }
+
+.app-brand-mark img { width: 34px; height: 34px; object-fit: contain; }
+.app-title { color: var(--header-fg); font-family: var(--font-heading); }

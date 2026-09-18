@@ -1,147 +1,76 @@
-/* ==========================================================================
-   Bridge RNA - the design tokens, defined once.
-
-   Dash serves every .css file in this directory, in alphabetical order, so the
-   numeric prefix here is load order rather than decoration:
-
-     00-tokens.css   this file: tokens + the global reset
-     01-shell.css    the header, the view switcher, the shell grid
-     retrieve.css    the retrieval view
-     map.css         the map view
-
-   The two views grew up as separate apps and each carried its own :root. Most
-   values agreed, which is why they always looked like one instrument, but five
-   of Dash's component tokens did not - and because the browser applies the last
-   definition it sees, whichever stylesheet happened to sort later was silently
-   deciding how the *other* view's dropdowns and radios rendered on hover. That
-   is settled here instead of by filename.
-   ========================================================================== */
-
+/* NASA visual theme for the existing Bridge RNA workspace.
+   Source: HDS Core 0.10.0 tokens; NASA/Glenn rendered type and surfaces.
+   Sizes and spacing retain the original research-workspace geometry.
+   Brand, interaction, and scientific colors have separate roles. */
 :root {
-  /* --- surfaces --- */
-  --bg-canvas: #eef2f7;        /* page background - cool off-white */
-  --bg-panel: #ffffff;         /* card backgrounds */
-  --bg-panel-raised: #f4f7fb;  /* hover / active panel state */
-  --bg-sidebar: #ffffff;       /* persistent tool panel */
-  --bg-inset: #f5f8fc;         /* inset regions (long-text, code, scroll areas) */
-  --plot-bg: #0e1d34;          /* the map's dark canvas - the one departure */
-
-  /* --- lines --- */
-  --border-subtle: #e3e9f2;
-  --border-strong: #cdd8e6;
-  --border: 1px solid #dce4ee;
-
-  /* --- text ---
-     All three tiers clear WCAG AA (4.5:1) on every surface defined in this
-     file. The muted tier did not until 2026-08-11: #8a99ac measured 2.90:1 on
-     white and 2.58:1 on the canvas, and it carried every rail label, every
-     kicker, every hint, the slider marks and the dropdown placeholder - so the
-     smallest type in the app was also the least legible. map.css had already
-     recorded that exact finding, and fixed it for one class.
-
-     #616e80 is the same cool grey darkened until its *worst* ground clears the
-     bar: 5.18:1 on white, 4.87:1 on the inset, 4.61:1 on the canvas, 4.53:1 on
-     the error tint. Enforcing AA necessarily brings it close to
-     --text-secondary, because a tier defined by being fainter cannot also be
-     legible. The hierarchy is carried by size, case and letter-spacing instead
-     - which is how the kickers and group labels were already built. */
-  --text-primary: #1a2432;
-  --text-secondary: #5a6b7e;
-  --text-muted: #616e80;
-
-  /* --- accents ---
-     Two blues, because one cannot do both jobs. --accent is the identity hue
-     and is what every non-text mark is drawn in: borders, fills, focus rings,
-     panel dots, the brand tile, and every Plotly glyph that matches it. At
-     3.76:1 it clears the 3:1 WCAG asks of a non-text mark and misses the
-     4.5:1 it asks of 14 px text - so wherever the accent has to *carry* text,
-     or be the ground white text sits on, --accent-text runs instead.
-
-     #1663dd is set by the tightest ground it lands on, which is the accent
-     tint the mode tabs and facet chips sit in: 5.44:1 on white, 4.83:1 on
-     --accent-soft, and 5.44:1 for white text on it (the primary button).
-
-     The three sit on one ramp and get darker in the order they are used:
-     identity, then text, then the hover under that text. --accent-hover moved
-     from #1f6ff0 to keep that order - it is the primary button's hover and
-     nothing else, and a hover lighter than its own rest state reads as the
-     button switching off. */
-  --accent: #2b7fff;           /* primary interactive accent - links, buttons, GSM hit node */
-  --accent-text: #1663dd;      /* the same blue, where it carries or grounds text */
-  --accent-hover: #1259d0;     /* one step darker again: --accent-text's hover */
-  --accent-dim: #9cc4ff;
-  --accent-soft: #eaf2ff;      /* accent-tinted fill */
-  --accent-teal: #0bab9f;      /* secondary/data accent - query node, header rule, stat figures */
+  --bg-canvas: var(--hds-color-carbon-05);
+  --bg-panel: var(--hds-color-spacesuit-white);
+  --bg-panel-raised: var(--hds-color-carbon-05);
+  --bg-sidebar: var(--hds-color-spacesuit-white);
+  --bg-inset: var(--hds-color-carbon-05);
+  --plot-bg: #0e1d34; /* Validated map surface; scientific palette unchanged. */
+  --border-subtle: var(--hds-color-carbon-10);
+  --border-strong: var(--hds-color-carbon-30);
+  --border: 1px solid var(--hds-color-carbon-20);
+  --text-primary: var(--hds-color-carbon-90);
+  --text-secondary: var(--hds-color-carbon-60);
+  --text-muted: var(--hds-color-carbon-60);
+  --accent: var(--hds-color-nasa-blue);
+  --accent-text: var(--hds-color-nasa-blue-shade);
+  --accent-hover: var(--hds-color-nasa-blue-shade);
+  --accent-dim: var(--hds-color-carbon-30);
+  --accent-soft: #f0f0f0;
+  --data-hit: #2b7fff;
+  --accent-teal: #0bab9f;
   --accent-teal-soft: #e2f6f3;
-  --accent-warm: #d9791b;      /* GSE / study-level accent */
+  --accent-warm: #d9791b;
   --accent-warm-soft: #fdf0e2;
-
-  /* --- header (the one deliberately dark surface in the chrome) --- */
-  --header-bg: #14294a;        /* deep navy - scientific-instrument gravitas */
-  --header-fg: #f3f7fc;
-  --header-fg-muted: #9db2d1;
-  --header-line: #22c7bd;      /* teal accent rule under the header */
-
-  /* --- status --- */
-  --status-good: #1f9d57;
-  --status-good-soft: #e7f6ee;
-  --status-error: #d64545;
-  --status-error-soft: #fceceb;
-  --status-warn: #b7791f;
+  /* HDS/USWDS accessible filled red: 4.6:1 with white at this text size. */
+  --action-primary: #d83933;
+  --action-primary-hover: var(--hds-color-nasa-red-shade);
+  --action-primary-active: #8b0a03;
+  --action-disabled-bg: var(--hds-color-carbon-10);
+  --action-disabled-text: var(--hds-color-carbon-60);
+  --header-bg: var(--hds-color-carbon-black);
+  --header-fg: var(--hds-color-spacesuit-white);
+  --header-fg-muted: var(--hds-color-carbon-20);
+  --header-line: var(--hds-color-carbon-70);
+  --status-good: #157a41;
+  --status-good-soft: #edf7f0;
+  --status-error: var(--hds-color-nasa-red-shade);
+  --status-error-soft: #fff1f0;
+  --status-warn: #8a600f;
   --status-warn-soft: #fdf6e3;
-  --status-info-soft: #eef2f7;
-
-  /* --- type --- */
-  --font-sans: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
-  --text-xl: 20px;   /* app title */
-  --text-lg: 18px;   /* panel titles */
-  --text-base: 14px; /* body / labels */
-  --text-sm: 12px;   /* metadata / secondary */
-
-  /* --- shape / spacing --- */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius: 10px;              /* the map's single radius, == --radius-md */
+  --status-info-soft: var(--hds-color-carbon-05);
+  --font-heading: var(--hds-font-family-heading);
+  --font-sans: var(--hds-font-family-body);
+  --font-mono: var(--hds-font-family-code);
+  --text-xl: 20px;
+  --text-lg: 18px;
+  --text-base: 14px;
+  --text-sm: 12px;
+  --radius-sm: var(--hds-border-radius-control);
+  --radius-md: var(--hds-border-radius);
+  --radius-lg: var(--hds-border-radius);
+  --radius: var(--hds-border-radius);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 20px;
   --space-5: 32px;
-  --shadow-card: 0 1px 2px rgba(26, 36, 50, 0.04), 0 6px 20px rgba(26, 36, 50, 0.06);
-  --shadow-raised: 0 2px 6px rgba(26, 36, 50, 0.08), 0 12px 30px rgba(26, 36, 50, 0.10);
-  --shadow: 0 1px 3px rgba(20, 41, 74, 0.08), 0 1px 2px rgba(20, 41, 74, 0.06);
+  --shadow-card: none;
+  --shadow-raised: 0 4px 12px rgba(0,0,0,.12);
+  --shadow: none;
 }
 
-/* Dash 4 ships its own design tokens and its own default palette (an interactive
-   purple). Remapping those tokens onto the Bridge RNA palette themes every Dash
-   component at once - dropdown, radio, checklist, focus rings - instead of
-   fighting each component's default rules with higher-specificity overrides.
-   Any Dash component added later inherits the instrument theme for free.
-
-   The five that used to disagree between the two stylesheets are resolved
-   toward the accent-tinted values rather than the neutral greys. One
-   application gets one interaction color, and a faint blue wash reads as
-   "this responds to you" in a way that a half-step change in grey does not.
-   The map's greys were chosen when it was a separate app with no accent-tinted
-   precedent to match. */
-/* `--accent-text`, not `--accent`. Dash spends this token on *text* as well as
-   on fills: it paints an option's label with it on `:hover` and
-   `:focus-within`, at a specificity of (0,3,1) - `:not(:has(input[disabled]))`
-   is worth more than it looks - so it outranks the rules the two views write
-   for their own controls. The `:focus-within` half of that could never fire
-   while the radio inside a segmented pill was `display: none`; making that
-   input focusable for keyboard users is what exposed it, and the first
-   symptom was the selected Projection pill reverting to 3.76:1 whenever focus
-   was inside it. One token decides it for every Dash control at once, which
-   is the same reason this block exists at all. */
+/* Map Dash controls onto shared interface colors. Use the darker blue for
+   interactive text as well as fills so selected controls remain readable. */
 :root {
   --Dash-Fill-Interactive-Strong: var(--accent-text);
   --Dash-Fill-Interactive-Weak: var(--accent-soft);
   --Dash-Fill-Inverse-Strong: var(--bg-panel);
-  --Dash-Fill-Primary-Hover: rgba(43, 127, 255, 0.06);
-  --Dash-Fill-Primary-Active: rgba(43, 127, 255, 0.12);
+  --Dash-Fill-Primary-Hover: rgba(0, 0, 0, 0.04);
+  --Dash-Fill-Primary-Active: rgba(0, 0, 0, 0.08);
   --Dash-Fill-Disabled: var(--bg-panel-raised);
   --Dash-Stroke-Strong: var(--border-strong);
   --Dash-Stroke-Weak: var(--border-subtle);
@@ -190,3 +119,26 @@ html, body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+
+/* Heading hierarchy follows NASA; compact sizes remain the application's. */
+h1, h2, h3, .app-nav, .btn-primary, .btn-secondary, .btn-ghost {
+  font-family: var(--font-heading);
+}
+::selection { background: #cde2ff; color: #17171b; }
+button, input, select, textarea { font-family: inherit; }
+:where(button, input, select, textarea, a, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 3px;
+}
+.dash-dropdown-trigger, .dash-dropdown-content, .dash-input-element {
+  border-radius: var(--radius-sm);
+}
+/* Plotly supplies actions; theme their ink without changing the toolbar. */
+.js-plotly-plot .plotly .modebar-group { background: rgba(255,255,255,.94) !important; }
+.js-plotly-plot .plotly .modebar-btn path { fill: #58585b !important; }
+.js-plotly-plot .plotly .modebar-btn:hover path,
+.js-plotly-plot .plotly .modebar-btn.active path { fill: #17171b !important; }
+.bm-plot-wrap .js-plotly-plot .plotly .modebar-group { background: #0e1d34 !important; }
+.bm-plot-wrap .js-plotly-plot .plotly .modebar-btn path { fill: #c7d6ea !important; }
+.bm-plot-wrap .js-plotly-plot .plotly .modebar-btn:hover path,
+.bm-plot-wrap .js-plotly-plot .plotly .modebar-btn.active path { fill: #fff !important; }

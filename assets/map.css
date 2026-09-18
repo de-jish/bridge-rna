@@ -23,7 +23,7 @@
   overflow-y: auto;
 }
 .bm-rail::-webkit-scrollbar { width: 8px; }
-.bm-rail::-webkit-scrollbar-thumb { background: #cfd9e6; border-radius: 4px; }
+.bm-rail::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-sm); }
 
 .bm-group { margin-bottom: 20px; }
 .bm-group-label {
@@ -47,7 +47,7 @@
    rules deliberately target Dash's structural classes, scoped under .bm-seg. */
 .bm-seg {
   display: flex; background: var(--bg-inset);
-  border-radius: 8px; padding: 3px; gap: 3px;
+  border-radius: var(--radius-sm); padding: 3px; gap: 3px;
 }
 .bm-seg .dash-options-list-option {
   flex: 1;
@@ -60,7 +60,7 @@
   padding: 7px 6px;
   font-size: 12.5px;
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-secondary);
   background: transparent;
@@ -161,12 +161,12 @@
   font-size: 13px;
   min-height: 38px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: #fff;
   box-shadow: var(--shadow);
 }
-.bm-find-input:hover { border-color: #c3cfdf; }
+.bm-find-input:hover { border-color: var(--border-strong); }
 .bm-find-input:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -209,10 +209,10 @@
   max-height: 196px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg-panel);
-  box-shadow: 0 6px 20px rgba(20, 41, 74, 0.14), 0 2px 6px rgba(20, 41, 74, 0.08);
+  box-shadow: var(--shadow-raised);
   padding: 3px;
 }
 .bm-suggest:empty { display: none; }
@@ -245,7 +245,7 @@
   flex-direction: column;
   gap: 1px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   /* WCAG 2.2 SC 2.5.8 puts the floor for a pointer target at 24x24 CSS px. */
   min-height: 24px;
@@ -282,17 +282,17 @@
 .bm-dropdown {
   font-size: 13px;
   min-height: 38px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
 }
 .bm-dropdown .dash-dropdown-trigger { min-height: 38px; }
-.bm-dropdown:hover { border-color: #c3cfdf; }
+.bm-dropdown:hover { border-color: var(--border-strong); }
 .dash-dropdown-content {
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(20, 41, 74, 0.14), 0 2px 6px rgba(20, 41, 74, 0.08);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-raised);
   font-size: 13px;
 }
-.dash-dropdown-content .dash-options-list-option { padding: 7px 11px; border-radius: 6px; }
+.dash-dropdown-content .dash-options-list-option { padding: 7px 11px; border-radius: var(--radius-sm); }
 .dash-dropdown-content .dash-options-list-option.selected { color: var(--accent-text); font-weight: 600; }
 
 /* Layer checklist. The checkbox is restyled rather than replaced, so keyboard
@@ -310,7 +310,7 @@
 .bm-checklist input[type="checkbox"] {
   appearance: none; -webkit-appearance: none;
   width: 16px; height: 16px; margin: 0 9px 0 0; flex-shrink: 0;
-  border: 1.5px solid #c3cfdf; border-radius: 4px;
+  border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm);
   background: var(--bg-panel); cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
@@ -362,7 +362,7 @@
   background: rgba(14, 29, 52, 0.82);
   color: #cfe0f7;
   border: 1px solid rgba(90, 130, 185, 0.45);
-  border-radius: 20px;
+  border-radius: var(--radius-sm);
   padding: 4px 11px;
   font-size: 11.5px;
   font-weight: 500;
@@ -386,7 +386,7 @@
   width: 228px; max-height: calc(100% - 58px);
   background: rgba(14, 29, 52, 0.9);
   border: 1px solid rgba(90, 130, 185, 0.4);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 10px 11px;
   backdrop-filter: blur(4px);
   display: flex; flex-direction: column;
@@ -399,7 +399,7 @@
 .bm-legend-search {
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(120,150,195,0.35);
-  border-radius: 6px; color: #e6eefb; font-size: 12px;
+  border-radius: var(--radius-sm); color: #e6eefb; font-size: 12px;
   padding: 5px 8px; width: 100%; outline: none;
 }
 /* The margin belongs to the wrapper, which is what the callback shows and
@@ -610,7 +610,7 @@
 }
 .bm-coverage-fix {
   font-size: 11px; color: var(--status-warn); line-height: 1.45;
-  margin-top: 5px; background: #fdf6ea; border-radius: 6px; padding: 6px 8px;
+  margin-top: 5px; background: #fdf6ea; border-radius: var(--radius-sm); padding: 6px 8px;
 }
 
 a, a:visited { color: var(--accent-text); }

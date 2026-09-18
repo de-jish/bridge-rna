@@ -15,27 +15,26 @@ legend, hover that names the exact category, and a distinct OSDR symbol.
 
 from __future__ import annotations
 
-# --- Bridge RNA chrome tokens (reused verbatim; REFERENCE.md section 9) -----
-BG_CANVAS = "#eef2f7"
+# --- Resolved shared interface tokens (assets/00-tokens.css) ----------------
+BG_CANVAS = "#f6f6f6"
 BG_PANEL = "#ffffff"
-BG_PANEL_RAISED = "#f4f7fb"
-BG_INSET = "#f5f8fc"
-TEXT_PRIMARY = "#1a2432"
-TEXT_SECONDARY = "#5a6b7e"
-TEXT_MUTED = "#616e80"
-ACCENT = "#2b7fff"
-#: The same blue where it carries or grounds text; #2b7fff is 3.76:1, which
-#: clears the 3:1 a mark needs and misses the 4.5:1 text needs.
-ACCENT_TEXT = "#1663dd"
-ACCENT_HOVER = "#1259d0"
+BG_PANEL_RAISED = "#f6f6f6"
+BG_INSET = "#f6f6f6"
+TEXT_PRIMARY = "#17171b"
+TEXT_SECONDARY = "#58585b"
+TEXT_MUTED = "#58585b"
+ACCENT = "#1c67e3"
+#: Darker NASA blue for interactive text. Scientific marks keep their palette.
+ACCENT_TEXT = "#0b3d91"
+ACCENT_HOVER = "#0b3d91"
 ACCENT_TEAL = "#0bab9f"
 ACCENT_WARM = "#d9791b"
-HEADER_BG = "#14294a"
-HEADER_FG = "#f3f7fc"
-HEADER_LINE = "#22c7bd"
-STATUS_GOOD = "#1f9d57"
-STATUS_ERROR = "#d64545"
-STATUS_WARN = "#b7791f"
+HEADER_BG = "#000000"
+HEADER_FG = "#ffffff"
+HEADER_LINE = "#444447"
+STATUS_GOOD = "#157a41"
+STATUS_ERROR = "#b60109"
+STATUS_WARN = "#8a600f"
 
 # --- The one deliberate departure: a dark navy plot canvas ------------------
 PLOT_BG = "#0e1d34"
@@ -272,7 +271,7 @@ def base_figure_layout(is_3d: bool = False) -> dict:
     layout = dict(
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
-        font=dict(color=PLOT_TEXT, family="system-ui, -apple-system, 'Segoe UI', sans-serif"),
+        font=dict(color=PLOT_TEXT, family="Public Sans Web, sans-serif"),
         margin=dict(l=0, r=0, t=0, b=0),
         showlegend=False,
         # Pan, not select. There is no selection feature: the map is read, not

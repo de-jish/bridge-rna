@@ -78,7 +78,7 @@ def header(active: str) -> html.Header:
             dcc.Link(
                 href="/", className="app-brand",
                 children=[
-                    html.Div("BR", className="app-brand-mark"),
+                    html.Div(html.Img(src="/assets/nasa.svg", alt="NASA"), className="app-brand-mark"),
                     html.Div(
                         className="app-brand-text",
                         children=[
@@ -274,9 +274,6 @@ INDEX_STRING = """<!DOCTYPE html>
     <head>
         {%metas%}
         <title>{%title%}</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
         {%favicon%}
         {%css%}
     </head>

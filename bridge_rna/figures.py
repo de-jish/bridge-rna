@@ -1,10 +1,12 @@
 """Plotly figures for the retrieval view.
 
 Plotly cannot read CSS variables, so the palette is mirrored from the light
-theme tokens in assets/style.css. Keep GRAPH_THEME in sync with :root there.
+theme tokens in assets/00-tokens.css. Keep GRAPH_THEME in sync with :root there.
 """
 
 from __future__ import annotations
+
+import textwrap
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -15,20 +17,20 @@ from .util import _safe_str
 GRAPH_THEME = {
     "paper_bg": "#ffffff",
     "plot_bg": "#ffffff",
-    "grid": "#e6ecf5",
-    "text_primary": "#1a2432",
-    "text_secondary": "#5a6b7e",
+    "grid": "#d1d1d1",
+    "text_primary": "#17171b",
+    "text_secondary": "#444447",
     "query": "#0bab9f",       # --accent-teal (query stands apart from its hits)
-    "gsm": "#2b7fff",         # --accent (GSM hit nodes)
+    "gsm": "#2b7fff",         # --data-hit (GSM hit nodes)
     "gse": "#d9791b",         # --accent-warm (GSE study nodes)
-    "edge": "rgba(43, 127, 255, 0.42)",
-    "edge_gse": "rgba(217, 121, 27, 0.35)",
+    "edge": "rgba(43, 127, 255, 0.62)",
+    "edge_gse": "rgba(217, 121, 27, 0.60)",
     "marker_line": "#ffffff",
-    "font_sans": "Inter, 'Segoe UI', -apple-system, sans-serif",
+    "font_sans": "Public Sans Web, 'Segoe UI', sans-serif",
     # Accessions are set in mono for the same reason the rail's measured values
     # are: GSM6431262 and GSM6431263 differ in one glyph, and a proportional
     # font is where that difference goes to hide.
-    "font_mono": "JetBrains Mono, 'SF Mono', Consolas, monospace",
+    "font_mono": "DM Mono, Consolas, monospace",
     # The comparison view's own three roles, named. They used to borrow `gsm`,
     # `gse` and `query`, which mean a hit node, a study node and the query in
     # the single-query network - so the same key meant two things depending on
@@ -45,8 +47,8 @@ GRAPH_THEME = {
     "cohort_a": "#0bab9f",
     "cohort_b": "#d9791b",
     "cohort_shared": "#2b7fff",
-    "edge_cohort_a": "rgba(11, 171, 159, 0.42)",
-    "edge_cohort_b": "rgba(217, 121, 27, 0.35)",
+    "edge_cohort_a": "rgba(11, 171, 159, 0.62)",
+    "edge_cohort_b": "rgba(217, 121, 27, 0.60)",
 }
 
 
@@ -219,7 +221,12 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
             x=node_df["x"],
             y=node_df["y"],
             mode="markers+text",
-            text=node_df["display_label"],
+            # Line breaks keep long sample identifiers inside laptop-sized plots.
+            # Customdata, hover identifiers, node positions and axes are unchanged.
+            text=["<br>".join(textwrap.wrap(str(label), width=20,
+                                          break_on_hyphens=False))
+                  if kind == "query" else label
+                  for label, kind in zip(node_df["display_label"], node_df["kind"])],
             textposition="top center",
             textfont={"family": GRAPH_THEME["font_sans"], "size": 11, "color": GRAPH_THEME["text_secondary"]},
             hovertemplate="%{customdata[2]}<extra></extra>",

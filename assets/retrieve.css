@@ -138,29 +138,24 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* Primary action button.
-   The ground is --accent-text rather than --accent: this is the one place the
-   accent has to hold white 14 px type, and at 3.76:1 the identity blue does
-   not clear AA for it. --accent-hover is a step darker again, so the hover
-   still reads as pressing further in. */
+/* NASA red is reserved for primary query actions. */
 .btn-primary {
   width: 100%;
   padding: 11px 14px;
   font-size: var(--text-base);
   font-weight: 600;
-  font-family: var(--font-sans);
+  font-family: var(--font-heading);
   color: #fff;
-  background: var(--accent-text);
-  border: 1px solid var(--accent-text);
+  background: var(--action-primary);
+  border: 1px solid var(--action-primary);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
-  /* The button's own blue, not the identity one it no longer wears. */
-  box-shadow: 0 1px 2px rgba(22, 99, 221, 0.25);
+  box-shadow: none;
 }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn-primary:active:not(:disabled) { transform: translateY(1px); }
-.btn-primary:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+.btn-primary:hover:not(:disabled) { background: var(--action-primary-hover); border-color: var(--action-primary-hover); }
+.btn-primary:active:not(:disabled) { background: var(--action-primary-active); border-color: var(--action-primary-active); transform: translateY(1px); }
+.btn-primary:disabled { background: var(--action-disabled-bg); color: var(--action-disabled-text); border-color: var(--border-strong); opacity: 1; cursor: not-allowed; box-shadow: none; }
 
 /* Secondary / subtle button */
 .btn-secondary {
@@ -230,13 +225,13 @@
   padding: var(--space-4);
 }
 
-/* the network graph is the main event: accent top edge */
+/* Full-height network canvas; neutral border preserves the original box. */
 .panel--canvas {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 3px solid var(--accent);
+  border-top: 3px solid var(--border-subtle);
   padding-top: calc(var(--space-4) - 3px);
 }
 
@@ -347,7 +342,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
   background: var(--accent-teal);
 }
-.legend-swatch--circle { border-radius: 50%; background: var(--accent); }
+.legend-swatch--circle { border-radius: 50%; background: var(--data-hit); }
 .legend-swatch--diamond { transform: rotate(45deg); width: 11px; height: 11px; background: var(--accent-warm); }
 .legend-divider { width: 1px; align-self: stretch; background: var(--border-strong); }
 .legend-note { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
@@ -402,7 +397,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .score-badge {
   flex: none;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   font-weight: 600;
@@ -419,7 +414,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--accent-text);
+  color: var(--text-primary);
   margin-bottom: var(--space-1);
 }
 
@@ -540,7 +535,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   font-size: 12px;
   background: var(--bg-inset);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* ==========================================================================
@@ -565,7 +560,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .status-error {
   background: var(--status-error-soft);
   border-color: rgba(214, 69, 69, 0.35);
-  color: #b83232;
+  color: var(--status-error);
 }
 .status-error .status-banner-text::before { content: "⚠ "; font-weight: 700; }
 
@@ -675,7 +670,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .sidebar::-webkit-scrollbar-thumb,
 .status-details-pre::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
 }
 
 /* ==========================================================================
@@ -783,7 +778,7 @@ summary:focus-visible,
   padding: var(--space-3);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md, 8px);
-  background: var(--panel-subtle, rgba(43, 127, 255, 0.03));
+  background: var(--bg-inset);
   text-align: center;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
@@ -855,7 +850,7 @@ summary:focus-visible,
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
@@ -864,7 +859,7 @@ summary:focus-visible,
   color: var(--accent-text);
   background: var(--bg-panel);
   border-color: var(--border-subtle);
-  box-shadow: 0 1px 2px rgba(26, 36, 50, 0.06), 0 1px 1px rgba(26, 36, 50, 0.04);
+  box-shadow: none;
 }
 .mode-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -891,7 +886,7 @@ summary:focus-visible,
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }

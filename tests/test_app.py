@@ -1630,6 +1630,23 @@ def test_every_dropdown_and_slider_is_named_by_something(mounted_ids, app):
         assert label_id in ids, f"{label_id} is referenced but never rendered"
 
 
+def _color_token(css: str, name: str) -> str:
+    """Resolve HDS aliases as well as literal app colors for contrast checks."""
+    seen = set()
+    while name not in seen:
+        seen.add(name)
+        match = re.search(rf"(?<![\w-]){re.escape(name)}:\s*([^;]+);", css)
+        assert match, f"{name} is undefined"
+        value = match.group(1).strip()
+        alias = re.fullmatch(r"var\((--[\w-]+)\)", value)
+        if alias:
+            name = alias.group(1)
+            continue
+        assert re.fullmatch(r"#[0-9a-fA-F]{6}", value), value
+        return value
+    raise AssertionError(f"Circular color token: {name}")
+
+
 def test_theme_matches_the_bridge_rna_tokens():
     """The chrome must stay pixel-identical to Bridge RNA; only the plot is dark.
 
@@ -1653,7 +1670,7 @@ def test_theme_matches_the_bridge_rna_tokens():
         ("--status-good", theme.STATUS_GOOD), ("--status-error", theme.STATUS_ERROR),
         ("--status-warn", theme.STATUS_WARN),
     ]:
-        assert f"{token}: {value}" in css, f"{token} drifted from {value}"
+        assert _color_token(css, token) == value, f"{token} drifted from {value}"
 
 
 def test_every_text_token_clears_wcag_aa_on_every_surface():
@@ -1669,9 +1686,7 @@ def test_every_text_token_clears_wcag_aa_on_every_surface():
     css = _all_css()
 
     def token(name: str) -> str:
-        match = re.search(rf"{re.escape(name)}:\s*(#[0-9a-fA-F]{{6}})\s*;", css)
-        assert match, f"{name} is not defined as a hex literal"
-        return match.group(1)
+        return _color_token(css, name)
 
     def relative_luminance(hex_color: str) -> float:
         raw = hex_color.lstrip("#")
@@ -1701,7 +1716,8 @@ def test_every_text_token_clears_wcag_aa_on_every_surface():
             if r < 4.5:
                 failures.append(f"{fg} on {bg}: {r:.2f}:1")
     # White type on the primary button's ground is the other direction.
-    for bg in ("--accent-text", "--accent-hover"):
+    for bg in ("--accent-text", "--accent-hover", "--action-primary",
+               "--action-primary-hover", "--action-primary-active"):
         r = ratio("#ffffff", token(bg))
         if r < 4.5:
             failures.append(f"white on {bg}: {r:.2f}:1")
