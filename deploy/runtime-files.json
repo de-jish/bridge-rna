@@ -62,6 +62,7 @@
   "assets/map.css",
   "assets/find-suggest.js",
   "assets/map-counts.js",
+  "assets/network-focus.js",
   "deploy/common.py",
   "deploy/apply.py",
   "deploy/processes.py",

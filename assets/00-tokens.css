@@ -41,6 +41,12 @@
   --control-weight: 600;
   --interaction-duration: 120ms;
   --data-hit: #2b7fff;
+  /* Requested network-role adaptation; Map/cohort categorical hues stay separate. */
+  --network-query: var(--action-primary);
+  --network-sample: var(--hds-color-nasa-blue-shade);
+  --network-study: var(--hds-color-carbon-60);
+  --network-edge: var(--control-border);
+  --network-emphasis: var(--hds-color-carbon-90);
   --accent-teal: #0bab9f;
   --accent-teal-soft: #e2f6f3;
   --accent-warm: #d9791b;

@@ -1243,3 +1243,9 @@ Continued the approved black/white/red direction from `9b9cfba`. Replaced routin
 ## 2026-09-18: NASA release packaging
 
 Integrated the existing SFTP-only deployment workflow into the approved NASA worktree, preserving the original checkout. Added exact allowlisted HDS fonts/licenses, the NASA SVG and shared theme styles; binary font hash diffs; and clean-payload HTTP checks for every asset. Prototype/review files remain excluded. All 505 tests pass. Python 3.14 production-lock preflight passes against 940,455 ARCHS4 and 2,108 OSDR samples, with upload/reference cosine 1.00000000. The initial SFTP audit timed out before any transfer; live-server confirmation remains a separate user-run step.
+
+## 2026-09-19: Focused network and Map control refinement
+
+Disabled search only on Map's two-option Color by dropdown using Dash's supported configuration. The single-query network (sample, pooled cohort and upload) now uses a larger white-filled red ring, dark-blue GSM circles, graphite GSE diamonds and neutral edges. Its legend uses matching roles. Hover and inspection emphasize adjacent relationships through scoped SVG classes without redrawing Plotly or altering click data; clean PNG exports keep the base styling. New searches reset emphasis and route navigation reconnects the handlers.
+
+The requested brand-color treatment is an app-specific departure from HDS's dataviz guidance. Map tissue/species palettes and the separate comparison A/B/shared encodings remain unchanged. Scientific callbacks, ranking, node identity, coordinates, tooltips and workspace geometry are preserved. All 508 tests and 31 real-data browser checks pass, including keyboard Map selection, retained searches, hover/inspection, export and 1440/1280/390px layouts. Evidence is in `.lavish/network-refinement/`. Runtime packaging includes the new local interaction asset. Deployment follows the SFTP-only process; transfer and confirmed running remain separate records.

@@ -50,6 +50,15 @@ def map_view():
     return layout.build_view()
 
 
+def test_only_map_color_by_disables_dropdown_search(map_view):
+    controls = {getattr(c, 'id', None): c for c in _walk(map_view)}
+    dropdown = controls['color-by']
+    assert dropdown.searchable is False
+    assert dropdown.clearable is False
+    assert {o['value'] for o in dropdown.options} == {'tissue', 'species'}
+    assert 'legend-search' in controls and 'find-input' in controls
+
+
 @pytest.fixture(scope="module")
 def mounted_ids(app):
     """Every component id that any route can put on the page.

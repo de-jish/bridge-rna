@@ -343,8 +343,10 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
   background: var(--accent-teal);
 }
-.legend-swatch--circle { border-radius: 50%; background: var(--data-hit); }
-.legend-swatch--diamond { transform: rotate(45deg); width: 11px; height: 11px; background: var(--accent-warm); }
+.legend-swatch--query { border: 2px solid var(--network-query); border-radius: 50%; }
+.legend-swatch--circle { border-radius: 50%; background: var(--network-sample); }
+.legend-swatch--comparison-hit { background: var(--data-hit); }
+.legend-swatch--diamond { transform: rotate(45deg); width: 11px; height: 11px; background: var(--network-study); }
 .legend-divider { width: 1px; align-self: stretch; background: var(--border-strong); }
 .legend-note { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
 
@@ -1106,3 +1108,17 @@ summary:focus-visible,
 .graph-wrap .modebar-btn path { fill: var(--text-secondary) !important; }
 .graph-wrap .modebar-btn:hover path,
 .graph-wrap .modebar-btn.active path { fill: var(--text-primary) !important; }
+
+/* Inspection emphasis leaves Plotly's data, hit testing and hover layer intact. */
+.graph-wrap .network-edge-active .js-line {
+  stroke: var(--network-emphasis) !important;
+  stroke-width: 4.5px !important;
+}
+.graph-wrap .network-node-active {
+  stroke: var(--network-emphasis) !important;
+  stroke-width: 3px !important;
+}
+.graph-wrap .network-query.network-node-active {
+  stroke: var(--network-query) !important;
+  stroke-width: 4px !important;
+}

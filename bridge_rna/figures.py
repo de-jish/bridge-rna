@@ -20,11 +20,11 @@ GRAPH_THEME = {
     "grid": "#d1d1d1",
     "text_primary": "#17171b",
     "text_secondary": "#444447",
-    "query": "#0bab9f",       # --accent-teal (query stands apart from its hits)
-    "gsm": "#2b7fff",         # --data-hit (GSM hit nodes)
-    "gse": "#d9791b",         # --accent-warm (GSE study nodes)
-    "edge": "rgba(43, 127, 255, 0.62)",
-    "edge_gse": "rgba(217, 121, 27, 0.60)",
+    "query": "#d83933",       # --network-query: requested research-app adaptation
+    "gsm": "#0b3d91",         # --network-sample
+    "gse": "#58585b",         # --network-study
+    "edge": "#858589",        # --network-edge, >3:1 against the white canvas
+    "edge_gse": "#858589",
     "marker_line": "#ffffff",
     "font_sans": "Public Sans Web, 'Segoe UI', sans-serif",
     # Accessions are set in mono for the same reason the rail's measured values
@@ -36,14 +36,8 @@ GRAPH_THEME = {
     # the single-query network - so the same key meant two things depending on
     # which figure was being built.
     #
-    # Cohort A is teal and "retrieved by both" is blue, which is a swap from
-    # what shipped first, and it fixes a real inconsistency rather than a
-    # preference: teal is the query star in the single-query network and the
-    # query mark on the map, so giving it to "shared" meant running a
-    # comparison silently recolored the star the previous search drew teal.
-    # Both views now agree that teal is cohort A and warm is cohort B, and each
-    # renders "both" the way its canvas supports - a third color on white, a
-    # doubled mark on the map's navy.
+    # These hues identify cohort membership, rather than node type. Preserve
+    # their separate A/B/shared meaning across comparison, cards and Map.
     "cohort_a": "#0bab9f",
     "cohort_b": "#d9791b",
     "cohort_shared": "#2b7fff",
@@ -102,9 +96,11 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
             "kind": "query",
             "x": 0.0,
             "y": 0.0,
-            "size": 28,
-            "color": GRAPH_THEME["query"],
-            "symbol": "star",
+            "size": 30,
+            # White-filled circle with a red outline hides edges below its
+            # center, unlike Plotly's transparent circle-open marker.
+            "color": GRAPH_THEME["paper_bg"],
+            "symbol": "circle",
             "hover": f"Query<br>{q_label}<br>{q_id}",
         }
     )
@@ -157,6 +153,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 "y1": y,
                 "width": EDGE_WIDTH,
                 "color": GRAPH_THEME["edge"],
+                "nodes": [q_id, gsm],
             }
         )
 
@@ -187,6 +184,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                     "y1": g_y,
                     "width": EDGE_WIDTH,
                     "color": GRAPH_THEME["edge_gse"],
+                    "nodes": [gsm, gse],
                 }
             )
 
@@ -200,6 +198,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 line={"width": e["width"], "color": e["color"]},
                 hoverinfo="skip",
                 showlegend=False,
+                meta={"network_edge": e["nodes"]},
             )
         )
 
@@ -236,8 +235,13 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 "opacity": 1.0,  # Match the solid legend swatches, not Plotly's array default.
                 "color": node_df["color"],
                 "symbol": node_df["symbol"],
-                "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]},
+                "line": {"width": [2.5 if k == "query" else 1.5 for k in node_df["kind"]],
+                         "color": [GRAPH_THEME["query"] if k == "query" else GRAPH_THEME["marker_line"]
+                                   for k in node_df["kind"]]},
             },
+            # Presentation-only metadata for local hover and
+            # inspector emphasis. Node customdata and scientific data stay intact.
+            meta={"network_nodes": True},
             # Let labels on the outermost nodes spill into the margin instead of
             # being cut off at the plot edge. The axis padding below sizes the
             # plot so this is a backstop for narrow viewports, not the main fix.

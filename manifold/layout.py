@@ -273,6 +273,7 @@ def control_rail() -> html.Aside:
                     options=colorby.menu_options(),
                     value=colorby.default_key(),
                     clearable=False,
+                    searchable=False,
                     className="bm-dropdown",
                 ),
                 html.Div(id="coverage", className="bm-coverage"),
