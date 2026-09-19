@@ -1,0 +1,44 @@
+{
+  ".bm-legend": {
+    "color": "rgb(23, 23, 27)",
+    "bg": "rgba(14, 29, 52, 0.9)",
+    "border": "rgba(90, 130, 185, 0.4)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  },
+  ".bm-legend-count": {
+    "color": "rgb(127, 151, 186)",
+    "bg": "rgba(0, 0, 0, 0)",
+    "border": "rgb(127, 151, 186)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  },
+  ".bm-legend-search input": {
+    "color": "rgb(230, 238, 251)",
+    "bg": "rgba(255, 255, 255, 0.06)",
+    "border": "rgb(230, 238, 251)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  },
+  ".bm-seg .selected": {
+    "color": "rgb(11, 61, 145)",
+    "bg": "rgb(255, 255, 255)",
+    "border": "rgb(11, 61, 145)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  },
+  ".bm-checklist input": {
+    "color": "rgb(0, 0, 0)",
+    "bg": "rgb(28, 103, 227)",
+    "border": "rgb(28, 103, 227)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  },
+  ".bm-coverage-fill": {
+    "color": "rgb(23, 23, 27)",
+    "bg": "rgb(11, 171, 159)",
+    "border": "rgb(23, 23, 27)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  },
+  ".bm-badge": {
+    "color": "rgb(207, 224, 247)",
+    "bg": "rgba(14, 29, 52, 0.82)",
+    "border": "rgba(90, 130, 185, 0.45)",
+    "font": "\"Public Sans Web\", \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif"
+  }
+}

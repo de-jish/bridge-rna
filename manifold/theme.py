@@ -272,6 +272,10 @@ def base_figure_layout(is_3d: bool = False) -> dict:
         paper_bgcolor=PLOT_BG,
         plot_bgcolor=PLOT_BG,
         font=dict(color=PLOT_TEXT, family="Public Sans Web, sans-serif"),
+        # Neutral hover chrome keeps category hue on the marks it describes.
+        hoverlabel=dict(bgcolor="#17171b", bordercolor="#858589",
+                        font=dict(family="Public Sans Web, sans-serif",
+                                  size=12, color="#ffffff")),
         margin=dict(l=0, r=0, t=0, b=0),
         showlegend=False,
         # Pan, not select. There is no selection feature: the map is read, not

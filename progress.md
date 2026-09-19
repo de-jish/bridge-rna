@@ -1234,3 +1234,8 @@ Full measurement in `REFERENCE.md` section 4.
   If tissue ever becomes a build gate, switch to the versioned metadata-only HDF5 files and assert 100%.
 - UMAP quality at 940k via landmark fit-and-transform ran clean, but *visual* quality on the real map is still unreviewed.
 - `tests/` never touches the real data, so the suite stays fast and runs on a machine with neither the memmap nor the checkpoint.
+
+
+### 2026-09-18 — NASA component cohesion (development worktree only)
+
+Continued the approved black/white/red direction from `9b9cfba`. Replaced routine green completion alerts with neutral summaries without rewriting result/provenance text; separated control, link, focus and scientific color roles; consolidated Dash/native control styling; themed Map overlays, loading and hover; retained the coverage bar's semantic partial state. Removed competing modebar styles and nested dropdown borders. Scientific callbacks and data mappings are unchanged; network markers now match solid legend swatches at full opacity. Evidence: `.lavish/nasa-cohesion/`; validation: 295 tests, 44 workflow browser checks and 9 state checks. See `prototypes/hds/README.md` for source distinctions and known limitations. No deployment or merge.

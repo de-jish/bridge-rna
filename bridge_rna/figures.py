@@ -233,6 +233,7 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
             customdata=node_df[["kind", "node_id", "hover"]].values,
             marker={
                 "size": node_df["size"],
+                "opacity": 1.0,  # Match the solid legend swatches, not Plotly's array default.
                 "color": node_df["color"],
                 "symbol": node_df["symbol"],
                 "line": {"width": 1.5, "color": GRAPH_THEME["marker_line"]},

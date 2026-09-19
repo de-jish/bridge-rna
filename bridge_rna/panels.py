@@ -174,13 +174,18 @@ def build_setup_banner() -> Any:
 
 
 def build_status_banner(message: str, kind: str = "info", detail: str | None = None) -> Any:
-    """One-line status banner. ``kind`` is info | good | error.
+    """Status content, with neutral routine completions. ``kind`` is info | good | error.
 
     When ``detail`` is provided (e.g. a full error blob), a collapsed
     "Show details" disclosure is appended so debugging text stays out of the
     primary viewport but remains reachable.
     """
-    children: list[Any] = [html.Span(message, className="status-banner-text")]
+    # Emphasize the existing completion lead without rewriting provenance,
+    # counts, or comparison evidence supplied by the scientific callbacks.
+    lead = re.match(r"^(Retrieved \d+ hits|Two pooled queries)(.*)$", message, re.S) if kind == "good" else None
+    content = ([html.Strong(lead.group(1), className="status-summary-lead"),
+                lead.group(2)] if lead else message)
+    children: list[Any] = [html.Span(content, className="status-banner-text")]
     if detail and _safe_str(detail) and _safe_str(detail) != _safe_str(message):
         children.append(
             html.Details(

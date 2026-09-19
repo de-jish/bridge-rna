@@ -20,6 +20,26 @@
   --accent-hover: var(--hds-color-nasa-blue-shade);
   --accent-dim: var(--hds-color-carbon-30);
   --accent-soft: #f0f0f0;
+  /* Interface roles: choice is charcoal, focus and links are blue, CTA is red.
+     These compact control treatments are Bridge RNA adaptations of HDS. */
+  --control-ink: var(--hds-color-carbon-90);
+  --control-border: #858589;
+  --control-hover: var(--hds-color-carbon-90);
+  --control-fill: var(--hds-color-spacesuit-white);
+  --control-hover-fill: var(--hds-color-carbon-05);
+  --control-selected-fill: var(--hds-color-carbon-10);
+  --focus-ring: var(--hds-color-nasa-blue-shade);
+  --link-color: var(--hds-color-nasa-blue-shade);
+  --link-hover: var(--hds-color-carbon-90);
+  --plot-ui-bg: var(--hds-color-carbon-90);
+  --plot-ui-inset: var(--hds-color-carbon-80);
+  --plot-ui-border: var(--hds-color-carbon-50);
+  --plot-ui-text: var(--hds-color-spacesuit-white);
+  --plot-ui-muted: var(--hds-color-carbon-20);
+  --control-height: 34px;
+  --control-font-size: 12px;
+  --control-weight: 600;
+  --interaction-duration: 120ms;
   --data-hit: #2b7fff;
   --accent-teal: #0bab9f;
   --accent-teal-soft: #e2f6f3;
@@ -63,16 +83,16 @@
   --shadow: none;
 }
 
-/* Map Dash controls onto shared interface colors. Use the darker blue for
-   interactive text as well as fills so selected controls remain readable. */
+/* Dash uses its strong interaction token for text, fills and selection.
+   Keep it neutral; keyboard focus and real links have independent roles. */
 :root {
-  --Dash-Fill-Interactive-Strong: var(--accent-text);
-  --Dash-Fill-Interactive-Weak: var(--accent-soft);
+  --Dash-Fill-Interactive-Strong: var(--control-ink);
+  --Dash-Fill-Interactive-Weak: var(--control-selected-fill);
   --Dash-Fill-Inverse-Strong: var(--bg-panel);
   --Dash-Fill-Primary-Hover: rgba(0, 0, 0, 0.04);
   --Dash-Fill-Primary-Active: rgba(0, 0, 0, 0.08);
   --Dash-Fill-Disabled: var(--bg-panel-raised);
-  --Dash-Stroke-Strong: var(--border-strong);
+  --Dash-Stroke-Strong: var(--control-border);
   --Dash-Stroke-Weak: var(--border-subtle);
   --Dash-Text-Primary: var(--text-primary);
   --Dash-Text-Strong: var(--text-primary);
@@ -127,18 +147,9 @@ h1, h2, h3, .app-nav, .btn-primary, .btn-secondary, .btn-ghost {
 ::selection { background: #cde2ff; color: #17171b; }
 button, input, select, textarea { font-family: inherit; }
 :where(button, input, select, textarea, a, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent-text);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 .dash-dropdown-trigger, .dash-dropdown-content, .dash-input-element {
   border-radius: var(--radius-sm);
 }
-/* Plotly supplies actions; theme their ink without changing the toolbar. */
-.js-plotly-plot .plotly .modebar-group { background: rgba(255,255,255,.94) !important; }
-.js-plotly-plot .plotly .modebar-btn path { fill: #58585b !important; }
-.js-plotly-plot .plotly .modebar-btn:hover path,
-.js-plotly-plot .plotly .modebar-btn.active path { fill: #17171b !important; }
-.bm-plot-wrap .js-plotly-plot .plotly .modebar-group { background: #0e1d34 !important; }
-.bm-plot-wrap .js-plotly-plot .plotly .modebar-btn path { fill: #c7d6ea !important; }
-.bm-plot-wrap .js-plotly-plot .plotly .modebar-btn:hover path,
-.bm-plot-wrap .js-plotly-plot .plotly .modebar-btn.active path { fill: #fff !important; }

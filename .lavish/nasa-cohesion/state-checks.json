@@ -1,0 +1,11 @@
+[
+  "dropdown has one border owner",
+  "dropdown outer border is visible",
+  "primary hover",
+  "primary active",
+  "network markers match solid legend",
+  "network scientific colors preserved",
+  "explicit neutral Map hover theme",
+  "real Map loading indicator appears during a pending callback",
+  "Map loading completes"
+]

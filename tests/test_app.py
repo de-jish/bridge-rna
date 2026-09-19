@@ -1491,23 +1491,15 @@ def test_the_stylesheets_define_each_token_exactly_once():
     assert counts, "no design tokens found at all"
 
 
-def test_the_dash_tokens_that_carry_text_use_the_accessible_blue():
-    """Dash spends its "interactive strong" token on text, not only on fills.
+def test_dash_interaction_text_uses_the_shared_control_ink():
+    """Dash's strong token also paints option text on hover and keyboard focus.
 
-    It paints an option's label with it on `:hover` and `:focus-within`, at a
-    specificity of (0,3,1) - `:not(:has(input[disabled]))` is worth more than
-    it looks - so it outranks what either view writes for its own controls.
-    Pointing it at --accent put 3.76:1 text on screen from a rule neither
-    stylesheet owns; pointing it at --accent-text fixes every Dash control at
-    once. The `:focus-within` half only became reachable when the radio inside
-    a segmented pill stopped being `display: none`, which is why this was
-    invisible until the keyboard fix landed.
+    Keep it on the neutral control role; contrast is checked for all supporting
+    surfaces below, independently of the choice of hue.
     """
     css = _all_css()
     match = re.search(r"--Dash-Fill-Interactive-Strong:\s*var\((--[\w-]+)\)", css)
-    assert match, "Dash's interactive-strong token is no longer mapped"
-    assert match.group(1) == "--accent-text", (
-        "Dash paints text with this token, so it must be the AA-safe blue")
+    assert match and match.group(1) == "--control-ink"
 
 
 def test_the_retrieval_input_rules_cannot_reach_the_map():
@@ -1707,7 +1699,7 @@ def test_every_text_token_clears_wcag_aa_on_every_surface():
                "--status-good-soft", "--status-error-soft", "--status-warn-soft",
                "--status-info-soft"]
     foregrounds = ["--text-primary", "--text-secondary", "--text-muted",
-                   "--accent-text"]
+                   "--accent-text", "--control-ink"]
 
     failures = []
     for fg in foregrounds:
@@ -1721,6 +1713,15 @@ def test_every_text_token_clears_wcag_aa_on_every_surface():
         r = ratio("#ffffff", token(bg))
         if r < 4.5:
             failures.append(f"white on {bg}: {r:.2f}:1")
+    for fg, bg in [("--plot-ui-text", "--plot-ui-bg"),
+                   ("--plot-ui-muted", "--plot-ui-bg"),
+                   ("--plot-ui-muted", "--plot-ui-inset"),
+                   ("--control-ink", "--control-selected-fill")]:
+        r = ratio(token(fg), token(bg))
+        if r < 4.5:
+            failures.append(f"{fg} on {bg}: {r:.2f}:1")
+    for fg in ("--control-border", "--focus-ring"):
+        assert ratio(token(fg), token("--bg-panel")) >= 3, fg
     assert not failures, "text below WCAG AA 4.5:1 -> " + "; ".join(failures)
 
 
@@ -2495,3 +2496,24 @@ def test_comparison_inspector_keeps_both_executed_cohorts(selected):
         assert f"{count} samples pooled" in json.dumps(section.children[0], default=str)
     if selected and selected["kind"] == "gsm":
         assert "GSM1" in json.dumps(tree, default=str)
+
+
+@pytest.mark.parametrize("kind,message", [
+    ("good", "Retrieved 5 hits from the precomputed OSDR embedding, scored against all 940,455 ARCHS4 samples."),
+    ("good", "Retrieved 5 hits for 6 pooled samples (Liver) from a pooled query."),
+    ("good", "Two pooled queries differing by spaceflight arm: A (6 samples) and B (6). They share 2 of 8 retrieved samples, a Jaccard overlap of 0.25."),
+    ("error", "Could not read the counts file: No columns to parse from file"),
+])
+def test_status_presentation_preserves_the_complete_scientific_message(kind, message):
+    from bridge_rna.panels import build_status_banner
+
+    def exact_text(node):
+        if isinstance(node, str):
+            return node
+        if isinstance(node, (list, tuple)):
+            return "".join(exact_text(child) for child in node)
+        return exact_text(getattr(node, "children", ""))
+
+    banner = build_status_banner(message, kind=kind)
+    assert exact_text(banner) == message
+    assert f"status-{kind}" in banner.className
