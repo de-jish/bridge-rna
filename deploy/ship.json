@@ -1,0 +1,5 @@
+{
+  "host": "nasa-server",
+  "remote_root": "/home/ubuntu/fm_viz_new",
+  "validation_python": ".ships/validation-env/bin/python"
+}
