@@ -122,7 +122,15 @@ with sync_playwright() as pw:
     check(dropdown.locator('input:not([type=radio]):not([type=checkbox])').count()==0,'Color by menu has no search input')
     check('Tissue' in dropdown.inner_text() and 'Species' in dropdown.inner_text(),'both Map coloring choices remain')
     shot(page,'map-menu')
-    page.keyboard.press('ArrowDown');page.keyboard.press('Enter')
+    # Name the option instead of counting arrow presses from whatever holds
+    # focus. Dash 4 renders each option as its own checkbox input, so an arrow
+    # key moves DOM focus without moving a selection cursor, and the screenshot
+    # above re-settles focus inside the open menu. Counting from that ambient
+    # start re-selected Tissue - the value already set - so the wait below
+    # timed out on every run. Focusing the option and pressing Enter is the
+    # same keyboard assertion and is deterministic with the shot in place.
+    dropdown.get_by_role('option').filter(has_text='Species').focus()
+    page.keyboard.press('Enter')
     page.wait_for_function("document.querySelector('#color-by').textContent.includes('Species')")
     page.wait_for_function("document.querySelector('#legend-title').textContent.includes('Species')",timeout=60000)
     check(True,'keyboard selects Species and updates the Map legend')

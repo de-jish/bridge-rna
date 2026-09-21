@@ -20,8 +20,9 @@ reintroduce its panel, warnings, or payload. Executed membership remains a discl
 `app.py` is the single entry point and owns the header and the router.
 **The router must decline to repaint a route that is already on screen.** `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` alone let the router rebuild the view on every load. Rebuilding the retrieval view reads the OSDR catalog, so its response landed a few hundred milliseconds later, on top of whatever the user had done meanwhile - clicking Cohort on arrival opened the cohort panel and then closed it again, 6 times out of 6, while the click's own callback had returned the right answer. `route-store` records what was painted and `app.navigation_for` is the decision, split out so it is testable without Dash plumbing. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 399 tests pass in about twenty-seven seconds, plus 363 browser checks: 129 in `tests/e2e_check.py`, 70 in `tests/e2e_upload_check.py`, and 164 in `tests/e2e_cohort_check.py`.
-Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted.
+**Current state: built, run on the real corpus, and tested.** 508 tests pass in about thirty seconds, plus 487 browser checks: 205 in `tests/e2e_check.py`, 178 in `tests/e2e_cohort_check.py`, 70 in `tests/e2e_upload_check.py`, 31 in `tests/e2e_network_style.py`, and 3 in `tests/e2e_cleanup_check.py`.
+Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted - and they drifted again, which is why these were re-measured by running every suite rather than by adding up the last recorded numbers.
+**The last two take a `--url` or `--port` and do not start their own server**, so they are the two that silently go unrun; both were stale when this was written.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
 
 ### The join between the halves, and why retrieval is fast
@@ -158,7 +159,7 @@ The whole live cache measures 217.8 MB, of which the app opens 80.8 MB; the rest
 ### Package layout
 
 ```
-app.py                   the only entry point: header, router, both views on :8050
+app.py                   the only entry point: header, router, both views on :8000
 bridge_rna/cohorts.py    what a cohort is: three facets, grouping, the vMF
                          estimator, leave-one-out cosines, low-N tiering. Opens
                          no embedding and no memmap.
@@ -388,12 +389,16 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/fetch_archs4_meta.py  # ARCHS4 GEO metadata. ~35 s, needs network.
 /Users/josh/Bridge-RNA/.venv/bin/python precompute/validate_artifacts.py --mixing --quality
 /Users/josh/Bridge-RNA/.venv/bin/python tests/check_join.py              # the join, on the real corpus
-/Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8050
+/Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8000
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 399 tests, about twenty-seven seconds
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 129 browser checks, about five minutes
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 508 tests, about thirty seconds
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 205 browser checks, about five minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 164 cohort checks, about five minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 178 cohort checks, about five minutes
+
+# These two need an app already running, and default to :8000 now that app.py does.
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_network_style.py --port 8000   # 31 checks
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cleanup_check.py --url http://127.0.0.1:8000  # 3 checks
 /Users/josh/Bridge-RNA/.venv/bin/python tests/screenshot_readme.py       # rewrites README's two images, about three minutes
 ```
 

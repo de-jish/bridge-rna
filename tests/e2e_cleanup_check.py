@@ -2,7 +2,7 @@
 """Check disclosure access, source links, and stale AI response handling.
 
 Run against an already running real-corpus app:
-    .venv/bin/python tests/e2e_cleanup_check.py --url http://127.0.0.1:8050
+    .venv/bin/python tests/e2e_cleanup_check.py --url http://127.0.0.1:8000
 
 Only AI generation responses are controlled, to reproduce a delayed response
 without depending on a model provider. Retrieval and metadata use the real app.
@@ -108,7 +108,11 @@ async def check(url: str, out: Path):
         await page.screenshot(path=str(out / "after-map.png"))
         await page.locator("#frame-retrieval").click()
         await expect(page.locator("#neighborhood-drawer")).to_be_visible()
-        await expect(page.locator("#neighborhood-body")).to_contain_text("GEO studies")
+        # "GEO studies" was one of the three overview statistic cards, removed
+        # when the explorer was simplified. "Leading studies" is the last
+        # section of the surviving overview, so it still proves the whole body
+        # rendered rather than just the heading.
+        await expect(page.locator("#neighborhood-body")).to_contain_text("Leading studies")
         await page.wait_for_function("""() => {
             const gd = document.querySelector('#manifold-graph .js-plotly-plot');
             return gd && (gd._fullData || []).some(
@@ -128,7 +132,7 @@ async def check(url: str, out: Path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8050")
+    parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("--out", type=Path, default=Path(".lavish/cleanup"))
     args = parser.parse_args()
     asyncio.run(check(args.url, args.out))
