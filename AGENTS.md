@@ -15,3 +15,14 @@ Read `CLAUDE.md` for architecture, scientific invariants, commands, and the exis
 - Verify representative sample, cohort, upload, map, metadata, and available export workflows in the running app. Check desktop and narrow layouts, review the scientific diff, and preserve unrelated work when committing.
 
 Prefer `rtk`-prefixed shell commands when installed. If it is unavailable, report that and use a transparent command fallback.
+
+## NASA shipping boundary
+
+When asked to ship changes, follow `docs/deployment.md` and use `deploy/ship.py`.
+Use only SFTP/SCP file operations within `/home/ubuntu/fm_viz_new` via the existing
+`nasa-server` alias. Never execute remote shell commands, helpers, installers or
+process controls; never access the earlier deployment outside this directory.
+Do not download secrets, private configuration or uploads, or follow remote
+symlinks. Review source/server diffs, validate locally, back up permitted code
+and transfer only into `.ship/incoming/ID`. The user runs apply and Gunicorn.
+Transferred and confirmed running are separate states.

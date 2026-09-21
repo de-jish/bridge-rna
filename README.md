@@ -163,7 +163,7 @@ That is why no line is drawn between a query and its matches, and why each hit's
 
 ## Quickstart
 
-You need **Python 3.11** (64-bit), **Git**, and **Git LFS**.
+You need **Python 3.14** (64-bit), **Git**, and **Git LFS**.
 The model and index (~2 GB) are stored in Git LFS; everything else arrives with a normal clone.
 
 **1. Clone and fetch the large files**
@@ -179,12 +179,12 @@ python3 fetch_artifacts.py --verify-only   # checks the large files arrived inta
 **2. Install dependencies**
 
 ```bash
-python3.11 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-On Windows, use `py -3.11 -m venv .venv` and `.\.venv\Scripts\python.exe` in place of `.venv/bin/python`.
+On Windows, use `py -3.14 -m venv .venv` and `.\.venv\Scripts\python.exe` in place of `.venv/bin/python`.
 The first install is large because it includes PyTorch and PyArrow.
 
 **3. Run the app**
@@ -200,6 +200,7 @@ If something is missing, the app still starts and shows a banner naming exactly 
 By default the app is reachable only from your own machine.
 Use `--port`, `--debug`, or `--host 0.0.0.0` to change that.
 This is a development server, so put a real WSGI server in front of it for anything beyond local use.
+For staged releases to the NASA Gunicorn server, see [the deployment commands](docs/deployment.md).
 
 ## AI readings (optional)
 
