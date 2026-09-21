@@ -6,6 +6,24 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-09-08 (map badges follow the current view)
+
+Removed the evidence-neighborhood and retrieval/comparison badges from the plot header, where they repeated the explorer and map key. Renamed the OSDR badge to “OSDR shown”. The server supplies initial counts; assets/map-counts.js refines both corpus counts against Plotly’s final visible 2-D axes after plotting, zoom, pan, framing and resize. Plotly can expand the requested frame, so counting only the server viewport under-reported visible OSDR samples. Corpus tags on base traces exclude retrieval/evidence highlights from the counts. The 3-D counts describe the loaded layers, as before; they do not measure camera occlusion.
+
+All OSDR traces and their metadata remain intact. Retrieval/evidence overlays, their key, missing-location details, selection, scientific calculations and projections are unchanged. A regression test checks whole-view, partial-view and zero counts and byte-identical figure JSON before and after viewport counting.
+
+Validation: all 491 pytest tests, 205 map/sample browser checks and 176 cohort browser checks pass. Browser verification independently counts visible OSDR centers after Fit results; manual zoom/reset checks update both badges, reset restores 940,455 ARCHS4 and 2,108 OSDR, and PNG export succeeds. Taste/impeccable review preserves the existing desktop and narrow visual language.
+
+Shipment `20260908T185007Z-6bcec075` includes both neighborhood cleanups and the view-aware corpus counts. Production-lock preflight passed. SFTP dropped during read-back after upload; reconnecting verified all 52 runtime files plus the manifest against the validated bundle, and recorded the transfer receipt. Staged under `/home/ubuntu/fm_viz_new/.ship/incoming/20260908T185007Z-6bcec075`; user-run apply and Gunicorn startup remain pending.
+
+## 2026-09-08 (simplify the neighborhood explorer)
+
+Removed the three overview statistic cards (GEO studies, samples in the top three studies, and median cosine), the tissue/species coverage counts, the requested/returned-depth header line, and the ranking disclaimer footer at the user's request. Deleted their presentation formatting, callback output, and orphan CSS. The overview retains its summary sentence, tissue/species compositions, and leading studies; tab counts, study/sample search and focus, source links, and unavailable-result explanations remain accessible.
+
+This is presentation cleanup only. The exact 250-neighbor payload, summary calculations, metadata, scoring, ranking, grouping, and projection algorithms are unchanged. Ranking still uses cosine similarity in 512 dimensions; projected map positions do not determine rank.
+
+Validation: 490 pytest tests, 202 map/sample browser checks, 176 cohort browser checks, and 70 upload browser checks pass. Reviewed the rendered overview at desktop and narrow widths with taste and impeccable; the browser suite checks responsive geometry down to 320 px. A real map PNG download succeeded. The design detector reported only the existing coverage-bar width transition outside this change.
+
 ## 2026-09-05 (show both compared cohorts in the inspector)
 
 Comparison searches now open both Cohort A and Cohort B definitions in the right inspector, stacked in the same order as the query roles. Each retains its own name, sample count, source link, membership and exclusions. Selecting a hit or study keeps both cohort summaries above the selected metadata; native disclosures allow either definition to be opened from the keyboard. Single-cohort and sample inspection are unchanged. No retrieval, ranking, membership, or metadata semantics changed.
