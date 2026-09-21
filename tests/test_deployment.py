@@ -20,7 +20,8 @@ def test_package_is_allowlisted_and_integrity_checked(tmp_path):
     assert 'prompts/ai_summary_prompt.txt' in meta['files']
     assert 'precompute/embed_upload.py' in meta['files']
     assert 'generate_archs4_embeddings.py' in meta['files']
-    assert not list(dest.rglob('*.md'))
+    assert {str(p.relative_to(dest)) for p in dest.rglob('*.md')} == {
+        'assets/fonts/HDS-LICENSE.md', 'assets/fonts/public-sans/LICENSE.md'}
     assert not list(dest.rglob('.env*'))
     assert not (dest/'deploy/ship.py').exists()
     assert not (dest/'data/osdr').exists()
@@ -203,3 +204,38 @@ def test_bad_transfer_readback_does_not_advance_baseline(tmp_path):
         ship.transfer(FakeSFTP(),dest,tmp_path,meta)
     assert not (tmp_path/'last-transferred.json').exists()
     assert not (dest.parent/'transferred.json').exists()
+
+
+def test_nasa_runtime_assets_are_packaged(tmp_path):
+    import re
+    dest = ship.build(tmp_path)
+    meta = common.verify_bundle(dest)
+    for name in ("assets/00-fonts.css", "assets/00-hds-tokens.css", "assets/02-controls.css", "assets/nasa.svg"):
+        assert name in meta["files"]
+    for relative in re.findall(r'url\(["\']?([^"\')]+)', (dest/"assets/00-fonts.css").read_text()):
+        assert "assets/" + relative in meta["files"]
+    assert not any(name.startswith(("prototypes/", ".lavish/")) for name in meta["files"])
+
+
+@pytest.mark.parametrize("name", ["assets/fonts/inter/private.json", "assets/fonts/inter/extra.woff2",
+                                  "assets/arbitrary.svg", "assets/fonts/../private.json"])
+def test_asset_packaging_does_not_broaden_private_reads(name):
+    assert not common.runtime_path(name)
+
+
+def test_audit_records_binary_font_differences(tmp_path):
+    dest = ship.build(tmp_path)
+    font = "assets/fonts/inter/Inter-Regular.woff2"
+    previous = b"wOF2\x80previous-font"
+    class FakeSFTP:
+        def checked(self, name, missing=False):
+            return {} if name == font else None
+        def get(self, name):
+            assert name == font
+            return previous
+    _, report = ship.audit(FakeSFTP(), dest, tmp_path)
+    assert font in report["versus_server"]["changed"]
+    assert (dest.parent/"server-before"/font).read_bytes() == previous
+    diff = (dest.parent/"diffs"/font).read_text()
+    assert hashlib.sha256(previous).hexdigest() in diff
+    assert common.sha256(dest/font) in diff

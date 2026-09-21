@@ -157,4 +157,3 @@ def stop(cfg, target):
         if time.monotonic() > deadline:
             raise RuntimeError('Gunicorn did not stop gracefully; no forced kill was attempted')
         time.sleep(0.2)
-

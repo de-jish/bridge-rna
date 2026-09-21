@@ -14,6 +14,24 @@ DATA_DIRS = ('data/osdr', 'archs4_sample_embeddings_full', 'checkpoints_performe
 HELPERS = {'common.py', 'apply.py', 'processes.py', 'preflight.py', 'requirements.in', 'requirements.lock'}
 TOP = {'app.py','wsgi.py','osdr_metadata.py','demo_osdr_top5.py','generate_archs4_embeddings.py',
        'slim_performer_model.py','numerator_and_denominator.py','requirements.txt'}
+# Exact vendored assets, not permission to read arbitrary nested asset files.
+STATIC_ASSETS = {
+    'assets/nasa.svg',
+    'assets/fonts/HDS-LICENSE.md',
+    'assets/fonts/dm-mono/LICENSE.txt',
+    'assets/fonts/dm-mono/DMMono-Regular.woff2',
+    'assets/fonts/dm-mono/DMMono-Medium.woff2',
+    'assets/fonts/inter/LICENSE.txt',
+    'assets/fonts/inter/Inter-Regular.woff2',
+    'assets/fonts/inter/Inter-Medium.woff2',
+    'assets/fonts/inter/Inter-SemiBold.woff2',
+    'assets/fonts/inter/Inter-Bold.woff2',
+    'assets/fonts/public-sans/LICENSE.md',
+    'assets/fonts/public-sans/PublicSans-Regular.woff2',
+    'assets/fonts/public-sans/PublicSans-Medium.woff2',
+    'assets/fonts/public-sans/PublicSans-SemiBold.woff2',
+    'assets/fonts/public-sans/PublicSans-Bold.woff2',
+}
 
 
 def now():
@@ -30,7 +48,7 @@ def runtime_path(name):
     p = Path(name)
     if p.is_absolute() or '..' in p.parts or str(p) != name:
         return False
-    if name in TOP | REFERENCES | {'prompts/ai_summary_prompt.txt', 'precompute/embed_upload.py'}:
+    if name in TOP | REFERENCES | STATIC_ASSETS | {'prompts/ai_summary_prompt.txt', 'precompute/embed_upload.py'}:
         return True
     if len(p.parts) == 2:
         parent, leaf = p.parts

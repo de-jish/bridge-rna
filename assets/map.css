@@ -23,15 +23,16 @@
   overflow-y: auto;
 }
 .bm-rail::-webkit-scrollbar { width: 8px; }
-.bm-rail::-webkit-scrollbar-thumb { background: #cfd9e6; border-radius: 4px; }
+.bm-rail::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-sm); }
 
 .bm-group { margin-bottom: 20px; }
 .bm-group-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
+  font-size: var(--control-font-size);
+  font-weight: var(--control-weight);
+  font-family: var(--font-heading);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-primary);
   margin-bottom: 9px;
 }
 
@@ -47,7 +48,7 @@
    rules deliberately target Dash's structural classes, scoped under .bm-seg. */
 .bm-seg {
   display: flex; background: var(--bg-inset);
-  border-radius: 8px; padding: 3px; gap: 3px;
+  border-radius: var(--radius-sm); padding: 3px; gap: 3px;
 }
 .bm-seg .dash-options-list-option {
   flex: 1;
@@ -60,7 +61,7 @@
   padding: 7px 6px;
   font-size: 12.5px;
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-secondary);
   background: transparent;
@@ -84,21 +85,17 @@
   overflow: hidden;
   clip-path: inset(50%);
 }
-/* `color: inherit` is load-bearing: Dash paints the selected option's *text
-   span* from its own interactive token, which is --accent, so the selected
-   pill's label stayed at 3.76:1 while the label element around it had already
-   been moved to --accent-text. Inheriting is what lets one rule below decide
-   the color for both. */
+/* Inherit the selected control role on Dash's nested text span. */
 .bm-seg .dash-options-list-option-text { display: block; text-align: center; color: inherit; }
 .bm-seg .dash-options-list-option:hover { color: var(--text-primary); }
 .bm-seg .dash-options-list-option.selected {
   background: var(--bg-panel);
-  color: var(--accent-text);
-  box-shadow: var(--shadow);
+  color: var(--control-ink);
+  box-shadow: inset 0 -2px var(--control-ink);
   font-weight: 600;
 }
 .bm-seg .dash-options-list-option:focus-within {
-  outline: 2px solid var(--accent); outline-offset: 1px;
+  outline: 2px solid var(--focus-ring); outline-offset: 1px;
 }
 .bm-seg .dash-options-list-option:has(input[disabled]) {
   color: var(--text-muted); cursor: not-allowed; opacity: 0.5;
@@ -161,16 +158,16 @@
   font-size: 13px;
   min-height: 38px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
   background: #fff;
   box-shadow: var(--shadow);
 }
-.bm-find-input:hover { border-color: #c3cfdf; }
+.bm-find-input:hover { border-color: var(--border-strong); }
 .bm-find-input:focus-within {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
-  border-color: var(--accent);
+  border-color: var(--focus-ring);
 }
 /* The wrapper carries the box, so the input inside it must not draw a second
    one. Scoped to this control rather than to `.dash-input-element` at large,
@@ -209,10 +206,10 @@
   max-height: 196px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   background: var(--bg-panel);
-  box-shadow: 0 6px 20px rgba(20, 41, 74, 0.14), 0 2px 6px rgba(20, 41, 74, 0.08);
+  box-shadow: var(--shadow-raised);
   padding: 3px;
 }
 .bm-suggest:empty { display: none; }
@@ -245,7 +242,7 @@
   flex-direction: column;
   gap: 1px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   /* WCAG 2.2 SC 2.5.8 puts the floor for a pointer target at 24x24 CSS px. */
   min-height: 24px;
@@ -254,7 +251,7 @@
    this is the row that Enter or a click would take. */
 .bm-suggest-row:hover,
 .bm-suggest-row.is-active { background: var(--accent-soft); }
-.bm-suggest-row.is-active { box-shadow: inset 2px 0 0 var(--accent); }
+.bm-suggest-row.is-active { box-shadow: inset 2px 0 0 var(--control-ink); }
 /* Both lines still ellipse rather than wrap. Nothing in the corpus is long
    enough to need it at this width - it is the guard that keeps a row one row
    tall whatever a future metadata join puts in it, so the list's height stays a
@@ -282,19 +279,11 @@
 .bm-dropdown {
   font-size: 13px;
   min-height: 38px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
 }
 .bm-dropdown .dash-dropdown-trigger { min-height: 38px; }
-.bm-dropdown:hover { border-color: #c3cfdf; }
-.dash-dropdown-content {
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(20, 41, 74, 0.14), 0 2px 6px rgba(20, 41, 74, 0.08);
-  font-size: 13px;
-}
-.dash-dropdown-content .dash-options-list-option { padding: 7px 11px; border-radius: 6px; }
-.dash-dropdown-content .dash-options-list-option.selected { color: var(--accent-text); font-weight: 600; }
-
+.bm-dropdown:hover { border-color: var(--border-strong); }
 /* Layer checklist. The checkbox is restyled rather than replaced, so keyboard
    focus and the native checked state keep working. */
 .bm-checklist { display: flex; flex-direction: column; gap: 3px; }
@@ -310,12 +299,12 @@
 .bm-checklist input[type="checkbox"] {
   appearance: none; -webkit-appearance: none;
   width: 16px; height: 16px; margin: 0 9px 0 0; flex-shrink: 0;
-  border: 1.5px solid #c3cfdf; border-radius: 4px;
+  border: 1.5px solid var(--control-border); border-radius: var(--radius-sm);
   background: var(--bg-panel); cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
 .bm-checklist input[type="checkbox"]:checked {
-  background: var(--accent); border-color: var(--accent);
+  background: var(--control-ink); border-color: var(--control-ink);
 }
 .bm-checklist input[type="checkbox"]:checked::after {
   content: ""; display: block;
@@ -324,23 +313,23 @@
   transform: rotate(45deg);
 }
 .bm-checklist input[type="checkbox"]:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
 }
 
 /* ---- Center plot ------------------------------------------------------ */
 .bm-plot-wrap { flex: 1; position: relative; min-width: 0; background: var(--plot-bg); }
 .bm-plot-loading { height: 100%; }
-.bm-legend-empty { font-size: 12px; color: #7089a8; padding: 4px 2px; }
+.bm-legend-empty { font-size: 12px; color: var(--plot-ui-muted); padding: 4px 2px; }
 .bm-plot-wrap .dash-graph, .bm-plot-wrap .js-plotly-plot { height: 100% !important; }
 
 /* Plotly's modebar is drawn for a light paper; on the navy canvas its default
    dark glyphs are all but invisible. Recolored for the dark surface, and kept
    dim until hover so it never competes with the data. */
 .bm-plot-wrap .modebar { padding-right: 6px; }
-.bm-plot-wrap .modebar-group { background: transparent !important; }
-.bm-plot-wrap .modebar-btn .icon path { fill: #6f88ab !important; transition: fill 0.12s; }
-.bm-plot-wrap .modebar-btn:hover .icon path { fill: #dceafd !important; }
-.bm-plot-wrap .modebar-btn.active .icon path { fill: var(--header-line) !important; }
+.bm-plot-wrap .modebar-group { background: var(--plot-ui-bg) !important; }
+.bm-plot-wrap .modebar-btn .icon path { fill: var(--plot-ui-muted) !important; transition: fill 0.12s; }
+.bm-plot-wrap .modebar-btn:hover .icon path { fill: var(--plot-ui-text) !important; }
+.bm-plot-wrap .modebar-btn.active .icon path { fill: var(--plot-ui-text) !important; }
 
 /* dcc.Loading overlays a white sheet by default, which flashes over the navy
    canvas on every control change. */
@@ -359,14 +348,14 @@
 }
 .bm-badges { display: contents; }
 .bm-badge {
-  background: rgba(14, 29, 52, 0.82);
-  color: #cfe0f7;
-  border: 1px solid rgba(90, 130, 185, 0.45);
-  border-radius: 20px;
+  background: var(--plot-ui-bg);
+  color: var(--plot-ui-text);
+  border: 1px solid var(--plot-ui-border);
+  border-radius: var(--radius-sm);
   padding: 4px 11px;
   font-size: 11.5px;
   font-weight: 500;
-  backdrop-filter: blur(3px);
+
 }
 .bm-badge b { color: #fff; }
 .bm-badge.warn { border-color: rgba(215, 150, 40, 0.6); color: #ffd79a; }
@@ -384,29 +373,34 @@
 .bm-legend {
   position: absolute; top: 46px; right: 14px; z-index: 7;
   width: 228px; max-height: calc(100% - 58px);
-  background: rgba(14, 29, 52, 0.9);
-  border: 1px solid rgba(90, 130, 185, 0.4);
-  border-radius: 10px;
+  background: var(--plot-ui-bg);
+  border: 1px solid var(--plot-ui-border);
+  border-radius: var(--radius-sm);
   padding: 10px 11px;
-  backdrop-filter: blur(4px);
+
   display: flex; flex-direction: column;
 }
 .bm-legend-section { display: flex; flex-direction: column; min-height: 0; }
 .bm-legend-title {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
-  color: #8ea6c9; font-weight: 700; margin-bottom: 8px;
+  font-size: 11px; text-transform: none; letter-spacing: 0;
+  font-family: var(--font-heading);
+  color: var(--plot-ui-muted); font-weight: 700; margin-bottom: 8px;
 }
 .bm-legend-search {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(120,150,195,0.35);
-  border-radius: 6px; color: #e6eefb; font-size: 12px;
+  background: var(--plot-ui-inset);
+  border: 1px solid var(--plot-ui-border);
+  border-radius: var(--radius-sm); color: var(--plot-ui-text); font-size: 12px;
   padding: 5px 8px; width: 100%; outline: none;
 }
 /* The margin belongs to the wrapper, which is what the callback shows and
    hides; on the field itself it would survive as a gap when the field is
    gone. */
 #legend-search-group { margin-bottom: 8px; }
-.bm-legend-search::placeholder { color: #7089a8; }
+.bm-legend-search input {
+  color: var(--plot-ui-text); background: transparent;
+  border: 0; outline: 0; padding: 0; font: inherit;
+}
+.bm-legend-search input::placeholder { color: var(--plot-ui-muted); }
 /* `outline: none` above kills the default ring, and this field is the only
    control sitting on the dark canvas - so it needs a ring drawn for the dark
    canvas rather than no ring at all. It was the one element in either view a
@@ -414,9 +408,9 @@
    `:focus-within`, because these class names land on Dash's wrapper div and
    the element that actually takes focus is the `<input>` inside it. */
 .bm-legend-search:focus-within {
-  outline: 2px solid var(--header-line);
+  outline: 2px solid var(--plot-ui-text);
   outline-offset: 1px;
-  border-color: var(--header-line);
+  border-color: var(--plot-ui-text);
 }
 /* `flex: none` on the rows is what makes the list scroll instead of squashing.
    A column flex item shrinks below its content height by default, so once the
@@ -431,11 +425,11 @@
 .bm-legend-list::-webkit-scrollbar-thumb { background: rgba(120,150,195,0.4); border-radius: 3px; }
 .bm-legend-item {
   display: flex; align-items: center; gap: 7px;
-  font-size: 12px; color: #cbd9ec; padding: 2px 2px;
+  font-size: 12px; color: var(--plot-ui-text); padding: 2px 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .bm-legend-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
-.bm-legend-count { margin-left: auto; color: #7f97ba; font-variant-numeric: tabular-nums; font-size: 11px; }
+.bm-legend-count { margin-left: auto; color: var(--plot-ui-muted); font-variant-numeric: tabular-nums; font-size: 11px; }
 
 /* ---- The mark key ------------------------------------------------------
    The color legend above keys hue. This keys SHAPE, which was the channel
@@ -461,15 +455,15 @@
 .bm-key--found,
 .bm-key--retrieval {
   margin-bottom: 9px; padding-bottom: 9px;
-  border-bottom: 1px solid rgba(90, 130, 185, 0.28);
+  border-bottom: 1px solid var(--plot-ui-border);
 }
 .bm-key--corpus {
   margin-top: 9px; padding-top: 9px;
-  border-top: 1px solid rgba(90, 130, 185, 0.28);
+  border-top: 1px solid var(--plot-ui-border);
 }
 .bm-key-row {
   display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: #cbd9ec; padding: 2px 2px;
+  font-size: 12px; color: var(--plot-ui-text); padding: 2px 2px;
   min-width: 0;
   /* Same reason as .bm-legend-item: these are column flex items inside a
      height-capped panel, and the default is to shrink rather than to overflow. */
@@ -477,7 +471,7 @@
 }
 .bm-key-count {
   margin-left: auto; padding-left: 6px;
-  color: #7f97ba; font-variant-numeric: tabular-nums; font-size: 11px;
+  color: var(--plot-ui-muted); font-variant-numeric: tabular-nums; font-size: 11px;
 }
 
 /* A comparison groups by ROLE, so the two member rows sit adjacent and differ
@@ -487,7 +481,7 @@
 .bm-key-head {
   margin: 6px 2px 2px;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
-  font-weight: 700; color: #7f97ba;
+  font-weight: 700; color: var(--plot-ui-muted);
 }
 .bm-key-head:first-child { margin-top: 0; }
 /* A cohort label runs long ("Liver · Space Flight"), and two arms usually
@@ -594,26 +588,28 @@
    covered. */
 .bm-coverage-bar {
   height: 4px; border-radius: 2px; overflow: hidden;
-  background: #d7e0ed; margin-bottom: 6px;
-  box-shadow: inset 0 0 0 1px rgba(20, 41, 74, 0.07);
+  background: var(--border-subtle); margin-bottom: 6px;
+  box-shadow: none;
 }
 .bm-coverage-fill {
   height: 100%; border-radius: 2px;
-  background: var(--accent-teal);
+  background: var(--text-secondary);
   transition: width 0.18s ease;
 }
 /* Amber, not red: a field that only describes OSDR is working correctly, not
    failing. The color marks a limit worth knowing, not an error. */
-.bm-coverage-fill.partial { background: var(--accent-warm); }
+.bm-coverage-fill.partial { background: var(--status-warn); }
 .bm-coverage-text {
   font-size: 11.5px; color: var(--text-secondary); line-height: 1.45;
 }
 .bm-coverage-fix {
   font-size: 11px; color: var(--status-warn); line-height: 1.45;
-  margin-top: 5px; background: #fdf6ea; border-radius: 6px; padding: 6px 8px;
+  margin-top: 5px; background: #fdf6ea; border-radius: var(--radius-sm); padding: 6px 8px;
 }
 
-a, a:visited { color: var(--accent-text); }
+/* Only real links use blue; action-like links use shared button styling. */
+a:not(.app-brand):not(.app-nav-item):not(.btn-ghost) { color: var(--link-color); }
+a:not(.app-brand):not(.app-nav-item):not(.btn-ghost):hover { color: var(--link-hover); }
 
 /* A rail action. Quieter than the retrieval view's primary button: the map is
    read rather than driven, and this is the only button on the rail. */
@@ -621,18 +617,17 @@ a, a:visited { color: var(--accent-text); }
   width: 100%;
   margin-top: 2px;
   padding: 7px 10px;
-  font-family: inherit;
+  font-family: var(--font-heading);
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent-text);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
+
+
+  border-width: 1px; border-style: solid;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 }
-.bm-button:hover { background: var(--accent-soft); border-color: var(--accent-dim); }
-.bm-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bm-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* The clicked-sample offer on the control rail. */
 .bm-picked {
@@ -702,20 +697,19 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
   right: var(--space-3);
   min-height: var(--space-5);
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-strong);
+  border-width: 1px; border-style: solid;
   border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  color: var(--accent-text);
-  font: inherit;
+
+
+  font-family: var(--font-heading);
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
 }
-.bm-neighborhood-close:hover { background: var(--accent-soft); }
 .bm-neighborhood-close:focus-visible,
 .bm-neighborhood-geo:focus-visible,
 .bm-neighborhood-row:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .bm-neighborhood-arm,
@@ -731,7 +725,7 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
   margin-top: var(--space-3);
   min-height: var(--space-5);
   padding: var(--space-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   color: var(--text-primary);
@@ -739,9 +733,9 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
   font-size: var(--text-sm);
 }
 .bm-neighborhood-search:focus-within {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
-  border-color: var(--accent);
+  border-color: var(--focus-ring);
 }
 .bm-neighborhood-search input {
   width: 100%;
@@ -849,7 +843,7 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
 .bm-neighborhood-row:hover,
 .bm-neighborhood-row:focus-visible,
 .bm-neighborhood-row.is-selected { background: var(--accent-soft); }
-.bm-neighborhood-row.is-selected { box-shadow: inset 3px 0 0 var(--accent); }
+.bm-neighborhood-row.is-selected { box-shadow: inset 2px 0 0 var(--control-ink); }
 .bm-neighborhood-row-primary,
 .bm-neighborhood-row-secondary,
 .bm-neighborhood-row-trailing { min-width: 0; }
@@ -880,7 +874,7 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
   display: inline-flex;
   align-items: center;
   min-height: var(--space-5);
-  color: var(--accent-text);
+  color: var(--link-color);
   font-size: 11px;
   font-weight: 600;
   text-decoration: underline;
@@ -1044,6 +1038,6 @@ a.bm-button { display: block; text-align: center; text-decoration: none; }
 }
 .bm-method-details > summary { cursor: pointer; }
 .bm-method-details > summary:focus-visible {
-  outline: 2px solid var(--accent-text);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }

@@ -1,0 +1,63 @@
+/* Shared interaction styling for Dash 4 and native controls.
+   Explicit classes keep plot legends and data glyphs outside interface rules. */
+.dash-dropdown, .dash-dropdown-content {
+  border: 1px solid var(--control-border);
+  background: var(--control-fill);
+  color: var(--control-ink);
+  font-family: var(--font-sans);
+}
+.dash-dropdown-trigger { border: 0; min-height: calc(var(--control-height) - 2px); }
+.dash-dropdown { transition: border-color var(--interaction-duration) ease; }
+.dash-dropdown:hover:not([disabled]) { border-color: var(--control-hover); }
+.dash-dropdown:focus-visible, .dash-dropdown:has(:focus-visible) {
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
+}
+.dash-dropdown-content { box-shadow: var(--shadow-raised); font-size: 13px; }
+.dash-dropdown-content .dash-options-list-option {
+  padding: 7px 11px; border-radius: var(--radius-sm);
+}
+.dash-dropdown-content .dash-options-list-option.selected {
+  color: var(--control-ink); background: var(--control-selected-fill); font-weight: 600;
+}
+.dash-dropdown-content .dash-dropdown-search { color: var(--control-ink); }
+.dash-dropdown-content .dash-dropdown-search::placeholder { color: var(--text-secondary); }
+
+.btn-secondary, .btn-ghost, .bm-button, .bm-neighborhood-close {
+  color: var(--control-ink);
+  background: var(--control-fill);
+  border-color: var(--control-border);
+  font-family: var(--font-heading);
+}
+.btn-secondary:hover:not(:disabled), .btn-ghost:hover,
+.bm-button:hover:not(:disabled), .bm-neighborhood-close:hover:not(:disabled) {
+  background: var(--control-hover-fill); border-color: var(--control-hover);
+}
+.btn-secondary:active:not(:disabled), .btn-ghost:active,
+.bm-button:active:not(:disabled), .bm-neighborhood-close:active:not(:disabled) {
+  background: var(--control-selected-fill);
+}
+.btn-secondary:disabled, .bm-button:disabled, .bm-neighborhood-close:disabled {
+  color: var(--action-disabled-text); background: var(--action-disabled-bg);
+  border-color: var(--border-strong); cursor: not-allowed;
+}
+.sidebar input[type="checkbox"], .bm-rail input[type="checkbox"] {
+  accent-color: var(--control-ink);
+}
+.control-slider .dash-slider-track { background: var(--control-border); }
+.control-slider .dash-slider-range { background: var(--control-ink); }
+.control-slider .dash-slider-thumb {
+  background: var(--control-ink); border-color: var(--bg-panel); box-shadow: none;
+}
+.control-slider .dash-slider-thumb:focus-visible {
+  outline: 2px solid var(--focus-ring); outline-offset: 3px;
+}
+.control-slider .dash-slider-mark { color: var(--text-secondary); }
+
+/* Native disclosures retain their behavior; use one quiet typographic role. */
+.advanced-summary, .detail-collapse > summary, .cohort-members-summary,
+.bm-method-details > summary, .status-details > summary {
+  color: var(--control-ink); font-family: var(--font-heading);
+}
+.advanced-summary:hover, .detail-collapse > summary:hover,
+.cohort-members-summary:hover, .bm-method-details > summary:hover,
+.status-details > summary:hover { text-decoration: underline; text-underline-offset: 3px; }

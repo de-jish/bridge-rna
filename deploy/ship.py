@@ -125,8 +125,13 @@ def audit(sftp, dest, store):
         before=backup/name;after=dest/name
         if before.is_file() and observed[name]!=meta['files'][name]:
             out=dest.parent/'diffs'/name;out.parent.mkdir(parents=True,exist_ok=True)
-            out.write_text(''.join(difflib.unified_diff(before.read_text().splitlines(True),after.read_text().splitlines(True),
-                                                     fromfile='server/'+name,tofile='local/'+name)))
+            if name.endswith('.woff2'):
+                out.write_text(f'Binary font changed: {name}\n'
+                               f'server SHA-256: {observed[name]}\n'
+                               f'local SHA-256: {meta["files"][name]}\n')
+            else:
+                out.write_text(''.join(difflib.unified_diff(before.read_text().splitlines(True),after.read_text().splitlines(True),
+                                                         fromfile='server/'+name,tofile='local/'+name)))
     atomic_json(dest/'ship.json',meta)
     atomic_json(dest.parent/'comparison.json',report)
     atomic_json(dest.parent/'server-before.json',observed)

@@ -566,12 +566,20 @@ It is still optional: without it the tissue color-by is shown disabled with the 
 
 ## 9. Visual theme tokens (from `assets/00-tokens.css` and `manifold/theme.py`)
 
-Light scientific-instrument chrome, reused verbatim from Bridge RNA:
-`--bg-canvas #eef2f7`, `--bg-panel #ffffff`, `--bg-panel-raised #f4f7fb`, `--bg-inset #f5f8fc`.
-`--text-primary #1a2432`, `--text-secondary #5a6b7e`, `--text-muted #8a99ac`.
-`--accent #2b7fff`, `--accent-hover #1f6ff0`, `--accent-teal #0bab9f`, `--accent-warm #d9791b`.
-`--header-bg #14294a`, `--header-fg #f3f7fc`, `--header-line #22c7bd`.
-`--status-good #1f9d57`, `--status-error #d64545`, `--status-warn #b7791f`.
+NASA Human Design System chrome, adopted 2026-09-19.
+Every value below is what an HDS token in `assets/00-hds-tokens.css` resolves to; `assets/00-tokens.css` does the mapping and `manifold/theme.py` mirrors the resolved values for Plotly, which cannot read a CSS variable.
+`--bg-canvas #f6f6f6` (carbon-05), `--bg-panel #ffffff`, `--bg-panel-raised #f6f6f6`, `--bg-inset #f6f6f6`.
+`--text-primary #17171b` (carbon-90), `--text-secondary #58585b` (carbon-60), `--text-muted #58585b`.
+`--accent #1c67e3` (NASA blue), `--accent-text #0b3d91` (NASA blue shade), `--accent-hover #0b3d91`, `--accent-teal #0bab9f`, `--accent-warm #d9791b`.
+`--action-primary #d83933`, `--action-primary-hover #b60109` - the primary query action only. NASA brand red `#f64137` is 3.67:1 against white and never carries a white label.
+`--header-bg #000000`, `--header-fg #ffffff`, `--header-line #444447` (carbon-70).
+`--status-good #157a41`, `--status-error #b60109`, `--status-warn #8a600f`.
+
+Measured on these values: text-muted 7.09:1 on a panel and 6.56:1 on the canvas, text-primary 16.54:1 on the canvas, accent-text 10.04:1 on a panel, white on `--accent` 5.12:1, white on `--action-primary` 4.61:1.
+`test_every_text_token_clears_wcag_aa_on_every_surface` recomputes these from the stylesheet.
+
+Typefaces are vendored under `assets/fonts/` with their licenses, never fetched from a CDN: Public Sans (headings and controls), Inter (body), DM Mono (numerals and accessions).
+The previous chrome, before the rebrand: `--bg-canvas #eef2f7`, `--accent #2b7fff`, `--header-bg #14294a`, `--header-line #22c7bd`.
 
 The one deliberate departure is a dark navy plot canvas for WebGL glyph contrast: `PLOT_BG #0e1d34`, `PLOT_GRID #1c3252`, `PLOT_AXIS #2a456b`, `PLOT_TEXT #c7d6ea`.
 

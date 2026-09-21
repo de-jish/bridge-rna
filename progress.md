@@ -6,6 +6,18 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-09-19 (NASA Human Design System)
+
+Merged `prototype/hds-exploration` into main. The interface now resolves every chrome color through NASA's Human Design System: `assets/00-hds-tokens.css` is HDS's generated token file, `assets/00-tokens.css` maps the app's semantic names onto it, and `manifold/theme.py` mirrors the resolved values for Plotly. Carbon-05 canvas, white panels, black header with a carbon-70 rule, NASA blue `#1c67e3` as the accent, `#d83933` for the one primary query action. Public Sans, Inter and DM Mono are vendored under `assets/fonts/` with their licenses and named in `deploy/common.STATIC_ASSETS` so the ship path carries them.
+
+The dark navy plot canvas, the eleven-hue categorical palette and every scientific mark inside the plot are unchanged. No retrieval, pooling, preprocessing, ranking or projection calculation changed.
+
+Merge resolution: the branch's `deploy/` files were taken over main's, since each is main's code plus the asset support the rebrand needs, and the branch's `.lavish/` screenshots (107 files) were dropped so the ignore rule added earlier survives. CLAUDE.md's Visual language section and REFERENCE.md section 9 described the pre-rebrand chrome and were rewritten against the shipped tokens, with the old palette kept as marked history.
+
+Validation: 508 pytest tests pass on the merged tree. Contrast recomputed from the stylesheet: text-muted 7.09:1 on a panel, text-primary 16.54:1 on the canvas, accent-text 10.04:1, white on `--action-primary` 4.61:1. NASA brand red `#f64137` is 3.67:1 and is never used to carry a white label.
+
+Open: the single-query star is `#d83933` in the retrieval network and `#0bab9f` on the map, and a comparison draws cohort A teal in both. The red was a requested adaptation; the divergence is recorded in `manifold/theme.py` rather than reconciled.
+
 ## 2026-09-08 (map badges follow the current view)
 
 Removed the evidence-neighborhood and retrieval/comparison badges from the plot header, where they repeated the explorer and map key. Renamed the OSDR badge to “OSDR shown”. The server supplies initial counts; assets/map-counts.js refines both corpus counts against Plotly’s final visible 2-D axes after plotting, zoom, pan, framing and resize. Plotly can expand the requested frame, so counting only the server viewport under-reported visible OSDR samples. Corpus tags on base traces exclude retrieval/evidence highlights from the counts. The 3-D counts describe the loaded layers, as before; they do not measure camera occlusion.
@@ -1234,3 +1246,18 @@ Full measurement in `REFERENCE.md` section 4.
   If tissue ever becomes a build gate, switch to the versioned metadata-only HDF5 files and assert 100%.
 - UMAP quality at 940k via landmark fit-and-transform ran clean, but *visual* quality on the real map is still unreviewed.
 - `tests/` never touches the real data, so the suite stays fast and runs on a machine with neither the memmap nor the checkpoint.
+
+
+### 2026-09-18 — NASA component cohesion (development worktree only)
+
+Continued the approved black/white/red direction from `9b9cfba`. Replaced routine green completion alerts with neutral summaries without rewriting result/provenance text; separated control, link, focus and scientific color roles; consolidated Dash/native control styling; themed Map overlays, loading and hover; retained the coverage bar's semantic partial state. Removed competing modebar styles and nested dropdown borders. Scientific callbacks and data mappings are unchanged; network markers now match solid legend swatches at full opacity. Evidence: `.lavish/nasa-cohesion/`; validation: 295 tests, 44 workflow browser checks and 9 state checks. See `prototypes/hds/README.md` for source distinctions and known limitations. No deployment or merge.
+
+## 2026-09-18: NASA release packaging
+
+Integrated the existing SFTP-only deployment workflow into the approved NASA worktree, preserving the original checkout. Added exact allowlisted HDS fonts/licenses, the NASA SVG and shared theme styles; binary font hash diffs; and clean-payload HTTP checks for every asset. Prototype/review files remain excluded. All 505 tests pass. Python 3.14 production-lock preflight passes against 940,455 ARCHS4 and 2,108 OSDR samples, with upload/reference cosine 1.00000000. The initial SFTP audit timed out before any transfer; live-server confirmation remains a separate user-run step.
+
+## 2026-09-19: Focused network and Map control refinement
+
+Disabled search only on Map's two-option Color by dropdown using Dash's supported configuration. The single-query network (sample, pooled cohort and upload) now uses a larger white-filled red ring, dark-blue GSM circles, graphite GSE diamonds and neutral edges. Its legend uses matching roles. Hover and inspection emphasize adjacent relationships through scoped SVG classes without redrawing Plotly or altering click data; clean PNG exports keep the base styling. New searches reset emphasis and route navigation reconnects the handlers.
+
+The requested brand-color treatment is an app-specific departure from HDS's dataviz guidance. Map tissue/species palettes and the separate comparison A/B/shared encodings remain unchanged. Scientific callbacks, ranking, node identity, coordinates, tooltips and workspace geometry are preserved. All 508 tests and 31 real-data browser checks pass, including keyboard Map selection, retained searches, hover/inspection, export and 1440/1280/390px layouts. Evidence is in `.lavish/network-refinement/`. Runtime packaging includes the new local interaction asset. Deployment follows the SFTP-only process; transfer and confirmed running remain separate records.

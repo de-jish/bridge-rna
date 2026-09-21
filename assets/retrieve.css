@@ -71,17 +71,19 @@
   margin: 0 0 var(--space-1);
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
 }
 
 .control-label {
   display: block;
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   margin-bottom: var(--space-1);
+  font-family: var(--font-heading);
 }
 .control-hint {
   font-size: 11px;
@@ -134,33 +136,29 @@
 .sidebar .dash-input .dash-input-element:focus,
 .control input[type="email"]:focus,
 .control input[type="text"]:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  border-color: var(--focus-ring);
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
+  box-shadow: none;
 }
 
-/* Primary action button.
-   The ground is --accent-text rather than --accent: this is the one place the
-   accent has to hold white 14 px type, and at 3.76:1 the identity blue does
-   not clear AA for it. --accent-hover is a step darker again, so the hover
-   still reads as pressing further in. */
+/* NASA red is reserved for primary query actions. */
 .btn-primary {
   width: 100%;
   padding: 11px 14px;
   font-size: var(--text-base);
   font-weight: 600;
-  font-family: var(--font-sans);
+  font-family: var(--font-heading);
   color: #fff;
-  background: var(--accent-text);
-  border: 1px solid var(--accent-text);
+  background: var(--action-primary);
+  border: 1px solid var(--action-primary);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
-  /* The button's own blue, not the identity one it no longer wears. */
-  box-shadow: 0 1px 2px rgba(22, 99, 221, 0.25);
+  box-shadow: none;
 }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn-primary:active:not(:disabled) { transform: translateY(1px); }
-.btn-primary:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+.btn-primary:hover:not(:disabled) { background: var(--action-primary-hover); border-color: var(--action-primary-hover); }
+.btn-primary:active:not(:disabled) { background: var(--action-primary-active); border-color: var(--action-primary-active); transform: translateY(1px); }
+.btn-primary:disabled { background: var(--action-disabled-bg); color: var(--action-disabled-text); border-color: var(--border-strong); opacity: 1; cursor: not-allowed; box-shadow: none; }
 
 /* Secondary / subtle button */
 .btn-secondary {
@@ -168,29 +166,27 @@
   padding: 10px 14px;
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--accent-text);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
+
+
+  border-width: 1px; border-style: solid;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
-.btn-secondary:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-dim); }
-.btn-secondary:disabled { opacity: 0.55; cursor: default; }
 
 .running-indicator {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   font-size: var(--text-sm);
-  color: var(--accent-text);
+  color: var(--text-secondary);
   min-height: 18px;
 }
 .running-indicator:not(:empty)::before {
   content: "";
   width: 12px; height: 12px;
   border: 2px solid var(--accent-dim);
-  border-top-color: var(--accent);
+  border-top-color: var(--control-ink);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
   flex: none;
@@ -230,14 +226,14 @@
   padding: var(--space-4);
 }
 
-/* the network graph is the main event: accent top edge */
+/* Full-height network canvas; neutral border preserves the original box. */
 .panel--canvas {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 3px solid var(--accent);
-  padding-top: calc(var(--space-4) - 3px);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: calc(var(--space-4) - 1px);
 }
 
 /* `flex-start`, not `center`. The dot marks the panel, so it belongs against
@@ -252,7 +248,7 @@
 }
 .panel-dot {
   width: 9px; height: 9px; border-radius: 50%;
-  background: var(--accent);
+  background: var(--text-secondary);
   flex: none;
   /* Optical centre of the 18px title's first line, not the top of it. */
   margin-top: 7px;
@@ -283,7 +279,7 @@
 .sample-preview-name {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
   word-break: break-word;
   margin-bottom: var(--space-2);
@@ -333,13 +329,13 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
   margin-bottom: var(--space-3);
-  background: var(--bg-inset);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border-block: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 .legend-item { display: flex; align-items: center; gap: var(--space-2); }
 .legend-swatch { width: 14px; height: 14px; flex: none; }
@@ -347,8 +343,10 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
   background: var(--accent-teal);
 }
-.legend-swatch--circle { border-radius: 50%; background: var(--accent); }
-.legend-swatch--diamond { transform: rotate(45deg); width: 11px; height: 11px; background: var(--accent-warm); }
+.legend-swatch--query { border: 2px solid var(--network-query); border-radius: 50%; }
+.legend-swatch--circle { border-radius: 50%; background: var(--network-sample); }
+.legend-swatch--comparison-hit { background: var(--data-hit); }
+.legend-swatch--diamond { transform: rotate(45deg); width: 11px; height: 11px; background: var(--network-study); }
 .legend-divider { width: 1px; align-self: stretch; background: var(--border-strong); }
 .legend-note { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
 
@@ -401,13 +399,13 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .score-badge {
   flex: none;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-dim);
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
   white-space: nowrap;
 }
 
@@ -416,10 +414,11 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .details-section-title {
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--accent-text);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-primary);
   margin-bottom: var(--space-1);
+  font-family: var(--font-heading);
 }
 
 .detail-row {
@@ -444,7 +443,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   word-break: break-word;
   min-width: 0;
 }
-.detail-row .value a { color: var(--accent-text); text-decoration: none; }
+.detail-row .value a { color: var(--link-color); text-decoration: none; }
 .detail-row .value a:hover { text-decoration: underline; }
 .detail-row .value.mono { font-family: var(--font-mono); font-size: var(--text-sm); }
 .detail-row .value.empty { color: var(--text-muted); font-style: italic; }
@@ -475,7 +474,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   list-style: none;
   font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--accent-text);
+  color: var(--control-ink);
   padding: var(--space-2) 0;
   user-select: none;
 }
@@ -513,7 +512,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   content: "";
   width: 12px; height: 12px;
   border: 2px solid var(--accent-dim);
-  border-top-color: var(--accent);
+  border-top-color: var(--control-ink);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
   flex: none;
@@ -539,7 +538,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   font-size: 12px;
   background: var(--bg-inset);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* ==========================================================================
@@ -556,15 +555,19 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 }
 .status-banner-text { display: block; }
 .status-good {
-  background: var(--status-good-soft);
-  border-color: rgba(31, 157, 87, 0.3);
-  color: #157a41;
+  background: transparent;
+  border: 0; border-top: 1px solid var(--border-subtle);
+  padding: var(--space-3) 0 0;
+  color: var(--text-secondary);
 }
-.status-good .status-banner-text::before { content: "✓ "; font-weight: 700; }
+.status-good .status-summary-lead {
+  display: block; color: var(--text-primary); font-family: var(--font-heading);
+  font-size: 13px; font-weight: 600; margin-bottom: var(--space-1);
+}
 .status-error {
   background: var(--status-error-soft);
   border-color: rgba(214, 69, 69, 0.35);
-  color: #b83232;
+  color: var(--status-error);
 }
 .status-error .status-banner-text::before { content: "⚠ "; font-weight: 700; }
 
@@ -674,7 +677,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .sidebar::-webkit-scrollbar-thumb,
 .status-details-pre::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
 }
 
 /* ==========================================================================
@@ -689,7 +692,7 @@ a:focus-visible,
 summary:focus-visible,
 .legend-item:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
@@ -755,10 +758,10 @@ summary:focus-visible,
   display: block;
   margin-top: var(--space-3);
   padding: 9px 14px;
-  border: 1px solid var(--border-strong);
+  border-width: 1px; border-style: solid;
   border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  color: var(--accent-text);
+
+
   font-size: var(--text-base);
   font-weight: 600;
   text-align: center;
@@ -766,13 +769,9 @@ summary:focus-visible,
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.btn-ghost:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent-dim);
-}
 
 .btn-ghost:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -782,13 +781,13 @@ summary:focus-visible,
   padding: var(--space-3);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md, 8px);
-  background: var(--panel-subtle, rgba(43, 127, 255, 0.03));
+  background: var(--bg-inset);
   text-align: center;
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 .upload-dropzone:hover {
-  border-color: var(--accent);
+  border-color: var(--focus-ring);
   background: var(--accent-soft);
 }
 .upload-dropzone-title {
@@ -806,14 +805,14 @@ summary:focus-visible,
   margin-top: var(--space-1);
   padding: var(--space-2);
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--accent-teal);
+  border-left: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm, 6px);
-  background: var(--panel, #fff);
+  background: var(--bg-inset);
 }
 .upload-filename {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-sm);
-  color: var(--text-primary, #14294a);
+  color: var(--text-primary);
   word-break: break-all;
 }
 .upload-meta {
@@ -833,16 +832,14 @@ summary:focus-visible,
 
 /* --- Sample / Cohort / Upload --------------------------------------------- */
 
-/* A recessed track with one raised segment. The rail's other controls are
-   raised surfaces on a white panel, so inverting that here is what makes the
-   switch read as a switch and not as three buttons that happen to be adjacent. */
+/* Query-source navigation shares the header's thin red active indicator. */
 .mode-switch {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 2px;
   padding: 3px;
-  background: var(--bg-panel-raised);
+  background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
 }
@@ -854,18 +851,18 @@ summary:focus-visible,
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
-.mode-tab:hover:not(.is-active) { color: var(--text-primary); background: rgba(255, 255, 255, 0.6); }
+.mode-tab:hover:not(.is-active) { color: var(--text-primary); background: var(--control-hover-fill); }
 .mode-tab.is-active {
-  color: var(--accent-text);
+  color: var(--control-ink);
   background: var(--bg-panel);
-  border-color: var(--border-subtle);
-  box-shadow: 0 1px 2px rgba(26, 36, 50, 0.06), 0 1px 1px rgba(26, 36, 50, 0.04);
+  border-color: transparent;
+  box-shadow: inset 0 -2px var(--action-primary);
 }
-.mode-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mode-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 /* `.mode-hint` used to sit here: a line under the switch naming what the
    selected source does. Removed on 2026-08-11 along with the three strings that
@@ -890,15 +887,15 @@ summary:focus-visible,
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 .facet-chip:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--text-primary); }
 .facet-chip.is-on {
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  border-color: var(--accent-dim);
+  color: var(--control-ink);
+  background: var(--control-selected-fill);
+  border-color: var(--control-border);
 }
 /* Study cannot be unticked: pooling across studies would average across the
    strongest batch boundary in the corpus. It is shown as part of the definition
@@ -906,9 +903,9 @@ summary:focus-visible,
    pointer and the hover response. The reason is on the title attribute. */
 .facet-chip.is-pinned {
   cursor: default;
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  border-color: var(--accent-dim);
+  color: var(--control-ink);
+  background: var(--control-selected-fill);
+  border-color: var(--control-border);
   opacity: 1;
 }
 .facet-chip.is-pinned::after {
@@ -918,9 +915,9 @@ summary:focus-visible,
   margin-left: 6px;
   vertical-align: 1px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--control-ink);
 }
-.facet-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.facet-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 .facet-summary {
   margin-top: 7px;
@@ -1104,3 +1101,23 @@ summary:focus-visible,
   border-top: 1px solid var(--border-subtle);
 }
 .comparison-cohort-body > :last-child { margin-bottom: 0; }
+
+/* Figure toolbar: opaque only while its group is visible. */
+.graph-wrap .modebar-group { background: var(--bg-panel) !important; }
+.graph-wrap .modebar-btn path { fill: var(--text-secondary) !important; }
+.graph-wrap .modebar-btn:hover path,
+.graph-wrap .modebar-btn.active path { fill: var(--text-primary) !important; }
+
+/* Inspection emphasis leaves Plotly's data, hit testing and hover layer intact. */
+.graph-wrap .network-edge-active .js-line {
+  stroke: var(--network-emphasis) !important;
+  stroke-width: 4.5px !important;
+}
+.graph-wrap .network-node-active {
+  stroke: var(--network-emphasis) !important;
+  stroke-width: 3px !important;
+}
+.graph-wrap .network-query.network-node-active {
+  stroke: var(--network-query) !important;
+  stroke-width: 4px !important;
+}

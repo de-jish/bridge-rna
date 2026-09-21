@@ -115,6 +115,13 @@ def validate():
             response = client.get(path)
             require(response.status_code == 200, f"startup failed: {path}")
             require(response.headers.get("X-Bridge-Release") == RELEASE_ID, "wrong startup release identity")
+        # Prove the clean payload serves every stylesheet, font and brand asset.
+        manifest = json.loads((ROOT / "ship.json").read_text())
+        for name in manifest["files"]:
+            if name.startswith("assets/"):
+                response = client.get("/" + name)
+                require(response.status_code == 200 and response.data == (ROOT / name).read_bytes(),
+                        f"missing or incorrect runtime asset: {name}")
     return {"archs4_samples": n, "osdr_samples": m, "upload_reference_cosine": cosine,
             "artifacts": {os.path.relpath(p, ROOT): {"path": str(p.resolve()), "sha256": sha256(p)} for p in required},
             "counts_files_checked": len(counts), "tsne": paths.COORDS_TSNE2.exists()}

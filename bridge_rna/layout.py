@@ -253,11 +253,13 @@ def build_graph_legend(kind: str = "sample") -> Any:
                    "comparison": "Pooled cohort queries (2)"}[kind]
     items: list[Any] = [
         html.Div(className="legend-item", children=[
-            html.Span(className="legend-swatch legend-swatch--star"),
+            html.Span(className="legend-swatch " + (
+                "legend-swatch--star" if kind == "comparison" else "legend-swatch--query")),
             html.Span(query_label),
         ]),
         html.Div(className="legend-item", children=[
-            html.Span(className="legend-swatch legend-swatch--circle"),
+            html.Span(className="legend-swatch legend-swatch--circle" + (
+                " legend-swatch--comparison-hit" if kind == "comparison" else "")),
             html.Span("GSM sample (ARCHS4 hit)"),
         ]),
     ]

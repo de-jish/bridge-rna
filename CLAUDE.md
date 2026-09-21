@@ -423,7 +423,13 @@ Structural checks pass for any set of finite numbers, so they cannot tell a good
 
 ## Visual language
 
-Light scientific-instrument chrome matching Bridge RNA exactly (canvas `#eef2f7`, panels `#fff`, accent `#2b7fff`, navy header `#14294a` with teal rule `#22c7bd`), with a dark navy *plot canvas* (`#0e1d34`) inside it for WebGL glyph contrast, the one deliberate departure.
+The interface is built on **NASA's Human Design System**, adopted on 2026-09-19.
+`assets/00-hds-tokens.css` is HDS's own generated token file and must not be edited by hand; `assets/00-tokens.css` maps this app's semantic names onto it, so every chrome color in both views resolves to an HDS token rather than to a hex someone chose.
+The chrome is a carbon-05 canvas (`#f6f6f6`), white panels, a black header with a carbon-70 rule, NASA blue `#1c67e3` as the interactive accent, and NASA red reserved for the one primary query action.
+Public Sans carries headings and controls, Inter the body, DM Mono the numerals, and all three are vendored under `assets/fonts/` with their licenses - a federal design system's typeface cannot be a CDN dependency on a machine behind a NASA firewall, and `deploy/common.STATIC_ASSETS` names each file so the ship path carries it.
+The dark navy *plot canvas* (`#0e1d34`) survives the rebrand unchanged, and so does everything drawn inside it.
+**That separation is the point: HDS owns the chrome, and the instrument owns the data.**
+The chrome before this was a light scientific-instrument palette of its own (canvas `#eef2f7`, accent `#2b7fff`, navy header `#14294a` with a teal rule `#22c7bd`); it is recorded here as history because the paragraphs below still reason about it.
 The shell is two columns, a control rail and the plot; it was three before the readout panel was removed, and `.bm-body` is flexbox so `.bm-plot-wrap`'s `flex: 1` reclaimed the space with no layout math.
 The eleven-hue categorical palette in `manifold/theme.py` was validated with the dataviz skill's checker against the navy plot surface (OKLCH L 0.48-0.67, worst adjacent-pair CVD deltaE 8.4, worst normal-vision deltaE 15.4, >= 3:1 on the surface); slot order is the CVD-safety mechanism, so do not shuffle it without re-validating.
 Two greys sit at the neutral end because "Other" and "Unknown" are different answers, with Unknown the dimmer so absence recedes furthest.
@@ -435,17 +441,17 @@ The rail has one rule about where a fact goes, and both readouts follow it: **th
 Neither belongs in `.bm-plot-badges`, which reports what is drawn *right now* and changes on every zoom, while these describe how the coordinates were built.
 Within `.bm-params` only the measured payload is set apart, in mono tabular figures at a half-step down, because "cosine" in a numeral font is noise while `30` and `942,563` want to sit on one grid.
 
-`.bm-hint` was moved from `--text-muted` to `--text-secondary` at the same time: `#8a99ac` on the white panel measures 2.90:1, which fails WCAG AA at the 11.5 px every hint on the rail uses, and `--text-secondary` is 5.47:1 while still receding behind the controls.
+`.bm-hint` was moved from `--text-muted` to `--text-secondary` at the same time: `#8a99ac` on the white panel measured 2.90:1, which fails WCAG AA at the 11.5 px every hint on the rail uses, and `--text-secondary` was 5.47:1 while still receding behind the controls.
+Under HDS the two tokens resolve to the same carbon-60 `#58585b` (7.09:1 on a panel, 6.56:1 on the canvas), so the distinction no longer does any work; the rule it encodes - a hint must clear AA at the size it is actually set in - is what survives.
 
 ### Contrast, keyboard, and the two breakpoints (2026-08-11)
 
 **Every text token clears WCAG AA 4.5:1 on every surface the stylesheet defines, and a test enforces it.**
-Both tiers below `--text-primary` used to fail. `--text-muted` was `#8a99ac`, 2.90:1 on white, and it carried every rail label, kicker, hint, slider mark and dropdown placeholder - the smallest type in the app was also the least legible - while `--accent` at 3.76:1 carried the primary button's white label and every blue link and tab.
-The paragraph above records that finding for `.bm-hint` and fixed exactly that one class.
-`--text-muted` is now `#616e80`, chosen so its *worst* ground clears the bar rather than only white, and there is a second blue: **`--accent-text` `#1663dd` runs wherever the accent carries text or is the ground white text sits on** - the primary button, the mode tabs, the facet chips, links, section titles, the selected segmented pill.
-**`--accent` `#2b7fff` is untouched and is still the identity hue** for every border, fill, focus ring, panel dot and Plotly mark, because 3.76:1 clears the 3:1 a non-text mark needs.
+The finding that produced this rule is worth keeping: both tiers below `--text-primary` used to fail, `--text-muted` was `#8a99ac` at 2.90:1 on white and carried every rail label, kicker, hint, slider mark and dropdown placeholder - the smallest type in the app was also the least legible - while the old `--accent` at 3.76:1 carried the primary button's white label and every blue link and tab.
+The fix then was a second blue (`--accent-text`) for wherever the accent carries text, and that **two-token split survived the HDS rebrand** rather than being re-derived: `--accent` is NASA blue `#1c67e3` for every border, fill, focus ring, panel dot and Plotly mark, and `--accent-text` is the NASA blue shade `#0b3d91`, 10.04:1 on a panel, wherever the accent carries text.
+The same reasoning picked the primary button's red. **NASA brand red `#f64137` is 3.67:1 against white and cannot carry a white label**, so the button uses the darker `#d83933` at 4.61:1, and HDS's own token file says red is for primary actions and never for dataviz.
 The one exception is the brand tile, under WCAG 1.4.3's logotype clause, and `01-shell.css` says so where someone would otherwise "fix" it.
-`test_every_text_token_clears_wcag_aa_on_every_surface` computes the ratios from the stylesheet, so a palette edit that reintroduces the failure fails there rather than in a browser; `test_theme_matches_the_bridge_rna_tokens` covers all 19 mirrored constants, because `theme.py`'s copy had already gone stale on `TEXT_MUTED`.
+`test_every_text_token_clears_wcag_aa_on_every_surface` computes the ratios from the stylesheet, so a palette edit that reintroduces the failure fails there rather than in a browser; `test_theme_matches_the_bridge_rna_tokens` covers all 19 mirrored constants resolved out of the HDS layer, because `theme.py`'s copy had already gone stale on `TEXT_MUTED`.
 
 **A control hidden with `display: none` is a control nobody can reach.**
 `.bm-seg` hid the radio input that carries the segmented control's state, which took Projection, Dimensions and the number of ARCHS4 points out of the tab order and out of the accessibility tree - three of the map's six controls, mouse-only.

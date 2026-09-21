@@ -116,9 +116,17 @@ uv pip compile deploy/requirements.in -c deploy/constraints.txt --python-version
 
 `deploy/runtime-files.json` is the explicit runtime allowlist. The app is Dash;
 there are no templates or frontend compiler steps. The payload includes Python
-application modules, six CSS/JS assets, `prompts/ai_summary_prompt.txt`, three
+application modules, runtime CSS/JS assets, `prompts/ai_summary_prompt.txt`, three
 small gene reference tables, dependency definitions and the minimal user-run
 helpers. `wsgi.py` captures `ship.json` once per worker to expose its identity.
+
+The NASA theme also ships the locally vendored HDS 0.10.0 fonts, their licenses,
+the NASA SVG, and the shared font/token/control styles. Nested assets are permitted
+by exact filename in `deploy/common.py`; arbitrary nested files remain excluded.
+Font differences are recorded as SHA-256 comparisons, and the original bytes are
+backed up alongside code. Preflight checks that every packaged asset is served
+with the expected bytes. Prototype pages, review screenshots and npm dependencies
+are not part of the production payload.
 
 Dynamic dependencies are retained: upload inference imports
 `generate_archs4_embeddings.py`, `demo_osdr_top5.py` and
@@ -126,7 +134,7 @@ Dynamic dependencies are retained: upload inference imports
 subprocess. `osdr_metadata.py` supplies study summaries. The conditional attention
 import retains `slim_performer_model.py` and `numerator_and_denominator.py`.
 This does not prove every function is live. Offline precompute tools, downloaders,
-examples, Markdown instructions/plans, tests, editors, old archives, logs and
+examples, Markdown instructions/plans (apart from the explicit asset licenses), tests, editors, old archives, logs and
 virtual environments are excluded. No runtime Markdown input was found; the
 runtime text prompt and required text reference table are included deliberately.
 

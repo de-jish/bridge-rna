@@ -273,6 +273,7 @@ def control_rail() -> html.Aside:
                     options=colorby.menu_options(),
                     value=colorby.default_key(),
                     clearable=False,
+                    searchable=False,
                     className="bm-dropdown",
                 ),
                 html.Div(id="coverage", className="bm-coverage"),
@@ -1076,7 +1077,7 @@ def build_view() -> html.Div:
                 # like it is reloading; the spinner should only appear when the
                 # wait is long enough to need explaining.
                 dcc.Loading(
-                    type="circle", color="#22c7bd",
+                    type="circle", color="var(--plot-ui-text)",
                     delay_show=600,
                     overlay_style={"visibility": "visible", "opacity": 0.45},
                     parent_className="bm-plot-loading",

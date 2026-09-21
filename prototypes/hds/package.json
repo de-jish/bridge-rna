@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@nasa-hds/core": "0.10.0"
+  }
+}
