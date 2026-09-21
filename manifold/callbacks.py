@@ -241,7 +241,9 @@ def next_neighborhood_interaction(trigger, value,
     if trigger == "hits-store":
         return focus, "overview", ROLE_A, ""
     if trigger == "manifold-graph" and focus is not no_update:
-        return focus, "samples", no_update, no_update
+        custom = value["points"][0]["customdata"]
+        arm = custom[7] if len(custom) > 7 and custom[7] in (ROLE_A, ROLE_B) else no_update
+        return focus, "samples", arm, no_update
     return focus, no_update, no_update, no_update
 
 
@@ -262,10 +264,6 @@ def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
                        if str(row.get("gsm") or "") == selected_gsm), None)
     summary["leading_studies"] = groups[:3]
     depth = int(summary.get("depth") or 0)
-    root = hits_payload or {}
-    requested_hits = ((root.get("comparison") or {}).get("hits_b")
-                      if arm == ROLE_B else root.get("hits"))
-    requested = len(requested_hits) if isinstance(requested_hits, list) else 0
     study_count = int(summary.get("study_count") or 0)
     tabs = [
         {"label": "Overview", "value": "overview"},
@@ -280,23 +278,13 @@ def neighborhood_drawer_state(hits_payload: dict | None, arm: str,
                 rows, focus, detail_row=detail_row),
         }
         body = builders.get(tab, builders["overview"])()
-        meta = (
-            f"{requested:,} requested hit{'s' if requested != 1 else ''} · "
-            f"{depth:,} returned · exact top-{neighborhoods.NEIGHBORHOOD_DEPTH} "
-            "cosine neighborhood in 512-D"
-        )
     else:
         body = layout.neighborhood_unavailable_children(
             str(payload.get("reason") or
                 neighborhoods.evidence_unavailable_reason(
                     str((hits_payload or {}).get("mode") or ""))))
-        meta = (
-            f"{requested:,} requested hit{'s' if requested != 1 else ''} · "
-            "Evidence neighborhood unavailable"
-        )
     return {
         "heading": _neighborhood_arm_label(hits_payload, arm or ROLE_A),
-        "meta": meta,
         "arm_options": options,
         "arm_style": arm_style,
         "tabs": tabs,
@@ -348,6 +336,7 @@ def _neighborhood_overlay(hits_payload: dict | None, arm: str,
     if not isinstance(returned, int) or isinstance(returned, bool):
         returned = len(payload.get("hits") or [])
     return {
+        "role": arm,
         "label": str(payload.get("label") or ""),
         "points": points,
         "rows": rows,
@@ -355,6 +344,18 @@ def _neighborhood_overlay(hits_payload: dict | None, arm: str,
         "returned": returned,
         "locatable": len(points),
     }
+
+
+def _neighborhood_overlays(hits_payload: dict | None, arm: str,
+                           focus: dict | None, roles: tuple[str, ...]) -> dict | None:
+    """Draw each visible cohort's evidence; the selected arm owns focus only."""
+    cohorts = []
+    for role in roles:
+        overlay = _neighborhood_overlay(
+            hits_payload, role, focus if role == arm else None)
+        if overlay is not None:
+            cohorts.append(overlay)
+    return {"cohorts": cohorts} if cohorts else None
 
 
 def _cohort_label(query: dict | None) -> str:
@@ -685,7 +686,7 @@ def register(app):
         roles = _roles_from_checklist(show_retrieval)
         retrieval = _retrieval_overlay(hits_payload, roles) if roles else None
         state = open_state or {}
-        neighborhood = (_neighborhood_overlay(hits_payload, arm or ROLE_A, focus)
+        neighborhood = (_neighborhood_overlays(hits_payload, arm or ROLE_A, focus, roles)
                         if state.get("open") else None)
         fig, legend_data, badges = render.build_figure(
             method, dims, color_by, layers or [], budget,
@@ -1016,7 +1017,6 @@ def register(app):
 
     @app.callback(
         Output("neighborhood-heading", "children"),
-        Output("neighborhood-meta", "children"),
         Output("neighborhood-arm", "options"),
         Output("neighborhood-arm", "style"),
         Output("neighborhood-tab", "options"),
@@ -1031,7 +1031,7 @@ def register(app):
     def render_neighborhood(hits_payload, arm, tab, search, focus):
         state = neighborhood_drawer_state(
             hits_payload, arm or ROLE_A, tab or "overview", search, focus)
-        return (state["heading"], state["meta"], state["arm_options"],
+        return (state["heading"], state["arm_options"],
                 state["arm_style"], state["tabs"], state["search_style"],
                 state["body"])
 
@@ -1213,7 +1213,10 @@ def register(app):
 
 def _badge(html_text: str):
     # badges may carry <b> tags; render via a small parser.
-    return html.Div(className="bm-badge", children=_html_with_bold(html_text))
+    corpus = ("osdr" if html_text.startswith("OSDR shown:") else
+              "archs4" if html_text.startswith("ARCHS4 shown:") else "")
+    return html.Div(className="bm-badge", children=_html_with_bold(html_text),
+                    **{"data-corpus-count": corpus})
 
 
 def _html_with_bold(text: str):

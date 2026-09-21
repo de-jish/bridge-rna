@@ -283,10 +283,35 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
          "the drawer is a named complementary landmark")
     c.ok(page.get_by_role("button", name="Close neighborhood explorer").count() == 1,
          "Close is a named button")
-    meta = page.locator("#neighborhood-meta").inner_text()
-    c.ok("5 requested hits" in meta
-         and "exact top-250 cosine neighborhood in 512-D" in meta,
-         f"the drawer distinguishes requested depth from exact evidence: {meta!r}")
+    c.ok(page.locator(
+        "#neighborhood-meta, .bm-neighborhood-metrics, "
+        ".bm-neighborhood-coverage, .bm-neighborhood-foot"
+    ).count() == 0, "the explorer omits redundant metrics, coverage, and copy")
+    shown = page.evaluate("""() => {
+        const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+        const [xmin, xmax] = gd._fullLayout.xaxis.range;
+        const [ymin, ymax] = gd._fullLayout.yaxis.range;
+        let visible = 0, total = 0;
+        for (const t of gd._fullData) {
+            if (!t.customdata || !t.customdata.length ||
+                t.customdata[0].length !== 2 ||
+                !String(t.customdata[0][0]).startsWith('OSD-')) continue;
+            for (let i = 0; i < t.x.length; i++) {
+                total++;
+                if (t.x[i] >= xmin && t.x[i] <= xmax &&
+                    t.y[i] >= ymin && t.y[i] <= ymax) visible++;
+            }
+        }
+        return {visible, total,
+            badges: document.querySelector('#plot-badges').innerText};
+    }""")
+    c.ok(0 < shown["visible"] < shown["total"],
+         "fitting the result leaves some OSDR samples outside the view")
+    c.ok(f"OSDR shown: {shown['visible']:,}" in shown["badges"],
+         f"OSDR shown counts visible sample centers ({shown['visible']})")
+    c.ok("Evidence neighborhood" not in shown["badges"]
+         and "Showing retrieval" not in shown["badges"],
+         "redundant evidence and retrieval badges are absent")
     c.ok(traces["evidenceTraces"] == 1,
          "the exact evidence neighborhood is drawn once")
     c.ok(traces["evidenceMarks"] == 250,

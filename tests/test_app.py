@@ -610,7 +610,7 @@ def test_neighborhood_open_state_has_one_deterministic_transition(
         trigger, previous, has_retrieval) == expected
 
 
-def test_neighborhood_overview_renders_metrics_coverage_and_ranked_groups():
+def test_neighborhood_overview_keeps_composition_and_groups_without_redundant_metrics():
     summary = {
         "available": True,
         "depth": 4,
@@ -640,11 +640,11 @@ def test_neighborhood_overview_renders_metrics_coverage_and_ranked_groups():
     classes = _classes(children)
 
     assert summary["sentence"] in text
-    assert "Tissue categories 3 of 4" in text
-    assert "Species metadata 3 of 4" in text
-    assert all(value in text for value in ("4", "2", "0.975"))
+    assert "Tissue categories 3 of 4" not in text
+    assert "Species metadata 3 of 4" not in text
+    assert all(value in text for value in ("Eye", "Brain", "Mus musculus"))
     assert "GSE10" in text and "GSE20" in text
-    assert "bm-neighborhood-metrics" in classes
+    assert "bm-neighborhood-metrics" not in classes
     assert classes.count("bm-neighborhood-bar-fill") == 4
 
 
@@ -773,52 +773,12 @@ def test_drawer_state_reads_only_the_selected_comparison_arm():
         payload, "b", "samples", "", None)
 
     assert state["heading"] == "Ground"
-    assert state["meta"] == (
-        "1 requested hit · 1 returned · "
-        "exact top-250 cosine neighborhood in 512-D"
-    )
     assert state["tabs"][1]["label"] == "Studies 1"
     assert state["tabs"][2]["label"] == "Samples 1"
     buttons = [c for c in _walk(html.Div(state["body"]))
                if type(c).__name__ == "Button"]
     assert [button.id["value"] for button in buttons] == ["GSM1"]
     assert state["search_style"] == {}
-
-
-def test_single_drawer_meta_names_requested_hits_and_exact_cosine_context():
-    payload = {
-        "hits": [{"gsm": "GSM1"}, {"gsm": "GSM2"}],
-        "neighborhood": _neighborhood_payload("Sample 1"),
-    }
-
-    state = callbacks.neighborhood_drawer_state(
-        payload, "a", "overview", "", None)
-
-    assert state["meta"] == (
-        "2 requested hits · 3 returned · "
-        "exact top-250 cosine neighborhood in 512-D"
-    )
-
-
-def test_comparison_drawer_meta_reads_requested_count_from_each_active_arm():
-    payload = {
-        "hits": [{"gsm": "A1"}, {"gsm": "A2"}],
-        "neighborhood": _neighborhood_payload("Flight"),
-        "comparison": {
-            "hits_b": [{"gsm": "B1"}],
-            "neighborhood_b": _neighborhood_payload("Ground", 10),
-        },
-    }
-
-    meta_a = callbacks.neighborhood_drawer_state(
-        payload, "a", "overview", "", None)["meta"]
-    meta_b = callbacks.neighborhood_drawer_state(
-        payload, "b", "overview", "", None)["meta"]
-
-    assert meta_a.startswith("2 requested hits · 3 returned")
-    assert meta_b.startswith("1 requested hit · 3 returned")
-    assert meta_a.endswith("exact top-250 cosine neighborhood in 512-D")
-    assert meta_b.endswith("exact top-250 cosine neighborhood in 512-D")
 
 
 def test_drawer_state_explains_an_unavailable_neighborhood():
@@ -2221,13 +2181,8 @@ def test_an_uploaded_query_gets_no_member_row(corpus):
     assert _key_shapes(children) == ["hit-a"]
 
 
-def test_a_shared_hit_is_one_sample_wherever_it_is_counted(two_cohorts):
-    """`hit_points` is a concatenation across the arms, so a hit both cohorts
-    retrieved is in it twice. Quoting its length made the map say "10 hits, 2 of
-    them retrieved by both" for the same comparison whose banner on the other
-    view said "share 2 of 8 retrieved samples" - two surfaces, one search, two
-    numbers, and a subset relation that cannot hold either way. Both surfaces
-    count distinct samples now."""
+def test_a_shared_hit_keeps_its_identity_across_both_arms(two_cohorts):
+    """Two retrieval marks for one sample retain one shared identity."""
     a, b = two_cohorts
     overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
     per_arm = sum(len(c["hit_points"]) for c in overlay["cohorts"])
@@ -2235,12 +2190,6 @@ def test_a_shared_hit_is_one_sample_wherever_it_is_counted(two_cohorts):
     assert overlay["shared_points"], "this fixture is built to share two hits"
     assert distinct == per_arm - len(overlay["shared_points"])
     assert distinct < len(overlay["hit_points"]), "the concatenation double-counts"
-
-    _fig, _legend, badges = render.build_figure(
-        "pca", "2d", "species", ["archs4"], 5000, None, retrieval=overlay)
-    badge = next(b for b in badges if "cohorts" in b)
-    assert f"<b>{distinct}</b> samples" in badge, badge
-    assert f"<b>{len(overlay['shared_points'])}</b> retrieved by both" in badge
 
 
 def test_the_retrieval_group_carries_no_standing_paragraph():

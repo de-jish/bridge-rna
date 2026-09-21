@@ -146,7 +146,8 @@ NEIGHBORHOOD_EVIDENCE_JS = """() => {
   return {
     sourceTraces: raw.length,
     renderedTraces: full.length,
-    marks: full.length === 1 && full[0].x ? full[0].x.length : 0,
+    marks: full.map(t => t.x ? t.x.length : 0),
+    symbols: full.map(t => t.marker.symbol),
   };
 }"""
 
@@ -186,33 +187,34 @@ def _figure_response_for(changed_prop: str):
     return matches
 
 
-def _response_evidence_gsms(response) -> list[str]:
+def _response_evidence_gsms(response, arm="a") -> list[str]:
     """Read the exact evidence identity from the response being awaited."""
     figure = response.json()["response"]["manifold-graph"]["figure"]
     traces = [trace for trace in figure.get("data", [])
-              if trace.get("name") == "512-D evidence neighbor"]
+              if trace.get("name") == "512-D evidence neighbor"
+              and trace.get("customdata") and trace["customdata"][0][7] == arm]
     if len(traces) != 1:
         raise AssertionError(
             f"figure response contained {len(traces)} evidence traces")
     return [str(row[2] or "") for row in traces[0].get("customdata", [])]
 
 
-def _wait_for_evidence_gsms(page, expected: list[str]) -> dict:
+def _wait_for_evidence_gsms(page, expected: list[str], arm="a") -> dict:
     """Wait until Plotly rendered the response's exact 250-sample identity."""
     page.wait_for_function(
-        """expected => {
+        """({expected, arm}) => {
           const gd = document.querySelector('#manifold-graph .js-plotly-plot');
-          const raw = (gd && gd.data || []).filter(
-            t => t.name === '512-D evidence neighbor');
-          const full = (gd && gd._fullData || []).filter(
-            t => t.name === '512-D evidence neighbor');
+          const own = t => t.name === '512-D evidence neighbor'
+            && t.customdata && t.customdata[0][7] === arm;
+          const raw = (gd && gd.data || []).filter(own);
+          const full = (gd && gd._fullData || []).filter(own);
           const rows = raw.length === 1 && Array.isArray(raw[0].customdata)
             ? raw[0].customdata : [];
           return raw.length === 1 && full.length === 1
             && full[0].x && full[0].x.length === 250
             && rows.length === expected.length
             && rows.every((row, index) => String(row[2] || '') === expected[index]);
-        }""", arg=expected, timeout=90_000)
+        }""", arg={"expected": expected, "arm": arm}, timeout=90_000)
     return page.evaluate(NEIGHBORHOOD_EVIDENCE_JS)
 
 
@@ -624,8 +626,16 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"and the legend stops advertising one: {legend[:80]!r}")
     c.ok("Pooled cohort queries (2)" in legend,
          "the legend names two pooled queries")
-    c.ok("which cohort retrieved it" in legend,
+    c.ok("Edge color identifies the retrieving cohort." in legend,
          "and explains what the colors mean")
+    c.ok("edge width" not in legend.lower(),
+         "the legend no longer claims width measures cosine similarity")
+    widths = page.evaluate("""() => {
+      const gd = document.querySelector('#network-graph .js-plotly-plot');
+      return [...new Set(gd._fullData.filter(t => t.mode === 'lines')
+        .map(t => t.line.width))];
+    }""")
+    c.ok(widths == [3], "every rendered comparison edge has the same 3px width")
     subtitle = page.locator("#canvas-subtitle").inner_text()
     c.ok("Two pooled cohorts" in subtitle, "so does the subtitle")
 
@@ -682,10 +692,10 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
              f"{len(shared_drawn)} drawn against {n_shared} reported")
 
     badges = page.locator(".bm-plot-badges").inner_text().replace("\n", " ")
-    c.ok("2" in badges and "cohorts" in badges,
-         f"the badge counts both: {badges[:90]!r}")
-    c.ok("retrieved by both" in badges,
-         "and names the number the comparison is about")
+    c.ok("Showing" not in badges and "Evidence neighborhood" not in badges,
+         "the plot omits redundant retrieval and evidence badges")
+    c.ok("ARCHS4 shown:" in badges and "OSDR shown:" in badges,
+         "both corpus counts say what is shown")
 
     # The key sits on the plot now, beside the marks it decodes, and it
     # is grouped by ROLE rather than by cohort - so the two member rows
@@ -752,21 +762,18 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     arm_label_a = arm_a.inner_text().strip()
     arm_label_b = arm_b.inner_text().strip()
     heading_a = page.locator("#neighborhood-heading").inner_text().strip()
-    meta_a = page.locator("#neighborhood-meta").inner_text().strip()
     c.ok(arm_label_a.startswith("A · ") and arm_label_b.startswith("B · ")
          and arm_label_a != arm_label_b,
          f"the explorer names two distinct comparison arms: "
          f"{arm_label_a!r}, {arm_label_b!r}")
     c.ok(page.get_by_role("radio", name=re.compile(r"^A · ")).is_checked(),
          "the comparison explorer opens on arm A")
-    c.ok(f"{depth} requested hits" in meta_a
-         and "exact top-250 cosine neighborhood in 512-D" in meta_a,
-         f"arm A states its requested depth and exact evidence context: {meta_a!r}")
-    c.ok(evidence_a["sourceTraces"] == 1
-         and evidence_a["renderedTraces"] == 1
-         and evidence_a["marks"] == 250
+    c.ok(evidence_a["sourceTraces"] == 2
+         and evidence_a["renderedTraces"] == 2
+         and evidence_a["marks"] == [250, 250]
+         and evidence_a["symbols"] == ["circle-open", "square-open"]
          and len(evidence_gsms_a) == 250,
-         "arm A owns exactly one complete 250-point evidence trace "
+         "both cohorts draw their complete 250-point evidence sets "
          f"({evidence_a['sourceTraces']} source, "
          f"{evidence_a['renderedTraces']} rendered, {evidence_a['marks']} marks)")
 
@@ -788,8 +795,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
             _figure_response_for("neighborhood-arm.value"),
             timeout=90_000) as response_info:
         arm_b.click()
-    evidence_gsms_b = _response_evidence_gsms(response_info.value)
-    evidence_b = _wait_for_evidence_gsms(page, evidence_gsms_b)
+    evidence_gsms_b = _response_evidence_gsms(response_info.value, "b")
+    evidence_b = _wait_for_evidence_gsms(page, evidence_gsms_b, "b")
     page.wait_for_function(
         """state => {
           const heading = document.querySelector('#neighborhood-heading');
@@ -802,29 +809,26 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         }""", arg={"heading": heading_a, "gsms": evidence_gsms_b},
         timeout=30_000)
     heading_b = page.locator("#neighborhood-heading").inner_text().strip()
-    meta_b = page.locator("#neighborhood-meta").inner_text().strip()
     rows_b = page.locator(
         ".bm-neighborhood-sample .bm-neighborhood-row-primary").all_inner_texts()
     c.ok(page.get_by_role("radio", name=re.compile(r"^B · ")).is_checked(),
          "switching A to B updates the selected arm's radio state")
-    c.ok(f"{depth} requested hits" in meta_b
-         and "exact top-250 cosine neighborhood in 512-D" in meta_b,
-         f"arm B states its requested depth and exact evidence context: {meta_b!r}")
     c.ok(heading_a != heading_b,
          f"switching A to B changes the active arm heading: "
          f"{heading_a!r} -> {heading_b!r}")
-    c.ok(evidence_b["sourceTraces"] == 1
-         and evidence_b["renderedTraces"] == 1
-         and evidence_b["marks"] == 250
+    c.ok(evidence_b["sourceTraces"] == 2
+         and evidence_b["renderedTraces"] == 2
+         and evidence_b["marks"] == [250, 250]
+         and evidence_b["symbols"] == ["circle-open", "square-open"]
          and len(evidence_gsms_b) == 250,
-         "arm B replaces A with one complete 250-point evidence trace "
+         "selecting B preserves both complete 250-point evidence sets "
          f"({evidence_b['sourceTraces']} source, "
          f"{evidence_b['renderedTraces']} rendered, {evidence_b['marks']} marks)")
     c.ok(rows_a == evidence_gsms_a and rows_b == evidence_gsms_b
          and rows_a != rows_b,
          "the complete 250-row Samples list changes with the selected arm")
     c.ok(set(evidence_gsms_a) != set(evidence_gsms_b),
-         f"the exact evidence point set changes with the arm "
+         f"the arms retain independently ranked evidence point sets "
          f"({len(set(evidence_gsms_a) & set(evidence_gsms_b))} shared)")
     c.ok((page.evaluate(MAP_OVERLAY_JS) or {}) == requested_before,
          "arm switching preserves both cohorts' requested-hit traces")
@@ -832,6 +836,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          == runs_before_neighborhood,
          "opening and switching evidence does not rerun either retrieval path")
     shot(page, "11-neighborhood-comparison")
+
 
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
@@ -1018,6 +1023,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     reframed = _stable_map_span(page)
     c.ok(abs(reframed - framed) < max(framed * 0.02, 0.001),
          f"re-framing gives the same window, not a stale one ({reframed:.2f})")
+
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):

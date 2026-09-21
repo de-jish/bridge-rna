@@ -325,12 +325,12 @@ def _osdr_customdata(codes: np.ndarray, legend: list[dict]) -> list[list]:
             for k, c in zip(keys, codes.tolist())]
 
 
-def _neighborhood_traces(coords, is_3d, neighborhood):
+def _neighborhood_traces(coords, is_3d, neighborhood, facts=None):
     """Draw the exact 512-D evidence prefix and an optional map focus.
 
     Rank is available in hover but never changes the mark. In particular this
-    is one markers-only open-dot trace, not a line, hull, enclosing ring, or
-    gradient that could be mistaken for geometry in the projection.
+    uses uniform open circles for A and larger open squares for B, so shared
+    samples retain both outlines at their original coordinates.
     """
     Scatter = go.Scatter3d if is_3d else go.Scattergl
     scale = 0.5 if is_3d else 1.0
@@ -353,7 +353,9 @@ def _neighborhood_traces(coords, is_3d, neighborhood):
         row.get("score"),
         str(row.get("tissue") or ""),
         str(row.get("species") or ""),
-    ] for _point, row in located]
+        neighborhood.get("role", "a"),
+        "<br>".join((facts or {}).get(point, [])),
+    ] for point, row in located]
 
     def xyz(indices):
         arr = np.asarray(indices, dtype=int)
@@ -362,15 +364,19 @@ def _neighborhood_traces(coords, is_3d, neighborhood):
             result["z"] = coords[arr, 2]
         return result
 
+    second = neighborhood.get("role") == "b"
     base = Scatter(
         **xyz(points), mode="markers", name="512-D evidence neighbor",
-        marker=dict(size=theme.NEIGHBORHOOD_SIZE * scale,
+        marker=dict(size=(theme.NEIGHBORHOOD_SIZE_B if second
+                          else theme.NEIGHBORHOOD_SIZE) * scale,
                     color=theme.NEIGHBORHOOD_COLOR,
                     opacity=theme.NEIGHBORHOOD_OPACITY,
-                    symbol="circle-open"),
+                    symbol="square-open" if second else "circle-open"),
         customdata=customdata,
         hovertemplate=("<b>%{customdata[2]}</b> · %{customdata[3]}<br>"
-                       "512-d rank %{customdata[1]:,} · cosine %{customdata[4]:.4f}<br>"
+                       + ("%{customdata[8]}<br>" if facts else
+                          "512-d rank %{customdata[1]:,} · cosine %{customdata[4]:.4f}<br>")
+                       +
                        "%{customdata[5]} · %{customdata[6]}<extra></extra>"),
         showlegend=False,
     )
@@ -723,6 +729,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
             for trace in _categorical_traces(coords, idx, archs4_codes, legend,
                                              is_3d, ARCHS4_SIZE, "circle", None,
                                              recede_residual=True, opacity=dim):
+                trace.meta = {"corpus": "archs4"}
                 fig.add_trace(trace)
             drawn.append(archs4_codes)
             badges.append(f"ARCHS4 shown: <b>{len(idx):,}</b>")
@@ -747,6 +754,7 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
                     coords, osdr_global, osdr_codes, legend, is_3d, OSDR_SIZE,
                     theme.OSDR_SYMBOL, theme.OSDR_OUTLINE,
                     hover_lines=OSDR_HOVER, customdata=rows, opacity=dim_osdr):
+                trace.meta = {"corpus": "osdr"}
                 fig.add_trace(trace)
             drawn.append(osdr_codes)
         else:
@@ -758,56 +766,48 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
                                    theme.OSDR_OUTLINE, name="OSDR",
                                    hover_lines=OSDR_HOVER, customdata=rows,
                                    opacity=dim_osdr))
-        badges.append(f"OSDR: <b>{n_osdr:,}</b>")
+            fig.data[-1].meta = {"corpus": "osdr"}
+        # Keep every OSDR trace and its metadata intact; only the readout
+        # counts point centers inside the current 2-D window.
+        osdr_shown = n_osdr
+        if not is_3d and viewport is not None:
+            osdr_shown = int(sampling.viewport_mask(
+                coords_xy[osdr_global], viewport).sum())
+        badges.append(f"OSDR shown: <b>{osdr_shown:,}</b>")
 
     # The legend reports the points that were actually plotted above, not the
     # whole-corpus tallies the color plan ranked with.
     legend_data["items"] = _legend_with_drawn_counts(legend, drawn)
 
     # --- Layer 3: exact evidence, behind requested hits ---------------------
-    neighborhood_focus = None
+    neighborhood_focus = []
     if neighborhood:
-        evidence, neighborhood_focus = _neighborhood_traces(
-            coords, is_3d, neighborhood)
-        if len(evidence.x):
-            fig.add_trace(evidence)
-        returned = int(neighborhood.get("returned") or 0)
-        drawn_evidence = len(evidence.x)
-        if drawn_evidence != returned:
-            badges.append(
-                f"Evidence neighborhood: <b>{drawn_evidence:,}</b> of "
-                f"{returned:,} locatable")
-        else:
-            badges.append(f"Evidence neighborhood: <b>{returned:,}</b>")
+        cohorts = neighborhood.get("cohorts", [neighborhood])
+        facts = {}
+        for cohort in cohorts:
+            for point, row in zip(cohort["points"], cohort["rows"]):
+                score = row.get("score")
+                score_text = f"{float(score):.4f}" if score is not None else "unavailable"
+                label = str(cohort.get("label") or "Query")
+                role = str(cohort.get("role", "a")).upper()
+                facts.setdefault(point, []).append(
+                    f"{role} · {label} · 512-d rank {row.get('rank')} · cosine {score_text}")
+        for cohort in cohorts:
+            evidence, focus = _neighborhood_traces(coords, is_3d, cohort, facts)
+            if len(evidence.x):
+                fig.add_trace(evidence)
+            if focus is not None:
+                neighborhood_focus.append(focus)
 
     # --- Layer 4: the retrieval, on top of its wider evidence --------------
     if showing_retrieval:
         for trace in _retrieval_traces(coords, is_3d, retrieval):
             fig.add_trace(trace)
-        # Distinct points, not drawn marks. `hit_points` is a concatenation
-        # across the arms, so a hit both cohorts retrieved is in it twice, and
-        # counting its length made the badge quote 10 for the same comparison
-        # whose banner on the retrieval view said "share 2 of 8 retrieved
-        # samples". The badge counts what is on screen; two rings on one point
-        # are still one sample.
-        n_hits = len(set(retrieval.get("hit_points", [])))
-        cohorts = retrieval.get("cohorts") or []
-        if len(cohorts) > 1:
-            # The badge reports what is drawn right now, so it has to count both
-            # arms and say how many carry both rings - the number the whole
-            # comparison is about.
-            n_shared = len(retrieval.get("shared_points") or [])
-            badges.append(
-                f"Showing <b>2</b> cohorts · <b>{n_hits}</b> samples · "
-                f"<b>{n_shared}</b> retrieved by both")
-        else:
-            badges.append(
-                f"Showing retrieval: <b>{n_hits}</b> hit{'s' if n_hits != 1 else ''}")
 
     # Focus is a larger open outline added after every requested-hit trace so
     # it surrounds rather than replaces the white ring at the same coordinate.
-    if neighborhood_focus is not None:
-        fig.add_trace(neighborhood_focus)
+    for focus in neighborhood_focus:
+        fig.add_trace(focus)
 
     # --- Layer 5: a found identifier, above everything ----------------------
     #

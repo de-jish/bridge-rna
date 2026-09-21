@@ -1,6 +1,6 @@
 /* Keyboard, pointer and open/closed behaviour for the "Find a study" combobox.
  *
- * This is the map's only JavaScript, and it exists because Dash cannot express
+ * This exists because Dash cannot express
  * the one thing an autocomplete is made of: a keystroke. `dcc.Input` publishes
  * `value`, `n_submit` and `n_blur`, and none of those is Up, Down or Escape.
  * Everything that *can* be done in Python is: the server decides what the
