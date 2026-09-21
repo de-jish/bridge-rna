@@ -266,13 +266,11 @@ def build_graph_legend(kind: str = "sample") -> Any:
             html.Span(className="legend-swatch legend-swatch--diamond"),
             html.Span("GSE study"),
         ]))
-    items.append(html.Span(className="legend-divider"))
-    items.append(html.Div(className="legend-note", children=[
-        html.Span(className="legend-edge"),
-        html.Span("edge width = cosine similarity"
-                  + (", color = which cohort retrieved it"
-                     if kind == "comparison" else "")),
-    ]))
+    if kind == "comparison":
+        items.append(html.Span(className="legend-divider"))
+        items.append(html.Div(className="legend-note", children=[
+            html.Span("Edge color identifies the retrieving cohort."),
+        ]))
     return items
 
 

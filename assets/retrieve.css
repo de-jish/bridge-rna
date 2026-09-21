@@ -351,11 +351,6 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .legend-swatch--diamond { transform: rotate(45deg); width: 11px; height: 11px; background: var(--accent-warm); }
 .legend-divider { width: 1px; align-self: stretch; background: var(--border-strong); }
 .legend-note { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
-.legend-edge {
-  width: 26px; height: 0;
-  border-top: 3px solid var(--accent-dim);
-  border-radius: 2px;
-}
 
 .graph-wrap { flex: 1 1 auto; min-height: 320px; }
 .graph-wrap .dash-graph, .graph-wrap .js-plotly-plot { height: 100%; }
