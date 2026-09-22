@@ -200,13 +200,25 @@
    Center workspace + right inspector
    ========================================================================== */
 
+/* The centre column holds two panels now - the network and the ranked
+   similarity profile - so it scrolls rather than clipping. It used to be
+   `overflow: hidden` with a single full-height canvas inside it, which was
+   right while there was one panel: with two, the second one's heading, its
+   sentence and its metric values were simply cut off the top of the column and
+   the panel read as though it began at its own controls. The inspector already
+   works this way; this is the same answer applied one column over. */
 .workspace {
   padding: var(--space-4);
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.workspace::-webkit-scrollbar { width: 8px; }
+.workspace::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: var(--radius-sm);
 }
 
 .inspector {
@@ -226,10 +238,13 @@
   padding: var(--space-4);
 }
 
-/* Full-height network canvas; neutral border preserves the original box. */
+/* Full-height network canvas; neutral border preserves the original box.
+   The floor is load-bearing now that a second panel shares the column: with a
+   scrolling parent, `min-height: 0` lets this collapse to nothing and hand its
+   whole height to the panel below. */
 .panel--canvas {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 420px;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-subtle);
@@ -1120,4 +1135,92 @@ summary:focus-visible,
 .graph-wrap .network-query.network-node-active {
   stroke: var(--network-query) !important;
   stroke-width: 4px !important;
+}
+
+/* ==========================================================================
+   Ranked similarity profile
+
+   A second panel under the network in the centre column. It answers the one
+   question the network and the map both duck - how far down the ranked list a
+   result is still worth reading - and it is fixed height so the network above
+   it keeps the rest of the column and stays the main event.
+
+   The similarity axis is fitted per query rather than fixed. Span over the top
+   250 runs 0.00027 at the 5th percentile to 0.01503 at the 95th across 120
+   real queries, a 55x spread, so one window would draw most samples as a flat
+   line. A fitted axis magnifies, which is why `.profile-metrics` publishes the
+   span next to the curve: that number is what stops a magnified nothing from
+   reading as a real separation.
+   ========================================================================== */
+
+.panel--profile {
+  flex: none;
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.profile-readout { margin-bottom: var(--space-3); }
+.profile-readout:empty { display: none; }
+
+.profile-headline {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.profile-detail {
+  margin: 5px 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 88ch;
+}
+
+/* The metrics qualify the sentence above them, so they sit under it rather
+   than beside it - the same rule the map rail follows for a readout that
+   qualifies a control. */
+.profile-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+}
+.profile-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.profile-metric-value {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-primary);
+}
+.profile-metric-label { font-size: 11.5px; color: var(--text-secondary); }
+
+.profile-controls { margin-bottom: var(--space-3); }
+.profile-controls .control { max-width: 420px; }
+
+/* A Plotly graph whose container can change size needs an explicit height to
+   size against, and `responsive: True` to redraw when it does. Without the
+   height the panel collapses; without responsive, Plotly keeps the geometry it
+   was first laid out with and draws a slice of the plot into the whole canvas
+   after any resize - the same defect the map's dcc.Graph had. */
+.profile-graph-wrap { flex: none; height: 300px; }
+
+.profile-note:empty { display: none; }
+.profile-note-details { margin-top: var(--space-3); }
+.profile-note-body {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 88ch;
+}
+
+/* Stacked, the centre column scrolls rather than squeezing both panels, which
+   is what the view already does with its three columns at this width. */
+@media (max-width: 1180px) {
+  .panel--profile { margin-top: var(--space-4); }
 }

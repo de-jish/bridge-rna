@@ -34,6 +34,8 @@ from .figures import (
     _empty_network_figure,
     build_comparison_figure,
     build_network_figure,
+    build_similarity_profile_figure,
+    empty_profile_figure,
 )
 from .geo import _enrich_hits_from_ncbi_eutils
 from .layout import (
@@ -43,6 +45,7 @@ from .layout import (
     build_graph_legend,
     samples_df,
 )
+from .profile import DEFAULT_RANGE, RANGE_CHOICES
 from .neighborhoods import (
     build_payload,
     evidence_unavailable_reason,
@@ -51,8 +54,11 @@ from .neighborhoods import (
 from .panels import (
     build_cohort_card,
     build_details_panel,
+    build_profile_note,
+    build_profile_readout,
     build_status_banner,
 )
+from . import profile as profile_shape
 from .retrieval import (
     COHORT_MODE,
     TIER_CACHED,
@@ -64,6 +70,7 @@ from .retrieval import (
     run_uploaded_retrieval_with_neighborhood,
     sample_tier,
     search_hits_with_neighborhood,
+    search_hits_with_profile,
 )
 from .util import _format_count, _last_nonempty_line, _safe_str
 
@@ -73,6 +80,58 @@ def _evidence_payload(frame: pd.DataFrame | None, label: str = "", *,
     if frame is None:
         return unavailable_payload(evidence_unavailable_reason(mode))
     return build_payload(frame, label=label)
+
+
+
+#: The profile payload keeps only what the curve and its hover need. The full
+#: hit records for 1,000 ranks would be several hundred kilobytes of session
+#: store shipped on every search, almost all of it fields the profile never
+#: reads. Parallel lists rather than records, for the same reason.
+PROFILE_FIELDS = ("gsm", "gse", "tissue", "species", "archs4_index")
+
+
+def _profile_payload(frame: pd.DataFrame | None, *, mode: str = "") -> dict:
+    """A compact ranked score series, or a reason there is not one."""
+    if frame is None or frame.empty:
+        return {"available": False,
+                "reason": evidence_unavailable_reason(mode) or
+                          "This query type does not produce a ranked profile.",
+                "depth": 0}
+    ordered = frame.sort_values("score", ascending=False).reset_index(drop=True)
+    payload: dict[str, Any] = {
+        "available": True,
+        "depth": int(len(ordered)),
+        "scores": [round(float(v), 6) for v in ordered["score"].tolist()],
+    }
+    for field in PROFILE_FIELDS:
+        if field in ordered.columns:
+            payload[field] = [_safe_str(v) for v in ordered[field].tolist()]
+    return payload
+
+
+def _profile_range(value: Any) -> int:
+    """The displayed range as an int, whatever Dash handed back."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_RANGE
+    return n if n in RANGE_CHOICES else DEFAULT_RANGE
+
+
+def _profile_frame(payload: dict | None, n: int) -> pd.DataFrame | None:
+    """Rebuild the sliced frame the figure draws, from the stored series."""
+    if not payload or not payload.get("available"):
+        return None
+    scores = payload.get("scores") or []
+    if len(scores) < 2:
+        return None
+    k = max(2, min(int(n), len(scores)))
+    data: dict[str, Any] = {"score": scores[:k]}
+    for field in PROFILE_FIELDS:
+        values = payload.get(field)
+        if values:
+            data[field] = list(values)[:k]
+    return pd.DataFrame(data)
 
 
 def _retrieval_phrase(mode: str) -> str:
@@ -493,7 +552,7 @@ def register(app) -> None:
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
         try:
-            hits_df, neighborhood_df, mode = search_hits_with_neighborhood(
+            hits_df, neighborhood_df, profile_df, mode = search_hits_with_profile(
                 samples_df=samples_df,
                 sample_id=sample_id,
                 topk=int(topk),
@@ -540,6 +599,8 @@ def register(app) -> None:
                 neighborhood_df, label=_safe_str(q_row.get("sample_name")),
                 mode=mode,
             ),
+            # One scan produced all three prefixes; see search_hits_with_profile.
+            "profile": _profile_payload(profile_df, mode=mode),
         }
         return network, payload, status
 
@@ -939,6 +1000,10 @@ def register(app) -> None:
             "neighborhood": _evidence_payload(
                 neighborhood_df, label=cohort.label
             ),
+            # A cohort runs its own pooled scan, which is already a ranked
+            # prefix, so the profile rides it rather than asking for a second.
+            # It is 250 deep rather than 1,000; the range control says so.
+            "profile": _profile_payload(neighborhood_df),
         }
 
         how = _retrieval_phrase(COHORT_MODE)
@@ -1143,6 +1208,9 @@ def register(app) -> None:
             "hits": hits_df.to_dict(orient="records"),
             "query": _query_dict(query),
             "neighborhood": _evidence_payload(neighborhood_df, label=column),
+            # As for a cohort: the uploaded path's ranked prefix is the
+            # neighbourhood, 250 deep, and the range control reflects that.
+            "profile": _profile_payload(neighborhood_df),
         }
         return network, payload, status
 
@@ -1340,3 +1408,69 @@ def register(app) -> None:
 
         return build_details_panel(query=q_row, selected_payload=selected_node,
                                    hits_df=hits_df, query_b=q_row_b)
+
+    # --- Ranked similarity profile ---------------------------------------
+    #
+    # Two callbacks rather than one, because the range control is both an
+    # input to the figure and an output of the store: a new result can have a
+    # shallower profile than the range currently asks for. Splitting them
+    # keeps that clamp out of the figure's own dependency cycle.
+
+    @app.callback(
+        Output("profile-range", "options"),
+        Output("profile-range", "value"),
+        Input("hits-store", "data"),
+        State("profile-range", "value"),
+    )
+    def profile_range_options(hits_payload: dict[str, Any] | None, current):
+        """Offer only the ranges this result actually has.
+
+        A cohort or an uploaded sample rides its own 250-deep ranked prefix
+        rather than the 1,000-deep scan the dropdown path runs, so offering
+        Top 1,000 there would be an option that cannot be honoured.
+        """
+        payload = (hits_payload or {}).get("profile") or {}
+        depth = int(payload.get("depth") or 0)
+        options = [
+            {"label": f"Top {n:,}", "value": str(n),
+             "disabled": depth > 0 and n > depth}
+            for n in RANGE_CHOICES
+        ]
+        if depth <= 0:
+            # Nothing to clamp against yet. Returning `no_update` for both props
+            # rather than restating them keeps the layout's own default as the
+            # single place the starting range is written down.
+            return no_update, no_update
+        available = [n for n in RANGE_CHOICES if n <= depth] or [min(RANGE_CHOICES)]
+        chosen = _profile_range(current)
+        value = chosen if chosen in available else min(max(available), DEFAULT_RANGE)
+        return options, str(value)
+
+    @app.callback(
+        Output("profile-graph", "figure"),
+        Output("profile-readout", "children"),
+        Output("profile-note", "children"),
+        Input("hits-store", "data"),
+        Input("profile-range", "value"),
+    )
+    def draw_similarity_profile(hits_payload: dict[str, Any] | None, n):
+        payload = (hits_payload or {}).get("profile") or {}
+        if not hits_payload:
+            return (empty_profile_figure(
+                "Run a search to draw the similarity profile."), None, None)
+        if not payload.get("available"):
+            reason = _safe_str(payload.get("reason")) or (
+                "This result carries no ranked profile.")
+            return empty_profile_figure(reason), None, None
+
+        frame = _profile_frame(payload, _profile_range(n))
+        if frame is None:
+            return (empty_profile_figure(
+                "Not enough ranked matches to draw a profile."), None, None)
+
+        shape = profile_shape.describe(frame["score"].to_numpy())
+        figure = build_similarity_profile_figure(frame, shape=shape)
+        return (figure,
+                build_profile_readout(shape, int(payload.get("depth") or 0)),
+                build_profile_note(shape, int(payload.get("depth") or 0)))
+

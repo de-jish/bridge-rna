@@ -17,9 +17,10 @@ from dash import dcc, html
 
 from . import cohorts as C
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
-from .figures import _empty_network_figure
+from .figures import _empty_network_figure, empty_profile_figure
 from .osdr import _eligible_osdr_count, load_osdr_samples
 from .panels import build_gene_list_banner, build_setup_banner
+from .profile import DEFAULT_RANGE, RANGE_CHOICES
 from .retrieval import _archs4_sample_count
 from .util import _safe_str
 
@@ -275,6 +276,80 @@ def build_graph_legend(kind: str = "sample") -> Any:
         ]))
     return items
 
+
+
+#: The profile panel is fixed height so the network keeps the rest of the
+#: column. Tall enough for a decay plus its change strip, short enough that the
+#: network above it is still the main event.
+PROFILE_PANEL_HEIGHT = 300
+
+
+def profile_panel() -> html.Div:
+    """The ranked similarity profile: how cosine decays with match rank.
+
+    The panel exists to answer one question the network and the map both duck:
+    how far down the ranked list a result is still worth reading. It states the
+    shape in a sentence, publishes the span the fitted axis is magnifying, and
+    says outright when there is no transition to find - which, measured over
+    120 real queries, is every time. See `bridge_rna/profile.py`.
+    """
+    return html.Div(
+        className="panel panel--profile",
+        children=[
+            html.Div(
+                className="panel-header",
+                children=[
+                    html.Span(className="panel-dot panel-dot--sample"),
+                    html.Div(
+                        children=[
+                            html.H2("Ranked similarity profile", className="panel-title"),
+                            html.P(
+                                "Cosine similarity between the query and its closest "
+                                "ARCHS4 matches, ordered from most to least similar.",
+                                className="panel-subtitle",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(id="profile-readout", className="profile-readout"),
+            html.Div(
+                className="profile-controls",
+                children=[
+                    _labelled(
+                        "profile-range-label", "Displayed range",
+                        # String option values, matching every other segmented
+                        # control in this application (manifold.layout._segmented
+                        # and the three neighbourhood switches). The range is an
+                        # int everywhere else, so `_profile_range` in callbacks
+                        # is the one place that conversion happens.
+                        dcc.RadioItems(
+                            id="profile-range",
+                            className="seg",
+                            options=[{"label": f"Top {n:,}", "value": str(n)}
+                                     for n in RANGE_CHOICES],
+                            value=str(DEFAULT_RANGE),
+                        ),
+                    ),
+                ],
+            ),
+            html.Div(
+                className="profile-graph-wrap",
+                children=[
+                    dcc.Graph(
+                        id="profile-graph",
+                        className="dash-graph",
+                        figure=empty_profile_figure(
+                            "Run a search to draw the similarity profile."),
+                        config={"displaylogo": False, "responsive": True,
+                                "displayModeBar": False},
+                        style={"height": "100%"},
+                    ),
+                ],
+            ),
+            html.Div(id="profile-note", className="profile-note"),
+        ],
+    )
 
 def build_view() -> html.Div:
     """The retrieval view, everything below the shared header.
@@ -569,6 +644,13 @@ def build_view() -> html.Div:
                                     ),
                                 ],
                             ),
+                            # ---- The ranked similarity profile ----
+                            # Under the network rather than in the inspector,
+                            # because it describes the whole result rather than
+                            # one selected hit, and the inspector's job is the
+                            # one selected hit. It is a fixed-height panel so
+                            # the network keeps the column's remaining space.
+                            profile_panel(),
                         ],
                     ),
                     # ---- Right: inspector ----

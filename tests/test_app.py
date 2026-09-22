@@ -272,10 +272,11 @@ def test_cached_sample_callback_carries_its_evidence_neighborhood(
 
     hits = _retrieval_frame("GSM-A-", 2)
     neighborhood = _retrieval_frame("GSM-A-", 4)
+    profile = _retrieval_frame("GSM-A-", 6)
     monkeypatch.setattr(
         retrieval_callbacks,
-        "search_hits_with_neighborhood",
-        lambda **_kwargs: (hits, neighborhood, "cached"),
+        "search_hits_with_profile",
+        lambda **_kwargs: (hits, neighborhood, profile, "cached"),
     )
     monkeypatch.setattr(
         retrieval_callbacks,
@@ -295,6 +296,15 @@ def test_cached_sample_callback_carries_its_evidence_neighborhood(
     assert [row["gsm"] for row in payload["neighborhood"]["hits"]] == [
         "GSM-A-0", "GSM-A-1", "GSM-A-2", "GSM-A-3"
     ]
+    # One scan, three prefixes: the profile is the deepest of them, and it
+    # travels as parallel lists rather than as records, because 1,000 full hit
+    # records would be several hundred kilobytes of session store per search.
+    assert payload["profile"]["available"] is True
+    assert payload["profile"]["depth"] == 6
+    assert len(payload["profile"]["scores"]) == 6
+    assert payload["profile"]["scores"] == sorted(
+        payload["profile"]["scores"], reverse=True)
+    assert "gsm" in payload["profile"] and "hits" not in payload["profile"]
 
 
 def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
@@ -305,8 +315,8 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
     hits = _retrieval_frame("GSM-D-", 2)
     monkeypatch.setattr(
         retrieval_callbacks,
-        "search_hits_with_neighborhood",
-        lambda **_kwargs: (hits, None, "demo"),
+        "search_hits_with_profile",
+        lambda **_kwargs: (hits, None, None, "demo"),
     )
     monkeypatch.setattr(
         retrieval_callbacks,
@@ -325,6 +335,10 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
     assert "demo mode cannot provide" in payload["neighborhood"]["reason"]
     assert "Rerunning that same mode will not add it" \
         in payload["neighborhood"]["reason"]
+    # The demo path runs no deep scan, so it has no profile either, and the
+    # panel is told why rather than being handed an empty chart.
+    assert payload["profile"]["available"] is False
+    assert payload["profile"]["reason"]
 
 
 def test_upload_callback_carries_evidence_without_expanding_the_network(

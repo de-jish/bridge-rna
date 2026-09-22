@@ -14,6 +14,7 @@ from dash import html
 
 from .config import ROOT
 from .osdr import _fetch_osdr_study_summary
+from . import profile
 from .preflight import (
     _canonical_gene_order_is_authoritative,
     preflight_retrieval_requirements,
@@ -572,3 +573,90 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
         parts.append(_detail_section("Publication", pub_rows))
 
     return [p for p in parts if p is not None]
+
+
+# ---------------------------------------------------------------------------
+# Ranked similarity profile
+# ---------------------------------------------------------------------------
+
+def _profile_metric(value: str, label: str) -> Any:
+    return html.Div(
+        className="profile-metric",
+        children=[
+            html.Span(value, className="profile-metric-value"),
+            html.Span(label, className="profile-metric-label"),
+        ],
+    )
+
+
+def build_profile_readout(shape, depth: int) -> Any:
+    """The sentence and the three numbers that sit above the profile.
+
+    The sentence comes first because the shape of the curve is the answer and
+    the numbers only qualify it. The span is one of the three because the y
+    axis is fitted per sample - it magnifies, and the span is what keeps a
+    magnified nothing from reading as a real separation.
+    """
+    if shape is None:
+        return None
+    metrics = [
+        _profile_metric(f"{shape.top:.4f}", "Top match"),
+        _profile_metric(_profile_span_text(shape.span),
+                        f"Cosine spanned by the top {shape.n:,}"),
+    ]
+    if shape.span > 0:
+        metrics.append(_profile_metric(f"{shape.half_span_rank:,}",
+                                       "Rank at half that fall"))
+    return html.Div(
+        children=[
+            html.P(shape.headline, className="profile-headline"),
+            html.P(shape.detail, className="profile-detail"),
+            html.Div(metrics, className="profile-metrics"),
+        ],
+    )
+
+
+def _profile_span_text(span: float) -> str:
+    if span >= 0.01:
+        return f"{span:.3f}"
+    if span >= 0.001:
+        return f"{span:.4f}"
+    return f"{span:.5f}"
+
+
+def build_profile_note(shape, depth: int) -> Any:
+    """What the estimator found, and what "found nothing" means here.
+
+    A panel that silently draws no marker leaves the reader to wonder whether
+    the test ran. It ran; this says so, with its number and with the corpus
+    measurement that makes "nothing" the expected answer rather than a failure.
+    """
+    if shape is None or shape.step is None:
+        return None
+    step = shape.step
+    if step.found:
+        body = (
+            f"A local drop of {_profile_span_text(step.delta)} at rank {step.rank:,} "
+            f"stands {step.prominence:.1f} times above the drops on either side of it "
+            f"and is worth {step.relative:.0%} of the whole fall. It marks a sharp "
+            f"local change in cosine similarity, and it is not a validated "
+            f"biological cutoff."
+        )
+        kicker = "Potential similarity breakpoint"
+    else:
+        body = (
+            f"The largest local drop over the top {shape.n:,} sits at rank {step.rank:,} "
+            f"and stands only {step.prominence:.1f} times above the drops beside it, "
+            f"against a floor of {int(profile.MIN_PROMINENCE)}. Nothing is marked on "
+            f"the chart. Measured over 120 random OSDR queries at top-100, top-250 and "
+            f"top-1,000, no query cleared that floor at any range, so a smooth decay is "
+            f"the expected reading here rather than a failed measurement."
+        )
+        kicker = "No breakpoint found"
+    return html.Details(
+        className="profile-note-details",
+        children=[
+            html.Summary(kicker, className="advanced-summary"),
+            html.P(body, className="profile-note-body"),
+        ],
+    )
