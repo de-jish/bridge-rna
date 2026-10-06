@@ -371,6 +371,8 @@ def _requested_sample(search: str | None) -> str:
 
 def register(app) -> None:
     """Attach every retrieval callback to `app`. Called once by the shell."""
+    from . import results_ui
+    results_ui.register(app)
 
     @app.callback(
         Output("study-dropdown", "value"),
@@ -1338,7 +1340,7 @@ def register(app) -> None:
 
     @app.callback(
         Output("details-panel", "children"),
-        Input("hits-store", "data"),
+        Input("results-view-store", "data"),
         Input("selected-node-store", "data"),
     )
     def render_details(hits_payload: dict[str, Any] | None, selected_node: dict[str, Any] | None):
@@ -1390,10 +1392,19 @@ def register(app) -> None:
                     _safe_str(r.get(c))
                     for c in ["geo_summary", "geo_design", "pubmed_ids"]
                 )
+                has_context = has_context or any(
+                    _safe_str(study.get(field))
+                    for study in (r.get("metadata") or {}).get("studies", [])
+                    for field in ("summary", "overall_design", "pubmed_ids")
+                )
                 if not has_context:
                     enriched_one = _enrich_hits_from_ncbi_eutils(one.copy(), entrez_email)
                     row_mask = hits_df["gsm"] == gsm
                     for col in enriched_one.columns:
+                        if col == "metadata":
+                            # NCBI enrichment must not overwrite the sidecar's
+                            # nested, attributed source records via pandas .loc.
+                            continue
                         # Add the column first if the cached path never created
                         # it. Without this, the `_biopython` fields the NCBI
                         # fetch returns - platform, entry type, GDS type,
@@ -1473,4 +1484,3 @@ def register(app) -> None:
         return (figure,
                 build_profile_readout(shape, int(payload.get("depth") or 0)),
                 build_profile_note(shape, int(payload.get("depth") or 0)))
-

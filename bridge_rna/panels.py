@@ -479,6 +479,13 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
         # resolves to whenever a node was actually clicked.
         return _build_query_details(query_b, compact=False, role="b")
 
+    if hits_df.empty:
+        return [
+            _details_head("Details", "No visible matches"),
+            html.P("No matches meet these filters. Reset filters to see the retrieved matches.",
+                   className="details-empty"),
+        ]
+
     if node_kind == "gse":
         df = hits_df[hits_df["gse"] == node_id]
         examples = ", ".join(df["gsm"].head(8).astype(str).tolist())
@@ -537,6 +544,7 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
             "Biology",
             [
                 _detail_row("Species", species),
+                _detail_row("Derived tissue", _safe_str(r.get("tissue")) or "Unknown"),
                 _detail_row("Source name", source_name),
                 _detail_row("Characteristics", characteristics),
             ],
@@ -553,6 +561,11 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
             ],
         ),
     ]
+
+    from .results_ui import metadata_details
+    rich_metadata = metadata_details(r.get("metadata"))
+    if rich_metadata is not None:
+        parts.insert(2, rich_metadata)
 
     if _safe_str(geo_summary) or _safe_str(geo_design):
         context = html.Div(className="details-section", children=[html.Div("Study context", className="details-section-title")])

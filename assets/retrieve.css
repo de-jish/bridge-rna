@@ -2,6 +2,16 @@
    inspector, the banners. Tokens and the global reset live in
    00-tokens.css; this file styles only what retrieval draws. */
 
+.results-controls { padding: 0 var(--space-4) var(--space-3); min-width: 0; }
+.results-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); justify-content: space-between; }
+.results-actions .btn-secondary { width: auto; }
+.results-controls > * + * { margin-top: var(--space-2); }
+.results-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: var(--space-2); margin-bottom: var(--space-2); }
+.results-filters > * { min-width: 0; }
+.metadata-details details { margin-top: var(--space-3); overflow-wrap: anywhere; }
+.metadata-details summary { cursor: pointer; color: var(--accent-text); line-height: 1.5; }
+.results-controls .dash-dropdown { min-width: 0; }
+
 /* ==========================================================================
    Retrieval view: the 3-zone grid
    The header that used to sit here is the shell's now; see 01-shell.css.
@@ -243,7 +253,7 @@
    scrolling parent, `min-height: 0` lets this collapse to nothing and hand its
    whole height to the panel below. */
 .panel--canvas {
-  flex: 1 1 auto;
+  flex: none;
   min-height: 420px;
   display: flex;
   flex-direction: column;
@@ -365,7 +375,7 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 .legend-divider { width: 1px; align-self: stretch; background: var(--border-strong); }
 .legend-note { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); }
 
-.graph-wrap { flex: 1 1 auto; min-height: 320px; }
+.graph-wrap { flex: none; height: 360px; min-height: 320px; }
 .graph-wrap .dash-graph, .graph-wrap .js-plotly-plot { height: 100%; }
 
 /* ==========================================================================

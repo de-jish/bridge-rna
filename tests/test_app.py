@@ -246,6 +246,28 @@ def _callback_for(app, trigger_id):
     return getattr(matches[0], "__wrapped__", matches[0])
 
 
+@pytest.mark.parametrize('context,expected_fetch', [('', True), ('Study summary', False)])
+def test_result_study_membership_does_not_hide_missing_context(app, monkeypatch,
+                                                             context, expected_fetch):
+    from bridge_rna import callbacks as retrieval_callbacks
+    callback = app.callback_map['details-panel.children']['callback'].__wrapped__
+    fetched = []
+    metadata = {'organ':'Liver', 'studies':[{'gse':'GSE1', 'summary':context}]}
+
+    def enrich(frame, email):
+        fetched.append(True)
+        frame['geo_summary'] = 'Fetched context'
+        return frame
+
+    monkeypatch.setattr(retrieval_callbacks, '_enrich_hits_from_ncbi_eutils', enrich)
+    monkeypatch.setattr(retrieval_callbacks, 'build_details_panel', lambda **kwargs: kwargs['hits_df'])
+    result = callback({
+        'sample_id':'query', 'hits':[{'gsm':'GSM1', 'score':.9, 'metadata':metadata}]},
+        {'kind':'gsm', 'node_id':'GSM1'})
+    assert bool(fetched) == expected_fetch
+    assert result.iloc[0]['metadata'] == metadata
+
+
 def _retrieval_frame(prefix, count, start=0):
     import pandas as pd
 

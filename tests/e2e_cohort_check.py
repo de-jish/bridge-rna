@@ -593,6 +593,9 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         summary_b.press("Enter")
         c.ok(paired.nth(1).get_attribute("open") is not None,
              "Cohort B definitions expand from the keyboard while inspecting a match")
+        # Cached metadata makes the first selection almost immediate. These
+        # are separate single clicks, not Plotly's double-click axis reset.
+        page.wait_for_timeout(350)
         pos = page.evaluate(QUERY_NODE_JS)
         page.mouse.click(pos["x"], pos["y"])
         page.wait_for_function("document.querySelectorAll('.comparison-cohort[open]').length === 2")

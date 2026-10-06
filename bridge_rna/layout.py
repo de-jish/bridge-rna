@@ -362,6 +362,7 @@ def build_view() -> html.Div:
     initialization and left both dropdowns empty, so the cold-load case is
     handled by choosing the initial value rather than by a callback.
     """
+    from .results_ui import controls
     initial_study = _initial_study()
     return html.Div(
         className="app-root",
@@ -627,6 +628,7 @@ def build_view() -> html.Div:
                                             ),
                                         ],
                                     ),
+                                    controls(),
                                     html.Div(id="graph-legend", className="graph-legend",
                                              children=build_graph_legend("sample")),
                                     html.Div(
