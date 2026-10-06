@@ -19,6 +19,7 @@ def test_package_is_allowlisted_and_integrity_checked(tmp_path):
     meta=common.verify_bundle(dest)
     assert 'prompts/ai_summary_prompt.txt' in meta['files']
     assert 'precompute/embed_upload.py' in meta['files']
+    assert 'bridge_rna/profile.py' in meta['files']
     assert 'generate_archs4_embeddings.py' in meta['files']
     assert {str(p.relative_to(dest)) for p in dest.rglob('*.md')} == {
         'assets/fonts/HDS-LICENSE.md', 'assets/fonts/public-sans/LICENSE.md'}

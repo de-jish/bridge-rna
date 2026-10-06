@@ -22,6 +22,7 @@
   "bridge_rna/neighborhoods.py",
   "bridge_rna/osdr.py",
   "bridge_rna/panels.py",
+  "bridge_rna/profile.py",
   "bridge_rna/preflight.py",
   "bridge_rna/retrieval.py",
   "bridge_rna/util.py",
