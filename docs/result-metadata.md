@@ -3,6 +3,9 @@
 Implemented on `feature/result-metadata`, using the existing result inspector,
 network, Dash controls and styles. Production has not been contacted or activated.
 
+For the implementation walkthrough, design rationale and limitations, see
+[Bridge RNA metadata upgrade explained](metadata-upgrade-explained.md).
+
 ## Source and validation
 
 The earlier comparison is at
