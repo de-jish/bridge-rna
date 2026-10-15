@@ -124,7 +124,10 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
                 gsm,
                 _safe_str(row.get("source_name", "")),
                 _safe_str(row.get("characteristics", "")),
-                f"Score: {score:.3f}",
+                (f"Adjusted cosine ({_safe_str(row.get('matching_method'))}): {score:.6f}"
+                 if _safe_str(row.get('matching_method')) else f"Score: {score:.3f}"),
+                (f"Original cosine: {float(row['raw_cosine']):.6f}"
+                 if _safe_str(row.get('matching_method')) else ""),
                 gse,
             )
             if part

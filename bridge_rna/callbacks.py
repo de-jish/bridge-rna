@@ -314,6 +314,8 @@ def register(app) -> None:
     """Attach every retrieval callback to `app`. Called once by the shell."""
     from .comparison_ui import register as register_comparisons
     register_comparisons(app)
+    from .matching_ui import register as register_matching
+    register_matching(app)
 
     @app.callback(
         Output("study-dropdown", "value"),
@@ -472,6 +474,7 @@ def register(app) -> None:
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
+        State("matching-method", "value"),
         running=[
             (Output("search-button", "disabled"), True, False),
             (Output("query-running-indicator", "children"), "Finding related ARCHS4 samples...", ""),
@@ -483,6 +486,7 @@ def register(app) -> None:
         topk: int,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
+        matching_method: str = "cosine",
     ):
         if not sample_id:
             return (
@@ -494,14 +498,22 @@ def register(app) -> None:
         q_row = samples_df.loc[samples_df["sample_id"] == sample_id].iloc[0]
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
+        matching = None
         try:
-            hits_df, neighborhood_df, mode = search_hits_with_neighborhood(
-                samples_df=samples_df,
-                sample_id=sample_id,
-                topk=int(topk),
-                entrez_email=email_value,
-                enable_biopython_metadata=enable_biopython,
-            )
+            if matching_method != "cosine":
+                from .matching import search_corrected
+                hits_df, neighborhood_df, matching = search_corrected(sample_id, int(topk), matching_method)
+                mode = "cached"
+                if enable_biopython:
+                    hits_df = _enrich_hits_from_ncbi_eutils(hits_df, email_value)
+            else:
+                hits_df, neighborhood_df, mode = search_hits_with_neighborhood(
+                    samples_df=samples_df,
+                    sample_id=sample_id,
+                    topk=int(topk),
+                    entrez_email=email_value,
+                    enable_biopython_metadata=enable_biopython,
+                )
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
             return (
@@ -521,6 +533,8 @@ def register(app) -> None:
         # results was announced as "real demo script output" - the interface
         # asserting something that was not true about how the answer was made.
         how = _retrieval_phrase(mode)
+        if matching:
+            how += f" using {matching['label'].lower()}"
         # The precomputed path (a supplied query-embedding table) does not
         # enrich even when the box is ticked, so it must not claim to. Only the
         # cached and demo paths run the NCBI fetch.
@@ -533,6 +547,7 @@ def register(app) -> None:
         status = build_status_banner(status_message, kind="good")
         payload = {
             "sample_id": sample_id,
+            "matching": matching,
             "entrez_email": email_value,
             "biopython_enabled": bool(enable_biopython),
             "mode": mode,
@@ -1235,7 +1250,10 @@ def register(app) -> None:
             kind = "cohort"
         else:
             kind = "sample"
-        return build_graph_legend(kind), CANVAS_SUBTITLES[kind]
+        subtitle = CANVAS_SUBTITLES[kind]
+        if payload.get('matching'):
+            subtitle = 'Ranked by experimental adjusted cosine; original scores are shown above.'
+        return build_graph_legend(kind), subtitle
 
     @app.callback(
         Output("see-on-map", "style"),

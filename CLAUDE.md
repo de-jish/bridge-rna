@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+Single-sample retrieval has opt-in reference-fitted background removal and
+regularized whitening. Original cosine remains the default; cohort, upload and
+fixed comparisons use it unchanged. Corrected results must preserve the method,
+original cosine and full-index original rank through inspector, AI context and
+map evidence. Map coordinates remain original. A larger score range is not
+biological validation. See `docs/matching-corrections.md` for fitting, artifact
+checksums, measurements and limitations.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 For interface work, also follow [AGENTS.md](AGENTS.md). Every agent must load both
