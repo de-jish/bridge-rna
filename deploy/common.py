@@ -48,10 +48,7 @@ def runtime_path(name):
     p = Path(name)
     if p.is_absolute() or '..' in p.parts or str(p) != name:
         return False
-    if name in TOP | REFERENCES | STATIC_ASSETS | {
-        'prompts/ai_summary_prompt.txt', 'precompute/embed_upload.py',
-        'precompute/validate_result_metadata.py',
-    }:
+    if name in TOP | REFERENCES | STATIC_ASSETS | {'prompts/ai_summary_prompt.txt', 'precompute/embed_upload.py'}:
         return True
     if len(p.parts) == 2:
         parent, leaf = p.parts

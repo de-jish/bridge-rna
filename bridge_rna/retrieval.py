@@ -52,7 +52,6 @@ from .config import (
 )
 from .geo import _enrich_hits_from_ncbi_eutils
 from .neighborhoods import NEIGHBORHOOD_DEPTH
-from .profile import PROFILE_DEPTH
 from .preflight import preflight_retrieval_requirements
 from .util import (
     RetrievalError,
@@ -919,51 +918,6 @@ def split_ranked_hits(
     return requested, neighborhood
 
 
-def search_hits_with_profile(
-    samples_df: pd.DataFrame,
-    sample_id: str,
-    topk: int,
-    *,
-    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
-    profile_depth: int = PROFILE_DEPTH,
-    entrez_email: str | None = None,
-    enable_biopython_metadata: bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame | None, str]:
-    """One scan, three prefixes: the hits, the evidence, and the profile.
-
-    The ranked similarity profile is not a second query. It is a deeper prefix
-    of the same cosine scan the evidence neighbourhood already rides, so the
-    scan asks for the deepest prefix anyone wants and the three frames are
-    slices of it. Going from 250 to 1,000 costs a larger top-k heap over the
-    same 940,455-row pass, which is why the profile needs no new artifact, no
-    new index and no second memmap read.
-
-    Only the cached path can serve a profile. The demo and precomputed paths
-    return None for it, and the panel says why rather than drawing nothing.
-    """
-    row = samples_df.loc[samples_df["sample_id"] == sample_id]
-    if row.empty:
-        raise ValueError(f"Unknown sample_id: {sample_id}")
-
-    scan_k = max(int(topk), int(neighborhood_depth), int(profile_depth))
-    if cached_query_vector(sample_id) is not None:
-        ranked = run_cached_query_retrieval(sample_id, scan_k)
-        hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
-        _, profile = split_ranked_hits(ranked, topk, profile_depth)
-        if enable_biopython_metadata and _safe_str(entrez_email):
-            hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
-        return hits, neighborhood, profile, "cached"
-
-    hits, mode = search_hits(
-        samples_df,
-        sample_id,
-        topk,
-        entrez_email,
-        enable_biopython_metadata,
-    )
-    return hits, None, None, mode
-
-
 def search_hits_with_neighborhood(
     samples_df: pd.DataFrame,
     sample_id: str,
@@ -973,22 +927,27 @@ def search_hits_with_neighborhood(
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame | None, str]:
-    """Retrieve requested hits plus a locatable evidence prefix when available.
+    """Retrieve requested hits plus a locatable evidence prefix when available."""
+    row = samples_df.loc[samples_df["sample_id"] == sample_id]
+    if row.empty:
+        raise ValueError(f"Unknown sample_id: {sample_id}")
 
-    The evidence-only entry point, kept because most callers want exactly this.
-    It delegates rather than duplicating the scan, and asks for no more depth
-    than it uses, so nothing that does not draw a profile pays for one.
-    """
-    hits, neighborhood, _profile, mode = search_hits_with_profile(
+    scan_k = max(int(topk), int(neighborhood_depth))
+    if cached_query_vector(sample_id) is not None:
+        ranked = run_cached_query_retrieval(sample_id, scan_k)
+        hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
+        if enable_biopython_metadata and _safe_str(entrez_email):
+            hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
+        return hits, neighborhood, "cached"
+
+    hits, mode = search_hits(
         samples_df,
         sample_id,
         topk,
-        neighborhood_depth=neighborhood_depth,
-        profile_depth=neighborhood_depth,
-        entrez_email=entrez_email,
-        enable_biopython_metadata=enable_biopython_metadata,
+        entrez_email,
+        enable_biopython_metadata,
     )
-    return hits, neighborhood, mode
+    return hits, None, mode
 
 
 

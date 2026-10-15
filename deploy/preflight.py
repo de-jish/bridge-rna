@@ -107,15 +107,6 @@ def validate():
     from bridge_rna.retrieval import run_cached_query_retrieval, run_cohort_retrieval
     hits = run_cached_query_retrieval(sample.sample_key, 5)
     require(len(hits) == 5 and "archs4_index" in hits, "cached retrieval failed")
-    from bridge_rna.result_metadata import database_path, enrich
-    metadata_checked = False
-    if os.environ.get('BRIDGE_METADATA_DB') or database_path().is_file():
-        original = hits.to_dict('records')
-        annotated, error = enrich(original)
-        require(not error, error)
-        require([{k:row[k] for k in original[0]} for row in annotated] == original,
-                'metadata changed result identities, counts or scores')
-        metadata_checked = True
     cohort_hits, _ = run_cohort_retrieval(osdr.sample_key.iloc[:2].tolist(), 5)
     require(len(cohort_hits) == 5, "pooled retrieval failed")
     from wsgi import application, RELEASE_ID
@@ -132,7 +123,6 @@ def validate():
                 require(response.status_code == 200 and response.data == (ROOT / name).read_bytes(),
                         f"missing or incorrect runtime asset: {name}")
     return {"archs4_samples": n, "osdr_samples": m, "upload_reference_cosine": cosine,
-            "result_metadata_checked": metadata_checked,
             "artifacts": {os.path.relpath(p, ROOT): {"path": str(p.resolve()), "sha256": sha256(p)} for p in required},
             "counts_files_checked": len(counts), "tsne": paths.COORDS_TSNE2.exists()}
 
