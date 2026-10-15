@@ -87,7 +87,8 @@ def _detail_text_block(title: str, text: str, collapsible: bool = False, placeho
     )
 
 
-def _details_head(kicker: str, heading: str, score: float | None = None) -> Any:
+def _details_head(kicker: str, heading: str, score: float | None = None,
+                  score_label: str = "Cosine") -> Any:
     children: list[Any] = [
         html.Div(
             children=[
@@ -97,8 +98,8 @@ def _details_head(kicker: str, heading: str, score: float | None = None) -> Any:
         )
     ]
     if score is not None:
-        children.append(html.Span(f"Cosine {score:.4f}", className="score-badge",
-                                  title="Cosine similarity between query and sample embeddings"))
+        children.append(html.Span(f"{score_label} {score:.4f}", className="score-badge",
+                                  title="Cosine similarity in the matching method's embedding geometry"))
     return html.Div(className="details-head", children=children)
 
 
@@ -523,7 +524,13 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
     pubmed_doi = _first_non_empty(r, ["pubmed_doi_biopython", "pubmed_doi_ncbi"])
 
     parts: list[Any] = [
-        _details_head("ARCHS4 hit · GSM", _safe_str(r.get("gsm")), score=float(r.get("score", 0.0))),
+        _details_head("ARCHS4 hit · GSM", _safe_str(r.get("gsm")), score=float(r.get("score", 0.0)),
+                      score_label="Adjusted cosine" if _safe_str(r.get("matching_method")) else "Cosine"),
+        _detail_section("Matching method", [
+            _detail_row("Method", _safe_str(r.get("matching_method"))),
+            _detail_row("Original cosine", f"{float(r['raw_cosine']):.6f}"),
+            _detail_row("Original rank", str(int(r['raw_rank']))),
+        ]) if _safe_str(r.get("matching_method")) else None,
         _detail_section(
             "Identity",
             [

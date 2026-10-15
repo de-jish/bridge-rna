@@ -104,6 +104,7 @@ def _retrieval_overlay(hits_payload: dict | None,
         if not points and not members:
             continue
         cohorts.append({"role": role,
+                        "matching_method": (hits_payload.get('matching') or {}).get('method', ''),
                         # The cohort's own name for a pooled query; for a single
                         # sample there is none, and its sample key is the name.
                         "label": label or (str(keys[0]) if keys else ""),

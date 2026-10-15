@@ -68,7 +68,12 @@ def build_payload(frame: pd.DataFrame | None, *, label: str = "",
             "score": None if pd.isna(score) or not np.isfinite(score) else float(score),
             "archs4_index": _index(raw.get("archs4_index")),
         })
+        method = _text(raw.get("matching_method"))
+        if method:
+            row.update(matching_method=method, raw_cosine=float(raw['raw_cosine']),
+                       raw_rank=_index(raw.get('raw_rank')))
         rows.append(row)
+    method = rows[0].get('matching_method', '') if rows else ''
     return {
         "available": True,
         "reason": "",
@@ -76,7 +81,7 @@ def build_payload(frame: pd.DataFrame | None, *, label: str = "",
         "depth_requested": int(depth_requested),
         "depth_returned": len(rows),
         "metric": "cosine",
-        "space": "embedding-512d",
+        "space": f"corrected-512d-{method}" if method else "embedding-512d",
         "hits": rows,
     }
 

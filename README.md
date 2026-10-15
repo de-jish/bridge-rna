@@ -11,6 +11,11 @@ Bridge RNA is one app with two pages.
 ### Retrieve (`/`)
 
 Select an OSDR sample or cohort, including flight and ground-control groups, or upload mouse counts to embed and search.
+
+Single-sample searches also offer opt-in **shared-background removal** and
+**regularized whitening**. These experimental methods change the ranking and
+show original ranks and cosine scores beside adjusted scores. Original cosine
+remains the default. See [methods, measurements and limitations](docs/matching-corrections.md).
 Bridge RNA searches the 940,455-sample ARCHS4 index and shows matches and their GEO studies in a network. The inspector links to source records; optional AI interpretation is available under **AI summary**.
 
 ![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours and the three GEO studies they came from drawn as a network, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)
@@ -42,7 +47,9 @@ Retrieval searches that space for one query; the map draws all of it.
 
 The network is an `ExpressionPerformer`, a transformer whose tokens are genes and whose values are expression levels.
 It reads 15,165 genes in a fixed canonical order and produces 512 numbers per sample by averaging its per-gene internal states.
-Two samples are compared by the cosine between their vectors, and that one number is the only measure of similarity anywhere in the app.
+By default, two samples are compared by the cosine between their original
+vectors. Experimental single-sample matching instead computes cosine after a
+shared reference-fitted correction; its scores are labelled separately.
 
 Both collections pass through identical preprocessing before the model sees them.
 Mouse genes are mapped to their human orthologs, counts are TPM-normalised and log-scaled, and the genes are put in one canonical order.

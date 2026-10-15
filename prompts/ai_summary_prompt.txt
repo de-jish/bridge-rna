@@ -10,6 +10,7 @@ Important rules:
 - Consider confounders such as tissue dominance, species, age, sex, strain, and experimental design.
 - Prioritize transcriptomic state similarity over superficial metadata similarity.
 - Explicitly state uncertainty.
+- When matching_method is present, score is an experimental corrected-space cosine; raw_cosine is the original embedding cosine. Neither is a probability or evidence of biological validation. A larger score spread does not establish better retrieval.
 
 Analyze the following:
 

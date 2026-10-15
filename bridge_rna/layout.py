@@ -17,6 +17,7 @@ from dash import dcc, html
 
 from . import cohorts as C
 from .comparison_ui import comparison_panel
+from .matching_ui import matching_control
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
 from .figures import _empty_network_figure
 from .osdr import _eligible_osdr_count, load_osdr_samples
@@ -338,6 +339,7 @@ def build_view() -> html.Div:
                                                 dcc.Dropdown(id="sample-dropdown", clearable=False),
                                             ),
                                             html.Div(id="sample-preview", className="sample-preview"),
+                                            matching_control(),
                                         ],
                                     ),
                                     build_cohort_panel(),
@@ -549,6 +551,7 @@ def build_view() -> html.Div:
                     html.Main(
                         className="workspace",
                         children=[
+                            html.Div(id="matching-evidence", **{"aria-live": "polite"}),
                             html.Div(id="comparison-results-switch", style={"display": "none"},
                                      role="group", **{"aria-label": "Comparison result view"}, children=[
                                 dcc.RadioItems(id="results-view", value="network", inline=True,

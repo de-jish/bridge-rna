@@ -375,7 +375,9 @@ def _neighborhood_traces(coords, is_3d, neighborhood, facts=None):
         customdata=customdata,
         hovertemplate=("<b>%{customdata[2]}</b> · %{customdata[3]}<br>"
                        + ("%{customdata[8]}<br>" if facts else
-                          "512-d rank %{customdata[1]:,} · cosine %{customdata[4]:.4f}<br>")
+                          ("Adjusted rank %{customdata[1]:,} · adjusted cosine %{customdata[4]:.4f}<br>"
+                           if any(row.get('matching_method') for _, row in located) else
+                           "512-d rank %{customdata[1]:,} · cosine %{customdata[4]:.4f}<br>"))
                        +
                        "%{customdata[5]} · %{customdata[6]}<extra></extra>"),
         showlegend=False,
@@ -525,6 +527,9 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         map_ranks.append(ranks)
         scores = cohort.get("hit_scores") or []
         name = str(cohort.get("label") or "")
+        method = str(cohort.get('matching_method') or '')
+        score_label = f'adjusted cosine ({method})' if method else 'cosine'
+        rank_label = 'Adjusted rank' if method else '512-d rank'
         # Only say "pooled member" when something was actually pooled. For a
         # single-sample or uploaded search the one member *is* the query.
         origin = (" from the nearest pooled member" if len(members) > 1 else "")
@@ -534,13 +539,13 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
             if comparing:
                 # Each arm carries its own map rank here, because a shared hit
                 # is one coordinate with two nearest members and two answers.
-                line = (f"<b>{name}</b>  ·  512-d rank {i + 1} of {len(hits)}"
-                        f"  ·  cosine {score}")
+                line = (f"<b>{name}</b>  ·  {rank_label} {i + 1} of {len(hits)}"
+                        f"  ·  {score_label} {score}")
                 if mr is not None:
                     line += f"  ·  map rank {mr:,}"
             else:
-                line = (f"512-d rank {i + 1} of {len(hits)} retrieved"
-                        f"  ·  cosine {score}")
+                line = (f"{rank_label} {i + 1} of {len(hits)} retrieved"
+                        f"  ·  {score_label} {score}")
                 if mr is not None:
                     line += f"<br>map rank {mr:,} of {n:,}{origin}"
             facts.setdefault(point, []).append(line)
@@ -790,8 +795,11 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
                 score_text = f"{float(score):.4f}" if score is not None else "unavailable"
                 label = str(cohort.get("label") or "Query")
                 role = str(cohort.get("role", "a")).upper()
+                matching_method = row.get('matching_method')
+                metric = f'adjusted cosine ({matching_method})' if matching_method else 'cosine'
+                rank_label = 'adjusted rank' if matching_method else '512-d rank'
                 facts.setdefault(point, []).append(
-                    f"{role} · {label} · 512-d rank {row.get('rank')} · cosine {score_text}")
+                    f"{role} · {label} · {rank_label} {row.get('rank')} · {metric} {score_text}")
         for cohort in cohorts:
             evidence, focus = _neighborhood_traces(coords, is_3d, cohort, facts)
             if len(evidence.x):

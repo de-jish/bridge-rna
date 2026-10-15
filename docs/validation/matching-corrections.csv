@@ -1,0 +1,13 @@
+sample_id,source_tissue,method,seconds,overlap_at_5,overlap_at_30,raw_top5_spread,adjusted_top5_spread,raw_tissue_categories,adjusted_tissue_categories,raw_largest_gse_count,adjusted_largest_gse_count,max_explicit_score_error
+OSD-100|Mmus_C57-6J_EYE_FLT_Rep1_M23,left eye,background,5.851,4,25,0.001609206199645996,0.006598114967346191,"{""Eye"": 23, ""Other"": 7}","{""Eye"": 22, ""Other"": 8}",6,6,1.3397034370754568e-08
+OSD-100|Mmus_C57-6J_EYE_FLT_Rep1_M23,left eye,whiten,13.33,3,25,0.001609206199645996,0.004725813865661621,"{""Eye"": 23, ""Other"": 7}","{""Eye"": 21, ""Other"": 9}",6,6,6.620603565377081e-09
+OSD-104|Mmus_C57-6J_SLS_FLT_Rep1_M23,Soleus-both sides,background,6.771,1,25,0.0002231597900390625,0.00330197811126709,"{""Adipose"": 1, ""Skeletal muscle"": 29}","{""Skeletal muscle"": 30}",16,16,2.7803419677674412e-08
+OSD-104|Mmus_C57-6J_SLS_FLT_Rep1_M23,Soleus-both sides,whiten,5.884,1,21,0.0002231597900390625,0.007812738418579102,"{""Adipose"": 1, ""Skeletal muscle"": 29}","{""Skeletal muscle"": 30}",16,13,9.494834363188431e-09
+OSD-194|Mmus_BAL-TAL_LRTN_FLT_Rep1_F6,Left retina,background,6.504,2,12,0.0009753108024597168,0.00798022747039795,"{""Eye"": 30}","{""Eye"": 30}",5,9,8.107138238511169e-09
+OSD-194|Mmus_BAL-TAL_LRTN_FLT_Rep1_F6,Left retina,whiten,11.071,3,11,0.0009753108024597168,0.009073913097381592,"{""Eye"": 30}","{""Eye"": 30}",5,6,1.1866918225855727e-08
+OSD-137|Mmus_BAL-TAL_LVR_FLT_Rep1_F1,Liver,background,17.487,4,19,2.3126602172851562e-05,0.0006508231163024902,"{""Liver"": 30}","{""Liver"": 30}",6,6,2.767986162499625e-08
+OSD-137|Mmus_BAL-TAL_LVR_FLT_Rep1_F1,Liver,whiten,13.305,1,15,2.3126602172851562e-05,0.0027127861976623535,"{""Liver"": 30}","{""Liver"": 30}",6,5,9.24175103111935e-09
+OSD-102|Mmus_C57-6J_KDN_FLT_Rep1_M23,Left kidney,background,9.331,4,10,0.0002918839454650879,0.0008439421653747559,"{""Kidney"": 24, ""Other"": 6}","{""Kidney"": 26, ""Other"": 4}",13,9,2.6266971819843832e-08
+OSD-102|Mmus_C57-6J_KDN_FLT_Rep1_M23,Left kidney,whiten,20.938,2,11,0.0002918839454650879,0.0003968477249145508,"{""Kidney"": 24, ""Other"": 6}","{""Kidney"": 24, ""Other"": 6}",13,8,2.077047533965981e-08
+OSD-613|RRRM2_BRN_FLT_ISS-T_OLD_FO14,Left cerebral hemisphere,background,9.886,1,11,0.0006109476089477539,0.01185917854309082,"{""Brain / CNS"": 29, ""Nerve / spinal cord"": 1}","{""Brain / CNS"": 30}",9,10,2.9432012271790597e-08
+OSD-613|RRRM2_BRN_FLT_ISS-T_OLD_FO14,Left cerebral hemisphere,whiten,12.003,0,9,0.0006109476089477539,0.03790944814682007,"{""Brain / CNS"": 29, ""Nerve / spinal cord"": 1}","{""Brain / CNS"": 30}",9,7,1.469407873155859e-08
