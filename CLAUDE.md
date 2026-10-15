@@ -7,6 +7,12 @@ For interface work, also follow [AGENTS.md](AGENTS.md). Every agent must load bo
 implementation and apply both during final review. Preserve the scientific
 workflows and use contextual disclosure to simplify secondary information.
 The map has one results action: **Fit results** in 2-D, **View results** in 3-D.
+**Compare** offers three fixed, source-checked flight/ground definitions and a
+paired evidence table. These are documented comparisons, not independent
+biological validation. See `docs/reviewed-comparisons.md`. Exact ranks use the
+same full reference universe for both groups; the UI makes no enrichment,
+statistical-significance or causal claim. Optional read-only study context uses
+`BRIDGE_RNA_STUDY_CONTEXT_DB`; missing context never changes retrieval eligibility.
 Result stability was removed at the user's request on 2026-09-05. Do not
 reintroduce its panel, warnings, or payload. Executed membership remains a disclosure.
 

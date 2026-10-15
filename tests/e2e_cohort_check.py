@@ -379,8 +379,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     page.wait_for_selector(".sample-preview", timeout=60_000)
     page.wait_for_timeout(1500)
 
-    c.ok(page.locator(".mode-tab").count() == 3,
-         "the rail offers three query sources")
+    c.ok(page.locator(".mode-tab").count() == 4,
+         "the rail offers sample, cohort, documented comparison and upload")
     c.ok("is-active" in (page.locator("#mode-tab-sample")
                          .get_attribute("class") or ""),
          "it opens on Sample")

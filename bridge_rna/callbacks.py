@@ -312,6 +312,8 @@ def _requested_sample(search: str | None) -> str:
 
 def register(app) -> None:
     """Attach every retrieval callback to `app`. Called once by the shell."""
+    from .comparison_ui import register as register_comparisons
+    register_comparisons(app)
 
     @app.callback(
         Output("study-dropdown", "value"),
@@ -553,6 +555,8 @@ def register(app) -> None:
         *[Output(f"mode-panel-{m['key']}", "style") for m in QUERY_MODES],
         *[Output(f"action-slot-{m['key']}", "style") for m in QUERY_MODES],
         Output("study-group", "style"),
+        Output("metadata-options", "style"),
+        Output("topk-slider-label", "children"),
         Output("network-graph", "figure", allow_duplicate=True),
         *[Input(f"mode-tab-{m['key']}", "n_clicks") for m in QUERY_MODES],
         State("hits-store", "data"),
@@ -614,6 +618,7 @@ def register(app) -> None:
             canvas = _empty_network_figure({
                 "sample": "Select an OSDR sample, then run a search.",
                 "cohort": "Define a cohort, then pool and search it.",
+                "comparison": "Select a documented comparison, then compare its groups.",
                 "upload": "Upload a counts file, then embed and search it.",
             }[active])
 
@@ -625,7 +630,9 @@ def register(app) -> None:
             *[shown if m["key"] == active else hidden for m in QUERY_MODES],
             *[shown if m["key"] == active else hidden for m in QUERY_MODES],
             # Upload has no study; Sample and Cohort share one.
-            hidden if active == "upload" else shown,
+            hidden if active in ("upload", "comparison") else shown,
+            hidden if active == "comparison" else shown,
+            "Network matches per group" if active == "comparison" else "Number of matches",
             canvas,
         )
 
