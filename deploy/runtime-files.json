@@ -68,5 +68,9 @@
   "deploy/processes.py",
   "deploy/preflight.py",
   "deploy/requirements.in",
-  "deploy/requirements.lock"
+  "deploy/requirements.lock",
+  "bridge_rna/reviewed.py",
+  "bridge_rna/comparison.py",
+  "bridge_rna/comparison_ui.py",
+  "assets/comparison.css"
 ]

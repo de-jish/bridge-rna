@@ -403,6 +403,7 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
                         block_bytes: int = 200_000_000,
                         progress: Any = None, *,
                         preserve_matrix_product: bool = False,
+                        score_sink: np.ndarray | None = None,
                         ) -> tuple[np.ndarray, np.ndarray]:
     """Top-k for `m` query vectors in **one** pass over the index.
 
@@ -410,6 +411,8 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
     reaches the ARCHS4 index through here, as do offline validation batches.
 
     Returns `(idx, scores)`, both `(m, k)`, each row sorted best first.
+    Optional ``score_sink`` receives all scores in an existing (m, n) array for
+    the two-query comparison's full-index ranks. Normal retrieval leaves it unset.
 
     ``preserve_matrix_product`` keeps a formerly batched query on BLAS's
     matrix-matrix path. A single-column matrix can use matrix-vector arithmetic
@@ -439,6 +442,8 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
             f"Embedding dimension mismatch: query dim={Q.shape[1]} but ARCHS4 dim={d}")
 
     m = Q.shape[0]
+    if score_sink is not None and score_sink.shape != (m, n):
+        raise ValueError("Score sink must have one row per query and one column per reference sample.")
     k = max(1, min(int(k), n))
     Qt = np.ascontiguousarray(Q.T)                      # (d, m)
     if preserve_matrix_product and m == 1:
@@ -454,9 +459,13 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
     best_score = np.zeros((m, 0), dtype=np.float32)
     for start in range(0, n, chunk):
         end = min(start + chunk, n)
-        x = np.asarray(index_vecs[start:end], dtype=np.float32)
+        # Normalization must never modify a float32 array or a writable memmap.
+        # float16 already needed a copy; make that ownership explicit for both.
+        x = np.array(index_vecs[start:end], dtype=np.float32, copy=True)
         x /= (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
         block = (x @ Qt).T[:m]                          # (m, rows in block)
+        if score_sink is not None:
+            score_sink[:, start:end] = block
 
         take = min(k, block.shape[1])
         part = np.argpartition(block, -take, axis=1)[:, -take:]

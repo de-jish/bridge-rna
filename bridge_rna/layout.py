@@ -16,6 +16,7 @@ from typing import Any
 from dash import dcc, html
 
 from . import cohorts as C
+from .comparison_ui import comparison_panel
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
 from .figures import _empty_network_figure
 from .osdr import _eligible_osdr_count, load_osdr_samples
@@ -101,6 +102,8 @@ QUERY_MODES = (
      "button_id": "search-button", "button_label": "Search"},
     {"key": "cohort", "label": "Cohort",
      "button_id": "cohort-search-button", "button_label": "Search cohort"},
+    {"key": "comparison", "label": "Compare",
+     "button_id": "comparison-search-button", "button_label": "Compare groups"},
     {"key": "upload", "label": "Upload",
      "button_id": "upload-search-button", "button_label": "Embed & search"},
 )
@@ -338,6 +341,7 @@ def build_view() -> html.Div:
                                         ],
                                     ),
                                     build_cohort_panel(),
+                                    comparison_panel(),
                                     html.Div(
                                         id="mode-panel-upload",
                                         className="mode-panel",
@@ -395,6 +399,7 @@ def build_view() -> html.Div:
                                 ],
                             ),
                             html.Details(
+                                id="metadata-options",
                                 className="control-group advanced-group",
                                 children=[
                                     html.Summary(
@@ -494,6 +499,16 @@ def build_view() -> html.Div:
                                         ],
                                     ),
                                     html.Div(
+                                        id="action-slot-comparison",
+                                        style={"display": "none"},
+                                        children=[
+                                            html.Button("Compare groups", id="comparison-search-button",
+                                                        n_clicks=0, className="btn-primary"),
+                                            html.Div(id="comparison-running-indicator",
+                                                     className="running-indicator"),
+                                        ],
+                                    ),
+                                    html.Div(
                                         id="action-slot-upload",
                                         style={"display": "none"},
                                         children=[
@@ -534,7 +549,31 @@ def build_view() -> html.Div:
                     html.Main(
                         className="workspace",
                         children=[
+                            html.Div(id="comparison-results-switch", style={"display": "none"},
+                                     role="group", **{"aria-label": "Comparison result view"}, children=[
+                                dcc.RadioItems(id="results-view", value="network", inline=True,
+                                              options=[{"label": "Paired evidence", "value": "evidence"},
+                                                       {"label": "Network", "value": "network"}],
+                                              className="results-view-switch"),
+                            ]),
+                            html.Section(id="comparison-evidence-panel", className="panel comparison-evidence",
+                                         style={"display": "none"}, **{"aria-label": "Paired comparison evidence"}, children=[
+                                html.Div(role="group", **{"aria-labelledby": "comparison-depth-label"}, children=[
+                                    html.Label("Evidence depth per group", id="comparison-depth-label", className="control-label"),
+                                    dcc.RadioItems(id="comparison-depth", value=30, inline=True,
+                                                  options=[{"label": str(k), "value": k} for k in (30, 100, 250)],
+                                                  className="results-view-switch"),
+                                ]),
+                                html.Div(id="comparison-evidence-body"),
+                                html.Nav(className="comparison-pagination", **{"aria-label": "Evidence pages"}, children=[
+                                    html.Button("Previous", id="comparison-previous", n_clicks=0, disabled=True),
+                                    html.Span(id="comparison-page-label", role="status"),
+                                    html.Button("Next", id="comparison-next", n_clicks=0, disabled=True),
+                                ]),
+                                dcc.Store(id="comparison-page", data=0),
+                            ]),
                             html.Div(
+                                id="network-panel",
                                 className="panel panel--canvas",
                                 children=[
                                     html.Div(
