@@ -432,10 +432,10 @@ Without that ranking an early unplaceable field pinned the answer to "Other" and
 Measured results on the real corpus:
 
 - All 48 OSDR raw tissue values map to a named bucket; zero fall to "Other" or "Unknown". They land in 17 buckets, of which "Cultured cells" (18 samples) is the only non-anatomical one.
-- 851,881 of 940,455 ARCHS4 samples, **90.6%**, land in a bucket other than "Other" or "Unknown".
+- 852,341 of 940,455 ARCHS4 samples, **90.6%**, land in a bucket other than "Other" or "Unknown".
 - The "Tissue" color-by covers **942,563 of 942,563 points, 100%**.
 
-Top buckets over ARCHS4: Blood / immune 155,761 (16.6%), Brain / CNS 103,182 (11.0%), Other 87,692 (9.3%), Embryo / stem cell 67,408 (7.2%), Liver 55,242 (5.9%), Tumor / cancer 53,117 (5.6%), Lung 40,710 (4.3%), Intestine 35,318 (3.8%), Bone marrow 34,409 (3.7%), Cultured cells 32,042 (3.4%), Breast / mammary 31,499 (3.3%).
+Top buckets over ARCHS4 (recounted 2026-10-21 after the eye vocabulary fix): Blood / immune 155,757 (16.6%), Brain / CNS 102,634 (10.9%), Other 87,232 (9.3%), Embryo / stem cell 66,353 (7.1%), Liver 55,242 (5.9%), Tumor / cancer 52,657 (5.6%), Lung 40,710 (4.3%), Intestine 35,318 (3.8%), Bone marrow 34,409 (3.7%), Cultured cells 31,930 (3.4%), Breast / mammary 31,499 (3.3%).
 
 The label was then validated as biology rather than as batch, because a keyword mapping over free text could easily be reproducing submitter conventions.
 25-NN label purity on the map is **0.8142 against a 0.0501 permuted null**, and it survives both a batch control and a depth control at **0.7058**.

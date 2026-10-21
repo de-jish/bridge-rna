@@ -160,7 +160,11 @@ def no_page_overflow(page) -> bool:
 
 def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     print("\n[load]")
-    page.goto(base + "/", wait_until="networkidle")
+    # A generous first load: Dash fetches its async component bundles here, and
+    # on a machine running other servers that alone has taken over 30 s.
+    page.goto(base + "/", wait_until="domcontentloaded", timeout=180_000)
+    page.wait_for_selector("#results-table-wrap", timeout=180_000)
+    page.wait_for_selector("#study-dropdown .dash-dropdown", timeout=180_000)
     settle(page)
     c.ok("Run a search" in page.locator("#results-table-wrap").inner_text(),
          "before a search the table invites one")

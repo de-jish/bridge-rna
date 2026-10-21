@@ -14,7 +14,7 @@ reintroduce its panel, warnings, or payload. Executed membership remains a discl
 
 **Bridge RNA is one application with two views**, developed by the Space Biosciences Research Branch at NASA Ames Research Center.
 
-- **Retrieve** (`/`) takes one NASA OSDR spaceflight RNA-seq sample and returns its closest Earth analogs out of the 940,455-sample ARCHS4/GEO index, as a network graph with an inspector and an optional LLM summary. Code in `bridge_rna/`.
+- **Retrieve** (`/`) takes one NASA OSDR spaceflight RNA-seq sample and returns its closest Earth analogs out of the 940,455-sample ARCHS4/GEO index, as a ranked, filterable, exportable table of up to 1,000 matches, an inspector, one switchable plot of the same rows, and an optional LLM summary. Code in `bridge_rna/`.
 - **Map** (`/map`) zooms out to the whole space: the 512-d ExpressionPerformer embeddings of both corpora - OSDR (2,108 NASA GeneLab spaceflight samples) and ARCHS4 (940,455 GEO samples) - reduced into one shared 2D/3D space, every one of the 942,563 points drawn as a live WebGL glyph and colored by biology. Code in `manifold/` and `precompute/`.
 
 `app.py` is the single entry point and owns the header and the router.
@@ -84,6 +84,30 @@ The map draws **every pooled member**, not one point: a cohort's query vector is
 `precompute/validate_cohorts.py` is the honesty gate and must keep passing: identity, leave-one-out stability, a structure-free null, a within-study null, the stability curve, and spherical-versus-raw normalization. It scores 9,270 query vectors in one 73-second memmap pass. Its identity check is worth reading before touching the estimator: pooling one sample perturbs the query vector by one float32 ulp, which is enough to permute ranks at an **exactly 0.0** score gap, so the gate is float32 score agreement plus an identical top-20 rather than an identical top-100.
 
 An uploaded file is **staged**, not merely written: `bridge_rna.callbacks._upload_dir` owns one directory per process, a session's previous file is unlinked when its next upload arrives, and a directory abandoned by a killed process is reaped by the next run. The reaping is PID-tagged rather than signal-based because `atexit` does not run on SIGTERM or SIGKILL and a signal handler is not available either - uploads arrive on Dash's request threads, and `signal.signal` may only be called from the main one. Before this, every upload leaked its counts matrix into the system temp directory forever.
+
+### The results view: a ranked table, not a network
+
+Rebuilt on 2026-10-21 at Joshua's request, after an interview; spec, measurements and contracts in [`docs/retrieval-results.md`](docs/retrieval-results.md).
+The three-column network (query, GSM hits, GSE studies) is no longer the result: it hid rank, score, tissue, species and title behind hover and became thirty identical dots at k=30.
+The result is a table of matches with filters, a pager and CSV export, an inspector for the selected row, and one plot of the same rows chosen from Score by rank (the default), Similarity, Series and Network.
+The network survives as that fourth plot, capped at `result_plots.NETWORK_MAX_ROWS` (30).
+The Compare tab of the unmerged `feature/reviewed-comparisons` branch is not part of this; the cohort A/B comparison inside Cohort is, as one merged table with Rank A and Rank B.
+
+Seven things about it are load-bearing.
+
+**Filters act on the rows retrieved, and ranks are never renumbered.** That was Joshua's choice ("a", not a deeper hidden pool), which is why k reaches **1,000**: at 30 a series filter usually comes back empty. Every rank in the table, the plots and the CSV is a position among all 940,455 reference samples. `bridge_rna/results.py` is the only place a row is filtered, merged, sorted or paged; it is pure stdlib and every consumer - table, plot, export, AI summary - goes through `results_view.visible_rows`, so they cannot disagree about which rows are in view.
+
+**The scan is tie-exact at every depth.** Exact score ties are common here - one profile under two GSM accessions has a bit-identical vector, and one query had 229 tied neighbours in its top 1,000 - and `argpartition` kept an arbitrary member of a tie at the cut: on the real corpus a 30-deep scan kept the later of two tied rows at rank 30 while a 1,000-deep scan kept the earlier. `retrieval._tie_exact_top` and the final `lexsort` give a tie to the lower reference row, so the top k no longer depends on scan depth (0 mismatches over 7 queries x 4 depths). Every scan now runs to `max(k, 250, SCORE_PROFILE_DEPTH)` and returns the top-1,000 scores as the score-by-rank curve, at about 0.08 s over a 250-deep scan.
+
+**Identical profiles are cosine distance below 1e-6, and the threshold was measured, not chosen.** Over the top 1,000 hits of nine queries, all 305 pairs below it sat in two *different* GEO series (re-deposits, "[re-analysis]" copies, one animal filed as both adipose and skeletal muscle) and all 14 pairs between 1e-6 and 1e-5 were replicates inside one series; a 0.9999 cosine threshold would have matched 13,810 pairs for one query. `similarity.IDENTICAL_PROFILE_DISTANCE`. Rows are marked, never merged by default; merging is a checkbox and states what it hid.
+
+**`hits-store` stays the source of truth; `results-store` is derived from it, including when the view mounts.** After a client-side route change Dash reruns a callback only when one of its *inputs* is newly mounted, and hits-store lives on the shell, so the derivation also takes `results-panel.id` as an input; without it, coming back from the map showed an empty table beside 472 KB of results in session storage. The sample search returns `no_update` without a click for a related reason: answering its mount-time call with `None` wiped the session's results every time anyone came back from the map, which was true on `main` before this work.
+
+**Nothing that fires per interaction may take `hits-store` as an Input or State.** At k=1,000 it is 385 KB of JSON per cohort and Dash posts every State on every call. The inspector and the AI summary get their few rows from clientside callbacks in `assets/results-table.js`; the table and plot read the lean `results-store`; only Download takes hits-store, once per click. The map view still posts it in four callbacks per visit, which predates this and is heavier at k=1,000.
+
+**The number box carries no `min` or `max`.** Dash 4 reports a number outside them as `None`, so "5000" reached the clamp as nothing and the next search silently ran with the default 5; `results_view.requested_match_count` falls back to the slider, never a constant. The slider moves in log10(k), because linear 3 to 1,000 put every value used before this change into the first 3% of the track.
+
+**No table library.** Dash DataTable is deprecated and removed in Dash 5.0, and Dash AG Grid would be a dependency the NASA server would have to install, which only Joshua can do there. The table is native HTML, rendered server-side, 50 rows a page.
 
 ### Two retrieval tiers, not three
 
@@ -163,6 +187,12 @@ app.py                   the only entry point: header, router, both views on :80
 bridge_rna/cohorts.py    what a cohort is: three facets, grouping, the vMF
                          estimator, leave-one-out cosines, low-N tiering. Opens
                          no embedding and no memmap.
+bridge_rna/results.py    rows, filters, identical-profile merge, sort, page, CSV.
+                         Pure stdlib: no Dash, no memmap
+bridge_rna/results_view.py  the match table, filters, plot switch and their
+                         callbacks; derives results-store from hits-store
+bridge_rna/result_plots.py  score by rank, similarity heatmap, series bars
+bridge_rna/similarity.py identical-profile groups and numpy average linkage
 bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, geo,
                          figures, retrieval, panels, layout, callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable
@@ -314,7 +344,7 @@ Two subtleties are load-bearing, and both were real bugs caught by tests.
 Ordering and word boundaries matter: "bone marrow" must beat "bone", `\brenal\b` must not fire inside "adrenal", "cortex" is a kidney and adrenal word as well as a brain word so those rules run first, and smooth muscle is vascular and must not be claimed by the "muscle" stem; a `~` prefix opts a pattern out of the leading word boundary for morphemes GEO glues onto a stem, so "sarcoma" matches inside "osteosarcoma".
 "Unknown" (nothing recorded) and "Other" (recorded but unplaceable) are kept distinct, and weak results are ranked, so an early unplaceable field cannot pin the answer to "Other" and block a later field that did identify the sample.
 
-Measured on the real corpus: all 48 OSDR raw values map to a named bucket, none falling to "Other" or "Unknown", and 851,881 of 940,455 ARCHS4 samples (90.6%) do the same.
+Measured on the real corpus: all 48 OSDR raw values map to a named bucket, none falling to "Other" or "Unknown", and 852,341 of 940,455 ARCHS4 samples (90.6%) do the same (recounted 2026-10-21, after eye anatomy and choroid plexus were placed correctly; see `docs/retrieval-results.md`).
 The Tissue color-by covers 942,563 of 942,563 points.
 It was independently validated as biology rather than batch: 25-NN label purity 0.8142 against a 0.0501 permuted null, surviving both a batch control and a depth control at 0.7058.
 

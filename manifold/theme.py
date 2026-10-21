@@ -165,7 +165,7 @@ RETRIEVAL_HIT_SIZE_B = 27.0
 #
 # White because the obvious choice, the retrieval network's own blue #2b7fff,
 # measures **1.03:1** against CATEGORICAL[0] (#3987e5, Blood / immune) - the
-# largest bucket on the map at 155,761 points. A hit landing anywhere in 16.6%
+# largest bucket on the map at 155,757 points. A hit landing anywhere in 16.6%
 # of the corpus would have been invisible. White is 3.64:1 against that bucket
 # and 16.9:1 against the plot background.
 #

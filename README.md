@@ -11,7 +11,10 @@ Bridge RNA is one app with two pages.
 ### Retrieve (`/`)
 
 Select an OSDR sample or cohort, including flight and ground-control groups, or upload mouse counts to embed and search.
-Bridge RNA searches the 940,455-sample ARCHS4 index and shows matches and their GEO studies in a network. The inspector links to source records; optional AI interpretation is available under **AI summary**.
+Bridge RNA searches the 940,455-sample ARCHS4 index and lists up to 1,000 matches in a ranked table.
+Filter them by GEO series, tissue category, species, minimum score or text, merge profiles deposited under two accessions, and download exactly the rows you kept as a CSV that records how it was made.
+A plot of the same rows shows how fast similarity falls with rank, how the matches cluster, which series they come from, or the classic query-to-study network.
+The inspector links to source records; optional AI interpretation is available under **AI summary**.
 
 ![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours and the three GEO studies they came from drawn as a network, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)
 
@@ -141,7 +144,8 @@ They were removed: each colored 2,108 points out of 942,563, scattered through a
 
 On the map, hovering an OSDR point shows its name and what it is under the current coloring.
 The Earth cloud carries no hover data on purpose, both for speed at a million points and because a click that returns nothing is how the app knows you clicked the background rather than a sample.
-In the retrieval view, the network graph draws the query, each matched sample, and the studies they belong to; clicking any node opens its full metadata in the inspector and fetches the study abstract from NCBI on demand.
+In the retrieval view, clicking a match's row, or any mark in the plot, opens its full metadata in the inspector and fetches the study abstract from NCBI on demand.
+Ranks are always positions among all 940,455 reference samples, so a filtered table can read 2, 9, 41 rather than renumbering, and the score-by-rank plot shows whether a top 5 actually stands apart from rank 50.
 
 ### The AI reading
 

@@ -1,6 +1,6 @@
 # Retrieval results: ranked table, filters, plots and export
 
-Status: in progress on `feature/retrieval-table`, branched from `main` on 2026-10-21.
+Status: built on `feature/retrieval-table`, branched from `main` on 2026-10-21, and run against the real corpus in the browser.
 This is the living implementation doc for the revamp. It records what was decided, why, and what was actually built.
 
 ## Objective
@@ -91,7 +91,7 @@ search callbacks ──► hits-store (shell, session, source of truth: map, ins
 ```
 
 `bridge_rna/results.py` is the only place that knows how a row is filtered, sorted, merged or paged.
-It is pure pandas, imports no Dash and opens no memmap, so it is tested against plain row lists.
+It is pure standard library (no pandas, no Dash, no memmap; a test pins that), so it is tested against plain row lists.
 The table, the plots, the export and the AI summary all call the same `apply_filters`, so the four can never disagree about which rows are in view.
 
 `hits-store` keeps its shape and its job: the map draws from it and the inspector reads full GEO fields from it.
@@ -137,7 +137,7 @@ They sit in the Matches panel, because they act on results, not on the query:
 - **Tissue category** and **Species**: multi-selects with counts.
 - **Minimum score**.
 - **Search**: case-insensitive substring over GSM, GSE, title and source name.
-- **Merge identical profiles**: off by default, so the duplication stays visible until the user chooses to collapse it.
+- **Merge identical profiles**: off by default, so the duplication stays visible until the user chooses to collapse it. It sits beside Download rather than among the filters, because it changes how rows are shown, not which qualify.
   The best-ranked accession is kept, and the summary says how many rows merging hid.
 - **Retrieved by** (comparison only): either, both, A only, B only.
 
@@ -145,6 +145,9 @@ The count line always reads "N of M matches", and "Clear filters" is offered onl
 A new search resets the filters, because a series chosen for one query rarely exists in the next one's results.
 
 ### Plots
+
+The plot sits below the table, not beside or split with it: the centre column scrolls, the table takes the column's height less 96 px so the plot switch stays in view as the cue to scroll, and each figure asks for the height it needs (the network grows with its node count, a 50-row heatmap is about 890 px).
+Splitting the column evenly was built first and lost both ways: at 1,000 px tall a 50-row page showed four rows.
 
 A segmented control picks one of four views. Each draws only the rows the filters keep.
 
@@ -269,6 +272,16 @@ Each step ends green on pytest and is committed on its own.
 8. Tissue vocabulary: "eyecup" maps to Eye. This is its own commit.
 9. Browser suites updated and extended. Docs: CLAUDE.md, README and this file.
 
+## What changed while building
+
+- **Number of matches.** The exact box has no `min` or `max`: Dash 4 reports an out-of-range number as `None`, so typing 5000 made the next search silently run with the default 5. The callback clamps and writes back 1,000, and a search falls back to the slider position, never a constant. Found by `tests/e2e_results_check.py`.
+- **Returning from the map.** Two bugs, both older than this work in effect. The sample search answered its mount-time call with `None`, wiping the session's results whenever anyone came back from the map. And the derivation never ran after a client-side route change, because Dash reruns a callback then only when one of its inputs is newly mounted; it now also takes `results-panel.id`.
+- **Failed searches clear their results** in all three modes, rather than leaving the previous query's matches under an error banner.
+- **The AI request is assembled in the browser** (`assets/results-table.js`), so one server callback can still own both writing and clearing the summary without every filter change posting the full payload.
+- **Tissue vocabulary.** The eyecup fix grew, with Joshua's approval: 396 choroid plexus samples (brain) had been filed under Eye by the bare "choroid" stem; eye anatomy terms (sclera, iris, conjunctiva, ciliary body, limbus, macula, vitreous, photoreceptor plurals and more) now reach Eye with guards for sclerosis, irisin, limbic and growth cones; and Eye ranks with the organs, so fetal retina, retinal organoids and iPSC-derived RPE are Eye rather than Embryo / stem cell. 2,934 ARCHS4 samples changed bucket, plus 750 the cached parquet had already been stale by. The local `cache/archs4_metadata.parquet` was regenerated offline with `fetch_archs4_meta.py --retissue`; the previous file is kept as `cache/archs4_metadata.pre-eye-fix-2026-10-21.parquet`. Placed ARCHS4 samples: 852,341 (90.6%).
+- **Performance under load.** On a quiet machine a 1,000-deep search measured 0.7 to 1.0 s. During the browser runs the machine was shared with another project's browser tests and had under 100 MB free, and a click-to-table search took 8 to 11 s, almost all of it page-cache misses in the 963 MB memmap scan; the old 250-deep scan took 4 to 7 s under the same conditions.
+
 ## Change log
 
 - 2026-10-21: spec written from the interview and the measurements above.
+- 2026-10-21: built. Retrieval profile and tie rule; `results.py`, `result_plots.py` and the tissue fix built in parallel by subagents against the contracts above; the view, callbacks, styles and browser suite integrated and verified here.
