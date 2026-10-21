@@ -6,6 +6,21 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-21 (the retrieval result is a ranked table, not a network)
+
+Branch `feature/retrieval-table`, from `main`, pushed to origin and not merged.
+Joshua asked for the network chart to be replaced by a table of matches with metadata in the right-hand card, filtering by study and other constraints, and better plots; an interview settled the details, recorded in `docs/retrieval-results.md` with the measurements behind each decision.
+
+Built: a ranked, sortable, paged table of up to 1,000 matches (k now runs 3 to 1,000 on a log slider with an exact box); filters by GEO series (show only or hide), tissue category, species, minimum score and text, all acting on the rows retrieved, with ranks never renumbered; marking and optional merging of identical profiles (cosine distance below 1e-6, measured to separate cross-series re-deposits from same-series replicates); CSV export of exactly the rows in view with `#` provenance lines; and one plot of the same rows from Score by rank (default), Similarity (average-linkage heatmap with dendrogram), Series, and the network capped at 30. Cohort A/B comparisons become one merged table with both ranks and a retrieved-by filter.
+
+Fixed along the way: the cosine scan kept an arbitrary member of an exact score tie at its cut, so the top k depended on scan depth (now tie-exact, 0 mismatches over 7 queries x 4 depths); the sample search wiped the session's results on every return from the map (pre-existing on main); the results view did not repaint after a client-side route change; typing an out-of-range k silently searched with 5. The eye tissue rules were extended with Joshua's approval (eyecup and other eye anatomy to Eye, choroid plexus to Brain, Eye ranked with the organs): 2,934 ARCHS4 samples changed bucket and the local `cache/archs4_metadata.parquet` was regenerated offline, the previous one kept beside it as `archs4_metadata.pre-eye-fix-2026-10-21.parquet`. The NASA server's copy needs the same `fetch_archs4_meta.py --retissue` run there.
+
+Not merged and untouched: PR #2 (Compare tab) and PR #3 (whitening); Joshua does not want either in the final app.
+
+Validation: 802 pytest tests and 554 browser checks (206 map/sample, 184 cohort, 70 upload, 58 results, 33 network style, 3 cleanup). The browser suites were ported in a parallel session. One known flaky check in `e2e_cohort_check.py`, a map-framing race when the evidence drawer closes, reproduces on main and is not addressed here.
+
+Open: the map view still posts the full hits payload in four callbacks per visit, which is heavier at k=1,000. Timings in this session were taken on a machine shared with another project's browser tests; a quiet-machine 1,000-deep search measured 0.7 to 1.0 s.
+
 ## 2026-09-19 (NASA Human Design System)
 
 Merged `prototype/hds-exploration` into main. The interface now resolves every chrome color through NASA's Human Design System: `assets/00-hds-tokens.css` is HDS's generated token file, `assets/00-tokens.css` maps the app's semantic names onto it, and `manifold/theme.py` mirrors the resolved values for Plotly. Carbon-05 canvas, white panels, black header with a carbon-70 rule, NASA blue `#1c67e3` as the accent, `#d83933` for the one primary query action. Public Sans, Inter and DM Mono are vendored under `assets/fonts/` with their licenses and named in `deploy/common.STATIC_ASSETS` so the ship path carries them.
