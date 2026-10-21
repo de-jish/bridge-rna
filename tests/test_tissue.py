@@ -199,6 +199,42 @@ def test_eye_terms_do_not_claim_what_is_not_the_eye(raw, expected):
     assert tissue.canonical_tissue(raw) == expected
 
 
+@pytest.mark.parametrize("raw,expected", [
+    # The retina in Brain's words: the organ named wins, as "renal cortex" does.
+    ("neural retina", "Eye"),
+    ("Retinal microglia", "Eye"),
+    ("retina astrocytes cells", "Eye"),
+    # A developmental qualifier must not outrank the organ, as for "fetal liver".
+    ("Foetal Retina", "Eye"),
+    ("fetal retinal pigment epithelium", "Eye"),
+    ("fetal eye", "Eye"),
+    ("Human fetal scleral fibroblasts", "Eye"),
+    ("retinal organoid", "Eye"),
+    ("iPSC-RPE", "Eye"),
+    ("in vitro iPSC-derived optic vesicles", "Eye"),
+    ("Limbal stem cells", "Eye"),
+    # Corneal endothelium is a corneal monolayer, not a blood vessel.
+    ("corneal endothelium", "Eye"),
+    ("immortalized mouse corneal endothelial cells", "Eye"),
+    ("human retinal endothelial cells (HREC)", "Eye"),
+    ("choroidal endothelial cells", "Eye"),
+    # The hypothalamic pre-optic area is Brain: "\boptic" fires after the
+    # hyphen, so Brain names it and runs first.
+    ("pre-optic area", "Brain / CNS"),
+    ("preoptic area", "Brain / CNS"),
+    ("optic nerve", "Eye"),
+    # The organ rule still yields to Blood / immune, which runs first.
+    ("cornea macrophages", "Blood / immune"),
+    # Stem cells and organoids that name no eye anatomy are unaffected.
+    ("embryonic stem cells", "Embryo / stem cell"),
+    ("intestinal organoid", "Intestine"),
+    ("cerebral organoid", "Brain / CNS"),
+    ("HUVEC", "Vasculature"),
+])
+def test_the_eye_is_ranked_with_the_organs(raw, expected):
+    assert tissue.canonical_tissue(raw) == expected
+
+
 def test_case_and_whitespace_do_not_change_the_answer():
     for variant in ("LIVER", "liver", "  Liver  ", "Liver\t"):
         assert tissue.canonical_tissue(variant) == "Liver"

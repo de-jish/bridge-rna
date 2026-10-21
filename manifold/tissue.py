@@ -56,6 +56,13 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # first-match-wins mechanism as the smooth-muscle case below.
     ("Adrenal gland", ("adrenal cortex", "adrenal medulla")),
     ("Kidney", ("renal cortex", "renal medulla", "kidney cortex")),
+    # The retina is CNS tissue, so GEO describes it in Brain's words: "neural
+    # retina", "retinal microglia", "retina astrocytes". The organ named in the
+    # string wins here too, as with cortex above. Only "retina" is guarded: the
+    # rest of the Eye rule stays below Brain because "pre-optic area" is
+    # hypothalamus and \boptic would claim it. Measured: 248 samples, every one
+    # naming the retina, moved from Brain / CNS.
+    ("Eye", ("retina", "retinal")),
     # --- Nervous system. "spinal cord" and peripheral nerve are split out of
     # Brain because they are anatomically distinct and both are well populated. ---
     ("Brain / CNS", ("brain", "cerebell", "cerebrum", "cerebral", "cortex",
@@ -68,7 +75,11 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                      # The ventricles' CSF-secreting tissue, not the eye's
                      # choroid: 396 ARCHS4 samples were filed under Eye by the
                      # bare "choroid" stem before this was named here.
-                     "choroid plexus")),
+                     "choroid plexus",
+                     # Hypothalamus, named here because the Eye rule's \boptic
+                     # fires after the hyphen in "pre-optic"; unhyphenated, 24
+                     # samples' "preoptic area" matched nothing and read Other.
+                     "preoptic", "pre-optic")),
     ("Nerve / spinal cord", ("spinal cord", "sciatic", "dorsal root", "drg",
                              "peripheral nerve", "schwann")),
     # --- Solid organs. ---
@@ -110,6 +121,34 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Uterus", ("uterus", "uterine", "endometri", "myometri", "fallopian",
                 "oviduct")),
     ("Placenta", ("placenta", "trophoblast", "chorion", "decidua", "amnion")),
+    # Eye anatomy, measured against the real corpus: before "eyecup", "eyeball",
+    # sclera, iris, conjunctiva, ciliary body, trabecular meshwork, limbus,
+    # macula, vitreous and photoreceptor names were missing, 560 ARCHS4 samples
+    # naming one of them read as Other, Cultured cells or Cell line. Each short
+    # stem is anchored where a neighbour word would otherwise fire: "\bsclera\b"
+    # not sclerosis, "\biris\b" not irisin, "conjunctiva" not GEO's
+    # mistranslated "conjunctive tissue", "limbal" not limbic, and photoreceptors
+    # by plural only, never a neuron's growth cone. "choroid" here is the eye's
+    # vascular layer; the choroid plexus is a brain tissue and is claimed by the
+    # Brain / CNS rule above. Ocular adnexa (lacrimal, meibomian and Harderian
+    # glands, eyelid) are deliberately not named: they are exocrine glands and
+    # skin beside the eye rather than the eye, and remain Other.
+    #
+    # The eye is an organ and sits with the organs, ahead of Embryo / stem cell
+    # and the structural rules, for the reason "fetal liver" is Liver: a
+    # developmental or cell-type qualifier must not outrank the organ it
+    # qualifies. It used to sit after them, which filed "fetal retina", retinal
+    # organoids, limbal stem cells and iPSC-derived RPE under Embryo / stem cell
+    # (1,034 samples) and corneal and retinal endothelium under Vasculature
+    # (178) - corneal endothelium is not vascular at all - while liver
+    # organoids and lung endothelium already went to their organ.
+    ("Eye", ("retina", "retinal", "\\beye\\b", "\\beyes\\b", "eyecup", "eyeball",
+             "cornea", "\\blens\\b", "choroid", "photoreceptor", "rpe\\b",
+             "\\barpe-?19\\b", "optic", "\\bsclera\\b", "scleral", "\\biris\\b",
+             "conjunctiva", "uvea", "ocular melanoma", "ciliary body",
+             "ciliary epithel", "trabecular meshwork", "limbal", "\\blimbus\\b",
+             "macula", "vitreous", "hyalocyte", "pterygi",
+             "\\brods\\b", "(?<!growth )\\bcones\\b")),
     ("Embryo / stem cell", ("embryo", "embryonic stem", "blastocyst", "ipsc",
                             "ips cell", "\\bips\\b", "induced pluripotent",
                             "pluripotent", "\\besc\\b", "\\bes cell",
@@ -125,25 +164,6 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Vasculature", ("endothelial", "huvec", "umbilical vein", "aorta", "aortic",
                      "artery", "arterial", "\\bvein\\b", "venous", "vascular",
                      "vasculature", "pericyte", "smooth muscle cell")),
-    # Eye anatomy, measured against the real corpus: before "eyecup", "eyeball",
-    # sclera, iris, conjunctiva, ciliary body, trabecular meshwork, limbus,
-    # macula, vitreous and photoreceptor names were missing, 560 ARCHS4 samples
-    # naming one of them read as Other, Cultured cells or Cell line. Each short
-    # stem is anchored where a neighbour word would otherwise fire: "\bsclera\b"
-    # not sclerosis, "\biris\b" not irisin, "conjunctiva" not GEO's
-    # mistranslated "conjunctive tissue", "limbal" not limbic, and photoreceptors
-    # by plural only, never a neuron's growth cone. "choroid" here is the eye's
-    # vascular layer; the choroid plexus is a brain tissue and is claimed by the
-    # Brain / CNS rule above. Ocular adnexa (lacrimal, meibomian and Harderian
-    # glands, eyelid) are deliberately not named: they are exocrine glands and
-    # skin beside the eye rather than the eye, and remain Other.
-    ("Eye", ("retina", "retinal", "\\beye\\b", "\\beyes\\b", "eyecup", "eyeball",
-             "cornea", "\\blens\\b", "choroid", "photoreceptor", "rpe\\b",
-             "\\barpe-?19\\b", "optic", "\\bsclera\\b", "scleral", "\\biris\\b",
-             "conjunctiva", "uvea", "ocular melanoma", "ciliary body",
-             "ciliary epithel", "trabecular meshwork", "limbal", "\\blimbus\\b",
-             "macula", "vitreous", "hyalocyte", "pterygi",
-             "\\brods\\b", "(?<!growth )\\bcones\\b")),
     ("Bladder", ("bladder", "urothel", "urinary")),
     ("Salivary gland", ("salivary", "parotid", "submandibular gland")),
     # --- Last resorts. These are not tissues, but they name a large and
