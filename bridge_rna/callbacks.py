@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 import pandas as pd
-from dash import ALL, Input, Output, State, ctx, html, no_update
+from dash import ALL, ClientsideFunction, Input, Output, State, ctx, html, no_update
 
 from .ai import (
     _call_ai_summary,
@@ -30,17 +30,10 @@ from .ai import (
 )
 from . import cohorts as C
 from .config import GENERIC_ENTREZ_EMAIL, MAX_UPLOAD_BYTES
-from .figures import (
-    _empty_network_figure,
-    build_comparison_figure,
-    build_network_figure,
-)
 from .geo import _enrich_hits_from_ncbi_eutils
 from .layout import (
     ARCHS4_SAMPLE_COUNT,
-    CANVAS_SUBTITLES,
     QUERY_MODES,
-    build_graph_legend,
     samples_df,
 )
 from .neighborhoods import (
@@ -53,6 +46,7 @@ from .panels import (
     build_details_panel,
     build_status_banner,
 )
+from .results_view import requested_match_count
 from .retrieval import (
     COHORT_MODE,
     TIER_CACHED,
@@ -312,6 +306,9 @@ def _requested_sample(search: str | None) -> str:
 
 def register(app) -> None:
     """Attach every retrieval callback to `app`. Called once by the shell."""
+    from . import results_view  # noqa: PLC0415 - layout imports it too
+
+    results_view.register(app)
 
     @app.callback(
         Output("study-dropdown", "value"),
@@ -462,11 +459,11 @@ def register(app) -> None:
 
 
     @app.callback(
-        Output("network-graph", "figure"),
         Output("hits-store", "data"),
         Output("search-status", "children"),
         Input("search-button", "n_clicks"),
         State("sample-dropdown", "value"),
+        State("topk-input", "value"),
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
@@ -476,18 +473,22 @@ def register(app) -> None:
         ],
     )
     def run_search(
-        _: int,
+        n_clicks: int,
         sample_id: str,
         topk: int,
+        topk_position: float,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
     ):
+        # Only a click searches. This callback also fires when the view mounts,
+        # and it used to answer that call with `None` - which wiped the
+        # session's hits-store every time someone came back from the map, so
+        # the retrieval the map had just drawn was gone from the view that ran
+        # it. The cohort and upload callbacks already guard the same way.
+        if not n_clicks:
+            return no_update, no_update
         if not sample_id:
-            return (
-                _empty_network_figure("Select an OSDR sample, then run a search."),
-                None,
-                None,
-            )
+            return None, None
 
         q_row = samples_df.loc[samples_df["sample_id"] == sample_id].iloc[0]
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
@@ -496,14 +497,13 @@ def register(app) -> None:
             hits_df, neighborhood_df, mode, profile = search_hits_with_neighborhood(
                 samples_df=samples_df,
                 sample_id=sample_id,
-                topk=int(topk),
+                topk=requested_match_count(topk, topk_position),
                 entrez_email=email_value,
                 enable_biopython_metadata=enable_biopython,
             )
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
             return (
-                _empty_network_figure("Retrieval failed - see status for details."),
                 None,
                 build_status_banner(
                     _last_nonempty_line(_safe_str(exc)) or "Retrieval failed.",
@@ -511,8 +511,6 @@ def register(app) -> None:
                     detail=detail,
                 ),
             )
-
-        network = build_network_figure(query=q_row, hits_df=hits_df)
 
         # Name the path that actually ran. This used to special-case only
         # "precomputed", so when the cached path was added every one of its
@@ -525,7 +523,7 @@ def register(app) -> None:
         enriched = (enable_biopython and _safe_str(entrez_email)
                     and mode in ("cached", "demo"))
         status_message = (
-            f"Retrieved {len(hits_df)} hits {how}"
+            f"Retrieved {len(hits_df):,} hits {how}"
             + (", plus GEO and PubMed enrichment." if enriched else ".")
         )
         status = build_status_banner(status_message, kind="good")
@@ -542,7 +540,7 @@ def register(app) -> None:
                 mode=mode,
             ),
         }
-        return network, payload, status
+        return payload, status
 
 
     # --- Cohort mode ------------------------------------------------------
@@ -554,9 +552,7 @@ def register(app) -> None:
         *[Output(f"mode-panel-{m['key']}", "style") for m in QUERY_MODES],
         *[Output(f"action-slot-{m['key']}", "style") for m in QUERY_MODES],
         Output("study-group", "style"),
-        Output("network-graph", "figure", allow_duplicate=True),
         *[Input(f"mode-tab-{m['key']}", "n_clicks") for m in QUERY_MODES],
-        State("hits-store", "data"),
         # Which mode we are already in, so a call this callback did not ask for
         # can restate it instead of guessing. See the fallback below.
         State("query-mode-store", "data"),
@@ -580,7 +576,7 @@ def register(app) -> None:
         Everything is derived from `QUERY_MODES` rather than hand-listed, so a
         fifth source is one entry there and no edits here.
         """
-        hits_payload, stored_mode = args[-2], args[-1]
+        stored_mode = args[-1]
         triggered = _safe_str(ctx.triggered_id)
         active = next((m["key"] for m in QUERY_MODES
                        if f"mode-tab-{m['key']}" == triggered), "")
@@ -605,18 +601,10 @@ def register(app) -> None:
             active = candidate if candidate in keys else QUERY_MODES[0]["key"]
         shown, hidden = {}, {"display": "none"}
 
-        # The empty canvas has to invite the thing the active mode can actually
-        # do. Left alone it kept saying "Select an OSDR sample" while Cohort mode
-        # was open, which is the smallest version of the same fault as a status
-        # banner naming the wrong path. A drawn network is never replaced -
-        # switching modes to look at the controls must not throw away a result.
-        canvas = no_update
-        if not hits_payload:
-            canvas = _empty_network_figure({
-                "sample": "Select an OSDR sample, then run a search.",
-                "cohort": "Define a cohort, then pool and search it.",
-                "upload": "Upload a counts file, then embed and search it.",
-            }[active])
+        # The empty plot invites what the active mode can do. That now follows
+        # from `query-mode-store` in results_view.update_plot, which never
+        # replaces a drawn result - switching modes to look at the controls must
+        # not throw one away.
 
         return (
             active,
@@ -627,7 +615,6 @@ def register(app) -> None:
             *[shown if m["key"] == active else hidden for m in QUERY_MODES],
             # Upload has no study; Sample and Cohort share one.
             hidden if active == "upload" else shown,
-            canvas,
         )
 
     @app.callback(
@@ -853,7 +840,6 @@ def register(app) -> None:
                 "much of the top-k the two share.")
 
     @app.callback(
-        Output("network-graph", "figure", allow_duplicate=True),
         Output("hits-store", "data", allow_duplicate=True),
         Output("search-status", "children", allow_duplicate=True),
         Input("cohort-search-button", "n_clicks"),
@@ -861,6 +847,7 @@ def register(app) -> None:
         State("cohort-members", "value"),
         State("cohort-compare-dropdown", "value"),
         State("cohort-facets-store", "data"),
+        State("topk-input", "value"),
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
@@ -878,18 +865,18 @@ def register(app) -> None:
         compare_id: str | None,
         facets: list[str] | None,
         topk: int,
+        topk_position: float,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
     ):
         # Belt and braces against the remount case above: a search runs when
         # somebody clicks Search, and a click means n_clicks is at least one.
         if not n_clicks:
-            return no_update, no_update, no_update
+            return no_update, no_update
 
         cohort = C.find_cohort(_safe_str(cohort_id), facets=facets)
         if cohort is None:
-            return (_empty_network_figure("Select a cohort, then run a search."),
-                    no_update,
+            return (no_update,
                     build_status_banner("Select a cohort to start.", kind="info"))
 
         members = [m for m in (included or []) if m in set(cohort.members)]
@@ -899,7 +886,8 @@ def register(app) -> None:
 
         try:
             hits_df, neighborhood_df, rows, profile = (
-                run_cohort_retrieval_with_neighborhood(members, topk=int(topk))
+                run_cohort_retrieval_with_neighborhood(
+                    members, topk=requested_match_count(topk, topk_position))
             )
             geometry = C.cohort_geometry(members, rows)
             if enable_biopython and _safe_str(entrez_email):
@@ -913,15 +901,16 @@ def register(app) -> None:
             if other is not None:
                 other_hits, other_neighborhood, other_rows, other_profile = (
                     run_cohort_retrieval_with_neighborhood(
-                        list(other.members), topk=int(topk)
+                        list(other.members), topk=requested_match_count(topk, topk_position)
                     )
                 )
                 other_geometry = C.cohort_geometry(list(other.members), other_rows)
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
+            # Cleared rather than left alone: the previous query's matches
+            # under a failure banner would read as this query's answer.
             return (
-                _empty_network_figure("Cohort retrieval failed - see status."),
-                no_update,
+                None,
                 build_status_banner(
                     _last_nonempty_line(_safe_str(exc)) or "Cohort retrieval failed.",
                     kind="error", detail=detail),
@@ -949,14 +938,13 @@ def register(app) -> None:
         excluded_note = (f" {len(excluded)} excluded." if excluded else "")
 
         if other_hits is None:
-            network = build_network_figure(query=query, hits_df=hits_df)
             message = (
-                f"Retrieved {len(hits_df)} hits for {geometry.size} pooled "
+                f"Retrieved {len(hits_df):,} hits for {geometry.size} pooled "
                 f"samples ({cohort.describe()}) {how}."
                 + excluded_note
                 + (" Plus GEO and PubMed enrichment." if enriched else "")
             )
-            return network, payload, build_status_banner(message, kind="good")
+            return payload, build_status_banner(message, kind="good")
 
         # Two cohorts, two independent pooled queries, one network.
         other_query = _cohort_query_series(other, other_geometry, [])
@@ -966,8 +954,6 @@ def register(app) -> None:
         facet = C.contrast_facet(cohort, other)
         facet_label = C.FACETS_BY_KEY[facet].label.lower() if facet else "one facet"
 
-        network = build_comparison_figure(
-            query_a=query, hits_a=hits_df, query_b=other_query, hits_b=other_hits)
         payload["comparison"] = {
             "query_b": _query_dict(other_query),
             "hits_b": other_hits.to_dict(orient="records"),
@@ -992,7 +978,7 @@ def register(app) -> None:
             f"{len(union)} retrieved samples, a Jaccard overlap of "
             f"{overlap:.2f}." + excluded_note
         )
-        return network, payload, build_status_banner(message, kind="good")
+        return payload, build_status_banner(message, kind="good")
 
     @app.callback(
         Output("upload-store", "data"),
@@ -1071,12 +1057,12 @@ def register(app) -> None:
         return store, preview, options, cols[0], col_style, False
 
     @app.callback(
-        Output("network-graph", "figure", allow_duplicate=True),
         Output("hits-store", "data", allow_duplicate=True),
         Output("search-status", "children", allow_duplicate=True),
         Input("upload-search-button", "n_clicks"),
         State("upload-store", "data"),
         State("upload-sample-column", "value"),
+        State("topk-input", "value"),
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
@@ -1092,6 +1078,7 @@ def register(app) -> None:
         upload_store: dict[str, Any] | None,
         sample_column: str | None,
         topk: int,
+        topk_position: float,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
     ):
@@ -1099,10 +1086,10 @@ def register(app) -> None:
         # announcing "Upload a counts file first" before anyone had done
         # anything at all.
         if not n_clicks:
-            return no_update, no_update, no_update
+            return no_update, no_update
 
         if not upload_store or not upload_store.get("path"):
-            return no_update, no_update, build_status_banner(
+            return no_update, build_status_banner(
                 "Upload a counts file first.", kind="info")
 
         filename = _safe_str(upload_store.get("filename")) or "uploaded file"
@@ -1115,15 +1102,14 @@ def register(app) -> None:
             hits_df, neighborhood_df, profile = run_uploaded_retrieval_with_neighborhood(
                 counts_path=upload_store["path"],
                 sample_column=column,
-                topk=int(topk),
+                topk=requested_match_count(topk, topk_position),
                 entrez_email=email_value,
                 enable_biopython_metadata=enable_biopython,
             )
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
             return (
-                _empty_network_figure("Embedding failed - see status for details."),
-                no_update,
+                None,
                 build_status_banner(
                     _last_nonempty_line(_safe_str(exc))
                     or "Embedding the uploaded sample failed.",
@@ -1132,10 +1118,9 @@ def register(app) -> None:
             )
 
         query = _uploaded_query_series(filename, column)
-        network = build_network_figure(query=query, hits_df=hits_df)
         enriched = bool(enable_biopython and _safe_str(entrez_email))
         status_message = (
-            f"Retrieved {len(hits_df)} hits {_retrieval_phrase(UPLOAD_MODE)}"
+            f"Retrieved {len(hits_df):,} hits {_retrieval_phrase(UPLOAD_MODE)}"
             + (", plus GEO and PubMed enrichment." if enriched else ".")
         )
         status = build_status_banner(status_message, kind="good")
@@ -1149,29 +1134,44 @@ def register(app) -> None:
             "query": _query_dict(query),
             "neighborhood": _evidence_payload(neighborhood_df, label=column),
         }
-        return network, payload, status
+        return payload, status
+
+    # The browser assembles the request (the first AI_SUMMARY_MAX_ROWS visible
+    # matches' full GEO records, picked out of hits-store), so this callback can
+    # own both generating and clearing - Dash discards an in-flight response
+    # once a newer invocation is scheduled - without every filter change
+    # posting the 385 KB payload just to clear a paragraph.
+    app.clientside_callback(
+        ClientsideFunction(namespace="results", function_name="aiRequest"),
+        Output("ai-request-store", "data"),
+        Input("ai-summary-button", "n_clicks"),
+        State("results-visible-store", "data"),
+        State("hits-store", "data"),
+        prevent_initial_call=True,
+    )
 
     @app.callback(
         Output("ai-summary-output", "children"),
         Output("ai-summary-status", "children"),
-        Input("ai-summary-button", "n_clicks"),
-        Input("hits-store", "data"),
+        Input("ai-request-store", "data"),
+        Input("hits-store", "modified_timestamp"),
+        Input("results-visible-store", "data"),
         running=[
             (Output("ai-summary-button", "disabled"), True, False),
-            (Output("ai-summary-status", "children"), "Generating summary...", ""),
             (Output("ai-summary-status", "className"), "ai-status ai-status--loading", "ai-status"),
         ],
         prevent_initial_call=True,
     )
-    def generate_ai_summary(_: int, hits_payload: dict[str, Any] | None):
-        # One callback owns both generation and invalidation. Dash discards an
-        # older response when a result change schedules this newer invocation.
-        if ctx.triggered_id == "hits-store":
+    def generate_ai_summary(request: dict[str, Any] | None, _stamp, _visible):
+        # A new result, a filter or a sort changes what a summary would be of.
+        if ctx.triggered_id != "ai-request-store":
             return "", ""
-        if not hits_payload:
+        if not request or not request.get("query"):
             return "", "Run a search before generating a summary."
+        if not request.get("hits"):
+            return "", "No matches pass the current filters."
 
-        query_row = _query_series(hits_payload)
+        query_row = _query_series(request)
         if query_row is None:
             return "", "Selected query sample is missing from local metadata."
 
@@ -1184,14 +1184,14 @@ def register(app) -> None:
         if blocked:
             return blocked, ""
 
-        hits_df = pd.DataFrame(hits_payload.get("hits", []))
-        email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
+        hits_df = pd.DataFrame(request.get("hits", []))
+        email = _safe_str(request.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
 
         # The study abstracts and overall-design text are the substance of what
-        # the model reasons over, and the local cache does not carry them. With
-        # search-time enrichment now off by default, this is where they get
-        # fetched: once, for the hits about to be summarized, rather than on
-        # every search whether or not anyone asks for a hypothesis.
+        # the model reasons over, and the local cache does not carry them. They
+        # are fetched here, once, for only the matches about to be summarized:
+        # before the cap moved into the request, every hit was fetched and the
+        # prompt then kept 20, which at k=1,000 was a thousand round trips.
         if not hits_df.empty and "geo_summary" in hits_df.columns:
             if not hits_df["geo_summary"].astype(str).str.strip().any():
                 try:
@@ -1208,115 +1208,48 @@ def register(app) -> None:
         )
 
         summary = _call_ai_summary(prompt)
-        return summary, ""
-
-
-    @app.callback(
-        Output("graph-legend", "children"),
-        Output("canvas-subtitle", "children"),
-        Input("hits-store", "data"),
-    )
-    def describe_the_canvas(hits_payload: dict[str, Any] | None):
-        """Keep the legend and the subtitle describing what is actually drawn.
-
-        A comparison draws no GSE nodes and two query stars whose colors mean
-        something; a single-sample network draws one star and a GSE column. The
-        strip above the plot said the second thing in both cases, which is the
-        same class of error as the status banner that announced every cached
-        result as subprocess output: the interface asserting something about
-        itself that is not true.
-        """
-        payload = hits_payload or {}
-        if payload.get("comparison"):
-            kind = "comparison"
-        elif payload.get("mode") == COHORT_MODE:
-            kind = "cohort"
-        else:
-            kind = "sample"
-        return build_graph_legend(kind), CANVAS_SUBTITLES[kind]
-
-    @app.callback(
-        Output("see-on-map", "style"),
-        Output("see-on-map", "children"),
-        Input("hits-store", "data"),
-    )
-    def offer_the_map(hits_payload: dict[str, Any] | None):
-        """Offer the map only once there is a retrieval to show on it.
-
-        Hits retrieved before `archs4_index` existed, or by the demo path,
-        cannot be located on the map. Offering the link anyway would send
-        someone to a map that draws nothing and looks broken.
-        """
-        payload = hits_payload or {}
-        # Both arms must be checked for locatable results. Their hit lists can
-        # overlap, so the link does not present their summed lengths as a count.
-        hits = list(payload.get("hits") or [])
-        hits += list((payload.get("comparison") or {}).get("hits_b") or [])
-        locatable = [h for h in hits if h.get("archs4_index") is not None]
-        if not locatable:
-            return {"display": "none"}, ""
-        return {}, "View results on map"
-
-    @app.callback(
-        Output("selected-node-store", "data"),
-        Input("network-graph", "clickData"),
-    )
-    def select_node(click_data: dict[str, Any] | None):
-        if not click_data:
-            return None
-        points = click_data.get("points", [])
-        if not points:
-            return None
-        custom = points[0].get("customdata")
-        if not custom or len(custom) < 2:
-            return None
-        return {"kind": custom[0], "node_id": custom[1]}
-
+        total = int(request.get("total") or len(hits_df))
+        scope = (f"Summary of the first {len(hits_df):,} of {total:,} matches shown."
+                 if total > len(hits_df) else
+                 f"Summary of the {len(hits_df):,} matches shown.")
+        return summary, scope
 
     @app.callback(
         Output("details-panel", "children"),
-        Input("hits-store", "data"),
-        Input("selected-node-store", "data"),
+        Input("inspector-store", "data"),
     )
-    def render_details(hits_payload: dict[str, Any] | None, selected_node: dict[str, Any] | None):
-        if not hits_payload:
+    def render_details(context: dict[str, Any] | None):
+        """The inspector, from the small context the browser picked out.
+
+        `inspector-store` carries the query record(s), the selection and only
+        the hit rows that selection needs (one GSM, or one series' rows), so a
+        row click no longer posts the whole retrieval back here.
+        """
+        if not context:
             return [
                 html.H2("Details", className="panel-title"),
-                html.P("Select a query, sample, or study in the network to inspect its metadata.",
+                html.P("Select a match in the table or a mark in the plot to "
+                       "inspect its metadata.",
                        className="details-empty"),
             ]
 
-        entrez_email = _safe_str(hits_payload.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
-        q_row = _query_series(hits_payload)
+        entrez_email = _safe_str(context.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
+        selected_node = context.get("selected") or None
+        q_row = _query_series(context)
         if q_row is None:
-            q_row = pd.Series({"sample_id": _safe_str(hits_payload.get("sample_id"))})
-
-        # A comparison draws two query stars and three bands of hits, and every
-        # one of those nodes is clickable. Looking node ids up in cohort A's
-        # hits alone meant a B-only hit, and the second star, both opened "No
-        # metadata found" - the figure offering something the inspector could
-        # not answer.
-        comparison = hits_payload.get("comparison") or {}
-        rows = list(hits_payload.get("hits") or []) + list(comparison.get("hits_b") or [])
-        hits_df = pd.DataFrame(rows)
-        if not hits_df.empty and "gsm" in hits_df.columns:
-            # A shared hit is in both lists with the same GEO metadata and a
-            # different score; cohort A's row is kept, which is the one the
-            # single-cohort inspector would have shown.
-            hits_df = hits_df.drop_duplicates(subset="gsm", keep="first").reset_index(drop=True)
-        q_row_b = (pd.Series(comparison["query_b"])
-                   if isinstance(comparison.get("query_b"), dict) else None)
+            q_row = pd.Series({"sample_id": _safe_str(context.get("sample_id"))})
+        q_row_b = (pd.Series(context["query_b"])
+                   if isinstance(context.get("query_b"), dict) else None)
+        hits_df = pd.DataFrame(context.get("rows") or [])
 
         # Open a GSM whose study context was never fetched, and fetch it now -
         # one accession, for the hit actually being read. This is what makes
         # search-time enrichment safe to leave off.
         #
-        # The condition tests the *study context* fields specifically. It used
-        # to ask whether any of gse/title/geo_summary/pubmed_ids had content,
-        # which was a reasonable proxy while a hit arrived either fully
-        # enriched or completely bare. The cached path always fills gse and
-        # title from the local join, so that test now passes for every hit and
-        # the abstract would never be fetched at all.
+        # The condition tests the *study context* fields specifically. The
+        # cached path always fills gse and title from the local join, so a test
+        # on those would pass for every hit and the abstract would never be
+        # fetched at all.
         if (selected_node and _safe_str(selected_node.get("kind")) == "gsm"
                 and not hits_df.empty and entrez_email):
             gsm = _safe_str(selected_node.get("node_id"))
@@ -1332,13 +1265,9 @@ def register(app) -> None:
                     row_mask = hits_df["gsm"] == gsm
                     for col in enriched_one.columns:
                         # Add the column first if the cached path never created
-                        # it. Without this, the `_biopython` fields the NCBI
-                        # fetch returns - platform, entry type, GDS type,
-                        # release date, FTP link, and the whole Publication
-                        # section - were dropped for a cached hit, because the
-                        # cached schema has none of them and the copy only kept
-                        # columns that already existed. Ten fetched fields, ten
-                        # blank rows in the inspector.
+                        # it, or the fetched `_biopython` fields - platform,
+                        # entry type, release date, the Publication section -
+                        # are dropped for a cached hit.
                         if col not in hits_df.columns:
                             hits_df[col] = ""
                         hits_df.loc[row_mask, col] = enriched_one.iloc[0][col]

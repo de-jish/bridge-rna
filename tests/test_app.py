@@ -94,6 +94,17 @@ def mounted_ids(app):
          "tissue": "Eye", "species": "mouse", "score": 0.9,
          "archs4_index": 1},
     ], None)))
+    # The match table exists only once a search has rows: its accession buttons
+    # carry their GSM and its sort headers their column, both pattern-matched.
+    from bridge_rna import results_view
+
+    row = {"gsm": "GSM1", "gse": "GSE1", "title": "Eye", "source_name": "",
+           "tissue": "Eye", "species": "Mus musculus", "archs4_index": 1,
+           "rank_a": 1, "score_a": 0.9, "rank_b": None, "score_b": None,
+           "identical": []}
+    trees.append(html.Div(results_view.render_table(
+        [row], {"k": 1, "comparison": False, "rows": [row]},
+        results_view.DEFAULT_SORT)))
     # The shell itself, built outside a request so it takes the default route.
     trees.append(app.layout() if callable(app.layout) else app.layout)
     for tree in trees:
@@ -117,18 +128,34 @@ def _id_key(component_id):
     return component_id
 
 
-def test_new_results_clear_ai_text_without_requesting_a_summary(app, monkeypatch):
+@pytest.mark.parametrize("trigger", ["hits-store", "results-visible-store"])
+def test_new_results_clear_ai_text_without_requesting_a_summary(app, monkeypatch,
+                                                                trigger):
+    """A new result, filter or sort clears the summary; only a request writes one."""
     from types import SimpleNamespace
     from bridge_rna import callbacks as retrieval_callbacks
 
     monkeypatch.setattr(retrieval_callbacks, "ctx",
-                        SimpleNamespace(triggered_id="hits-store"))
+                        SimpleNamespace(triggered_id=trigger))
     def unexpected_request():
         pytest.fail("Changing results must not request an AI service")
     monkeypatch.setattr(retrieval_callbacks, "unavailable_reason", unexpected_request)
-    callback = _callback_for(app, "ai-summary-button")
-    assert callback(1, {"sample_id": "new query", "hits": []}) == ("", "")
-    assert callback(1, None) == ("", "")
+    callback = _callback_for(app, "ai-request-store")
+    request = {"query": {"sample_id": "q"}, "hits": [{"gsm": "GSM1"}], "total": 1}
+    assert callback(request, 1, ["GSM1"]) == ("", "")
+    assert callback(None, 1, None) == ("", "")
+
+
+def test_an_ai_request_with_nothing_in_view_says_so(app, monkeypatch):
+    from types import SimpleNamespace
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    monkeypatch.setattr(retrieval_callbacks, "ctx",
+                        SimpleNamespace(triggered_id="ai-request-store"))
+    callback = _callback_for(app, "ai-request-store")
+    assert callback({"query": None}, 1, [])[1].startswith("Run a search")
+    _, status = callback({"query": {"sample_id": "q"}, "hits": [], "total": 0}, 1, [])
+    assert status == "No matches pass the current filters."
 
 
 def test_source_identifiers_link_to_the_record_without_changing_metadata(monkeypatch):
@@ -277,24 +304,32 @@ def test_cached_sample_callback_carries_its_evidence_neighborhood(
         "search_hits_with_neighborhood",
         lambda **_kwargs: (hits, neighborhood, "cached", [0.9, 0.8]),
     )
-    monkeypatch.setattr(
-        retrieval_callbacks,
-        "build_network_figure",
-        lambda *, query, hits_df: {"requested_count": len(hits_df)},
-    )
     query = retrieval_callbacks.samples_df.iloc[0]
 
-    network, payload, _status = _callback_for(app, "search-button")(
-        1, query["sample_id"], 2, "", []
+    payload, _status = _callback_for(app, "search-button")(
+        1, query["sample_id"], 2, None, "", []
     )
 
-    assert network["requested_count"] == 2
     assert len(payload["hits"]) == 2
+    assert payload["score_profile"] == [0.9, 0.8]
     assert payload["neighborhood"]["available"] is True
     assert payload["neighborhood"]["label"] == query["sample_name"]
     assert [row["gsm"] for row in payload["neighborhood"]["hits"]] == [
         "GSM-A-0", "GSM-A-1", "GSM-A-2", "GSM-A-3"
     ]
+
+
+def test_mounting_the_view_never_clears_the_sessions_results(app):
+    """The search fires when the view mounts; only a click may write hits-store.
+
+    Answering the mount with None wiped the retrieval every time a user came
+    back from the map, so the view that ran it showed nothing.
+    """
+    from dash import no_update
+
+    search = _callback_for(app, "search-button")
+    assert search(0, None, 5, None, "", []) == (no_update, no_update)
+    assert search(None, "OSD-100|x", 5, None, "", []) == (no_update, no_update)
 
 
 def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
@@ -308,18 +343,12 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
         "search_hits_with_neighborhood",
         lambda **_kwargs: (hits, None, "demo", [0.9, 0.8]),
     )
-    monkeypatch.setattr(
-        retrieval_callbacks,
-        "build_network_figure",
-        lambda *, query, hits_df: {"requested_count": len(hits_df)},
-    )
     query = retrieval_callbacks.samples_df.iloc[0]
 
-    network, payload, _status = _callback_for(app, "search-button")(
-        1, query["sample_id"], 2, "", []
+    payload, _status = _callback_for(app, "search-button")(
+        1, query["sample_id"], 2, None, "", []
     )
 
-    assert network["requested_count"] == 2
     assert [row["gsm"] for row in payload["hits"]] == ["GSM-D-0", "GSM-D-1"]
     assert payload["neighborhood"]["available"] is False
     assert "demo mode cannot provide" in payload["neighborhood"]["reason"]
@@ -327,7 +356,7 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
         in payload["neighborhood"]["reason"]
 
 
-def test_upload_callback_carries_evidence_without_expanding_the_network(
+def test_upload_callback_carries_evidence_and_its_score_profile(
     app, monkeypatch
 ):
     from bridge_rna import callbacks as retrieval_callbacks
@@ -339,23 +368,19 @@ def test_upload_callback_carries_evidence_without_expanding_the_network(
         "run_uploaded_retrieval_with_neighborhood",
         lambda **_kwargs: (hits, neighborhood, [0.9, 0.8]),
     )
-    monkeypatch.setattr(
-        retrieval_callbacks,
-        "build_network_figure",
-        lambda *, query, hits_df: {"requested_count": len(hits_df)},
-    )
 
-    network, payload, _status = _callback_for(app, "upload-search-button")(
+    payload, _status = _callback_for(app, "upload-search-button")(
         1,
         {"path": "counts.csv", "filename": "counts.csv", "columns": ["Sample A"]},
         "Sample A",
         2,
+        None,
         "",
         [],
     )
 
-    assert network["requested_count"] == 2
     assert len(payload["hits"]) == 2
+    assert payload["score_profile"] == [0.9, 0.8]
     assert payload["neighborhood"]["label"] == "Sample A"
     assert payload["neighborhood"]["depth_returned"] == 4
 
@@ -397,30 +422,21 @@ def test_comparison_callback_keeps_independent_evidence_for_both_arms(
         "run_cohort_retrieval_with_neighborhood",
         lambda members, topk: results[tuple(members)],
     )
-    seen = {}
-
-    def comparison_figure(**kwargs):
-        seen.update(kwargs)
-        return {"comparison": True}
-
-    monkeypatch.setattr(
-        retrieval_callbacks, "build_comparison_figure", comparison_figure
-    )
-
-    network, payload, _status = _callback_for(app, "cohort-search-button")(
+    payload, _status = _callback_for(app, "cohort-search-button")(
         1,
         cohort_a.cohort_id,
         list(cohort_a.members),
         cohort_b.cohort_id,
         list(facets),
         2,
+        None,
         "",
         [],
     )
 
-    assert network == {"comparison": True}
-    assert len(seen["hits_a"]) == len(seen["hits_b"]) == 2
     assert len(payload["hits"]) == len(payload["comparison"]["hits_b"]) == 2
+    assert payload["score_profile"] == [0.9, 0.8]
+    assert payload["comparison"]["score_profile_b"] == [0.7, 0.6]
     assert payload["neighborhood"]["label"] == cohort_a.label
     assert payload["comparison"]["neighborhood_b"]["label"] == cohort_b.label
     assert payload["neighborhood"]["depth_returned"] == 4
@@ -514,7 +530,8 @@ def test_both_halves_register_their_callbacks(app):
     a control is touched. Assert one signature callback from each half."""
     keys = " ".join(app.callback_map)
     assert "manifold-graph.figure" in keys, "the map's render callback is missing"
-    assert "network-graph.figure" in keys, "the retrieval's search callback is missing"
+    assert "hits-store.data" in keys, "the retrieval's search callback is missing"
+    assert "results-table-wrap.children" in keys, "the results table callback is missing"
     assert "page-content.children" in keys, "the router callback is missing"
 
 
@@ -1184,11 +1201,11 @@ def test_legend_filter_survives_an_empty_store():
     assert callbacks.filtered_legend_rows(None, None) == []
 
 
-def test_retrieval_network_offers_inspection_navigation_and_export_without_selection():
+def test_results_plot_offers_inspection_navigation_and_export_without_selection():
     from bridge_rna import layout as retrieval_layout
 
     graph = next(c for c in _walk(retrieval_layout.build_view())
-                 if getattr(c, "id", None) == "network-graph")
+                 if getattr(c, "id", None) == "results-plot")
     removed = set(graph.config.get("modeBarButtonsToRemove", []))
     assert {"select2d", "lasso2d"} <= removed
     assert removed.isdisjoint({"toImage", "pan2d", "zoom2d", "resetScale2d"})
@@ -1618,13 +1635,16 @@ def test_every_dropdown_and_slider_is_named_by_something(mounted_ids, app):
     # Every control that Dash renders without a usable name of its own.
     for control in ("study-dropdown", "sample-dropdown", "cohort-dropdown",
                     "cohort-compare-dropdown", "upload-sample-column",
-                    "topk-slider", "color-by", "layers", "method", "dims",
+                    "topk-slider", "filter-series", "filter-tissue",
+                    "filter-species", "color-by", "layers", "method", "dims",
                     "budget"):
         assert control in ids, f"{control} is no longer on any view"
 
     for label_id in ("study-dropdown-label", "sample-dropdown-label",
                      "cohort-dropdown-label", "cohort-compare-label",
-                     "upload-column-label", "topk-slider-label",
+                     "upload-column-label", "topk-label",
+                     "filter-series-label", "filter-tissue-label",
+                     "filter-species-label", "filter-retrieved-by-label",
                      "cohort-facets-label", "color-by-label", "layers-label",
                      "projection-label", "dims-label", "budget-label"):
         assert label_id in named, f"no group is labelled by {label_id}"

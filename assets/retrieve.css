@@ -1121,3 +1121,364 @@ summary:focus-visible,
   stroke: var(--network-query) !important;
   stroke-width: 4px !important;
 }
+
+/* ==========================================================================
+   Results: the match table, its filters, and one plot of the same rows.
+   docs/retrieval-results.md. The workspace splits its fixed height between
+   the two panels; the table scrolls inside its own frame with a sticky head,
+   which is what keeps the filters and the pager in view at k=1,000.
+   ========================================================================== */
+
+/* The table is the main event and gets the column's height; the plot sits
+   below it at the height its figure asks for, and the column scrolls. Split
+   evenly, both lost: at 1,000 px a 50-row page showed four rows, and a
+   50-row similarity heatmap needs about 890 px to keep its labels legible.
+   The 96 px left over keeps the plot's switch in view as the cue to scroll. */
+.results-workspace {
+  gap: var(--space-4);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.results-panel {
+  flex: none;
+  height: max(520px, calc(100% - 96px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.results-workspace .plot-panel {
+  flex: none;
+  min-height: 0;
+}
+
+.results-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.results-heading { min-width: 0; }
+.results-actions { display: flex; gap: var(--space-2); flex: none; }
+.results-actions .btn-compact,
+.results-pager .btn-compact {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  min-height: 32px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.results-pager .btn-compact:disabled {
+  color: var(--action-disabled-text);
+  background: transparent;
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+/* --- Filters ---------------------------------------------------------------- */
+
+.results-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.results-filter { display: flex; flex-direction: column; min-width: 120px; flex: 1 1 140px; }
+.results-filter--wide { flex: 2 1 230px; max-width: 340px; }
+.results-filter--grow { flex: 2 1 180px; }
+.results-filter .control-label { margin-bottom: var(--space-1); white-space: nowrap; }
+/* Series names its include/hide switch in its own label row, so all five
+   controls below share one baseline. */
+.results-filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.results-filter-head .control-label { margin: 0; }
+.results-filter .results-input--score { max-width: 112px; }
+.results-filter:has(.results-input--score) { flex: 0 1 112px; min-width: 96px; }
+.results-filter .dash-dropdown { min-height: var(--control-height); font-size: 13px; }
+
+.results-filter .dash-input-element {
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--interaction-duration) ease;
+}
+.results-filter .dash-input-element::placeholder { color: var(--text-secondary); }
+.results-filter .dash-input-element:hover { border-color: var(--control-hover); }
+.results-filter .dash-input-element:focus-visible {
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
+}
+.results-input--score .dash-input-element { font-family: var(--font-mono); }
+
+.results-merge .dash-options-list-option {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--text-sm); color: var(--text-primary); white-space: nowrap;
+}
+.results-merge input[type="checkbox"] { accent-color: var(--control-ink); }
+.results-actions { align-items: center; }
+
+/* A segmented RadioItems on the light chrome: the map's .bm-seg pattern,
+   restated here rather than shared so neither view's rules reach the other.
+   The radio is clipped, never `display: none`, so it keeps its tab stop. */
+.results-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}
+.results-seg .dash-options-list-option {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background var(--interaction-duration) ease, color var(--interaction-duration) ease;
+}
+.results-seg .dash-options-list-option-wrapper {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: 0; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.results-seg .dash-options-list-option-text { color: inherit; }
+.results-seg .dash-options-list-option:hover { color: var(--text-primary); }
+.results-seg .dash-options-list-option.selected {
+  color: var(--control-ink);
+  background: var(--bg-panel);
+  box-shadow: inset 0 -2px var(--control-ink);
+  font-weight: 600;
+}
+.results-seg .dash-options-list-option:focus-within {
+  outline: 2px solid var(--focus-ring); outline-offset: 1px;
+}
+.results-seg--mini { padding: 2px; }
+.results-seg--mini .dash-options-list-option { padding: 1px 8px; font-size: 11.5px; }
+
+/* --- The table -------------------------------------------------------------- */
+
+.results-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.results-table {
+  width: 100%;
+  min-width: 760px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.results-table th,
+.results-table td {
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.results-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  background: var(--bg-panel-raised);
+  border-bottom: 1px solid var(--border-strong);
+  font-family: var(--font-heading);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.results-table tbody tr:last-child td { border-bottom: 0; }
+
+.results-table .col-rank_a, .results-table .col-rank_b { width: 72px; }
+.results-table .col-score_a, .results-table .col-score_b { width: 82px; }
+/* Wide enough for "Same profile: GSM2349280" on one line, so an identical
+   profile marks its row without doubling its height. */
+.results-table .col-gsm { width: 176px; }
+.results-table .col-gse { width: 112px; }
+.results-table .col-tissue { width: 136px; }
+.results-table .col-species { width: 118px; }
+
+.results-table .col-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.results-table .col-gse { font-family: var(--font-mono); font-size: 12.5px; }
+.results-table .col-species { font-style: italic; }
+.results-table .col-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.results-table .col-tissue { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.results-table .is-missing { color: var(--text-secondary); }
+
+.sort-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.col-num .sort-button { justify-content: flex-end; }
+.sort-button:hover { background: var(--control-hover-fill); }
+.sort-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.sort-button::after {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0;
+  transition: transform var(--interaction-duration) ease, opacity var(--interaction-duration) ease;
+}
+.sort-button:hover::after { opacity: 0.35; transform: rotate(45deg) translateY(-2px); }
+.sort-button.is-ascending::after { opacity: 1; transform: rotate(-135deg) translateY(-2px); }
+.sort-button.is-descending::after { opacity: 1; transform: rotate(45deg) translateY(-2px); }
+
+.result-row { cursor: pointer; transition: background var(--interaction-duration) ease; }
+.result-row:hover { background: var(--control-hover-fill); }
+.result-row.is-selected { background: var(--control-selected-fill); }
+.result-row.is-selected .result-select { font-weight: 600; }
+
+.result-select {
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--link-color);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--interaction-duration) ease;
+}
+.result-select:hover { text-decoration-color: currentColor; }
+.result-select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.result-twin {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.results-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 160px;
+  height: 100%;
+  padding: var(--space-4);
+  text-align: center;
+}
+.results-empty-text { margin: 0; font-size: var(--text-base); color: var(--text-secondary); }
+
+.results-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+.results-pager:has(.results-page-label:empty) { display: none; }
+.results-page-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* --- The plot ----------------------------------------------------------------- */
+
+.plot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.results-seg--plot { flex: none; }
+.results-seg--plot .dash-options-list-option { flex: none; padding: 6px 14px; }
+.plot-caption { margin: 0; flex: 1 1 260px; }
+.plot-panel .graph-wrap { flex: none; min-height: 320px; }
+.plot-panel .graph-wrap .dash-graph,
+.plot-panel .graph-wrap .js-plotly-plot { height: auto; }
+
+/* --- Number of matches ------------------------------------------------------- */
+
+.topk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+.topk-head .control-label { margin: 0; white-space: nowrap; }
+.topk-head .topk-input { flex: none; width: 128px; }
+.sidebar .topk-input .dash-input-element {
+  width: 100%;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 1180px) {
+  .results-workspace { overflow: visible; }
+  .results-panel { height: auto; }
+  .results-table-wrap { flex: none; max-height: 70vh; }
+}
+
+@media (max-width: 680px) {
+  .results-head { flex-direction: column; }
+  .results-filter,
+  .results-filter--wide,
+  .results-filter--grow { flex: 1 1 100%; max-width: none; }
+  .results-seg--plot { width: 100%; }
+  .results-seg--plot .dash-options-list-option { flex: 1 1 auto; padding: 6px 8px; }
+  .results-actions { flex-wrap: wrap; }
+}

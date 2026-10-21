@@ -1,4 +1,4 @@
-/* Local emphasis for the single-query retrieval network. Existing Plotly click
+/* Local emphasis for the retrieval network, one of the results plots. Existing Plotly click
  * events still drive Dash's inspector; no ranking, layout or payload changes. */
 (function () {
   "use strict";
@@ -50,7 +50,7 @@
     schedule();
   }
   function connect() {
-    const next = document.querySelector("#network-graph .js-plotly-plot");
+    const next = document.querySelector("#results-plot .js-plotly-plot");
     if (next === graph || (next && !next.on)) return;
     if (graph && graph.removeListener) {
       graph.removeListener("plotly_hover", hover);

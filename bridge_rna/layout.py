@@ -17,9 +17,9 @@ from dash import dcc, html
 
 from . import cohorts as C
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
-from .figures import _empty_network_figure
 from .osdr import _eligible_osdr_count, load_osdr_samples
 from .panels import build_gene_list_banner, build_setup_banner
+from .results_view import build_plot_panel, build_results_panel, build_topk_control
 from .retrieval import _archs4_sample_count
 from .util import _safe_str
 
@@ -233,13 +233,6 @@ def build_cohort_panel() -> Any:
     )
 
 
-# The subtitle explains interpretation; the legend identifies the marks.
-CANVAS_SUBTITLES = {
-    "sample": "Ranked by embedding cosine similarity, not biological equivalence.",
-    "cohort": "Pooled OSDR cohort matches ranked by embedding cosine similarity.",
-    "comparison": "Two pooled cohorts searched separately; shared hits appear once.",
-}
-
 
 def build_graph_legend(kind: str = "sample") -> Any:
     """Horizontal legend strip explaining node shapes/colors + edge encoding.
@@ -379,19 +372,7 @@ def build_view() -> html.Div:
                             html.Div(
                                 className="control-group",
                                 children=[
-                                    _labelled(
-                                        "topk-slider-label", "Number of matches",
-                                        html.Div(
-                                            className="control-slider",
-                                            children=[
-                                                dcc.Slider(
-                                                    id="topk-slider",
-                                                    min=3, max=30, step=1, value=5,
-                                                    marks={3: "3", 5: "5", 10: "10", 20: "20", 30: "30"},
-                                                ),
-                                            ],
-                                        ),
-                                    ),
+                                    build_topk_control(),
                                 ],
                             ),
                             html.Details(
@@ -530,45 +511,12 @@ def build_view() -> html.Div:
                             dcc.Store(id="selected-node-store"),
                         ],
                     ),
-                    # ---- Center: workspace (the main event) ----
+                    # ---- Center: the matches, then one plot of them ----
                     html.Main(
-                        className="workspace",
+                        className="workspace results-workspace",
                         children=[
-                            html.Div(
-                                className="panel panel--canvas",
-                                children=[
-                                    html.Div(
-                                        className="panel-header",
-                                        children=[
-                                            html.Div(
-                                                children=[
-                                                    html.H2("Retrieval network", className="panel-title"),
-                                                    html.P(
-                                                        CANVAS_SUBTITLES["sample"],
-                                                        id="canvas-subtitle",
-                                                        className="panel-subtitle",
-                                                    ),
-                                                ],
-                                            ),
-                                        ],
-                                    ),
-                                    html.Div(id="graph-legend", className="graph-legend",
-                                             children=build_graph_legend("sample")),
-                                    html.Div(
-                                        className="graph-wrap",
-                                        children=[
-                                            dcc.Graph(
-                                                id="network-graph",
-                                                className="dash-graph",
-                                                figure=_empty_network_figure(),
-                                                config={"displaylogo": False, "responsive": True,
-                                                        "modeBarButtonsToRemove": ["select2d", "lasso2d"]},
-                                                style={"height": "100%"},
-                                            ),
-                                        ],
-                                    ),
-                                ],
-                            ),
+                            build_results_panel(),
+                            build_plot_panel(build_graph_legend("sample")),
                         ],
                     ),
                     # ---- Right: inspector ----
