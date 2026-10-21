@@ -1182,4 +1182,12 @@ def build_view() -> html.Div:
         ),
         dcc.Store(id="neighborhood-focus-store"),
         dcc.Store(id="neighborhood-focus-sink"),
+        # `hits-store`, cut once per visit to what each consumer reads. At
+        # k=1,000 the full payload is 472 KB per sample and Dash posts every
+        # Input and State on every call, so the figure, the drawer and the rail
+        # each read their own cut instead. See `callbacks.derive_map_stores`
+        # and docs/map-overlay-stores.md.
+        dcc.Store(id="map-overlay-store"),
+        dcc.Store(id="map-evidence-store"),
+        dcc.Store(id="map-retrieval-store"),
     ])

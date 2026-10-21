@@ -471,6 +471,241 @@ def _frame_for(hits_payload, method: str, dims: str,
     return frame_points(points, method, dims)
 
 
+# --- hits-store, cut to what each map callback reads -------------------------
+#
+# At k=1,000 hits-store is about 472 KB of JSON per sample, because every hit
+# carries its whole GEO record, and Dash posts every Input and State on every
+# call. Before these existed the map posted it in up to six callbacks per
+# interaction - twice on every zoom. `derive_map_stores` now reads it once per
+# visit and writes three cuts, and each per-interaction callback reads only its
+# own. The two payload-shaped cuts are the payload with fields removed, never a
+# new structure, so every function above runs on them unchanged and
+# `tests/test_map_stores.py` can prove the map draws what it drew before by
+# plain equality. docs/map-overlay-stores.md has the measurements.
+
+#: The hit fields the map reads: where to draw it, its hover title, its cosine.
+MAP_HIT_FIELDS = ("archs4_index", "gsm", "score")
+#: The evidence-row fields the figure reads. The drawer reads the rest, from
+#: `map-evidence-store`.
+MAP_NEIGHBOR_FIELDS = ("archs4_index", "rank", "gsm", "gse", "score",
+                       "tissue", "species")
+#: The neighborhood's own fields the figure reads besides its rows.
+MAP_NEIGHBORHOOD_FIELDS = ("available", "label", "depth_returned")
+#: The query fields any map surface prints.
+MAP_QUERY_FIELDS = ("cohort_label", "sample_name")
+#: Every tick combination Fit results can be asked to frame. `update_viewport`
+#: falls back to both arms when nothing is ticked, so the empty set is not one.
+FRAME_ROLE_SETS = ((ROLE_A,), (ROLE_B,), (ROLE_A, ROLE_B))
+
+
+def _cut(record, fields):
+    """`record` with only `fields`, keeping a field's absence an absence."""
+    if not isinstance(record, dict):
+        return record
+    return {f: record[f] for f in fields if f in record}
+
+
+def _cut_rows(rows, fields):
+    # Not a comprehension over dicts alone: a malformed row has to stay where
+    # it is, so a consumer that skips it, or counts it, still does.
+    if not isinstance(rows, list):
+        return rows
+    return [_cut(row, fields) for row in rows]
+
+
+def _cut_neighborhood(neighborhood):
+    if not isinstance(neighborhood, dict):
+        return neighborhood
+    out = _cut(neighborhood, MAP_NEIGHBORHOOD_FIELDS)
+    if "hits" in neighborhood:
+        out["hits"] = _cut_rows(neighborhood["hits"], MAP_NEIGHBOR_FIELDS)
+    return out
+
+
+def _cut_query(query):
+    # Always a dict, even when the payload had none: every reader treats a
+    # missing query and an empty one alike, and a comparison must stay truthy.
+    return _cut(query, MAP_QUERY_FIELDS) if isinstance(query, dict) else {}
+
+
+def overlay_payload(hits_payload: dict | None) -> dict | None:
+    """The payload as the figure reads it: hit positions, titles and cosines.
+
+    `_retrieval_overlay` and `_neighborhood_overlays` return the same value on
+    this as on the full payload, and `render.build_figure` draws the same
+    figure from either.
+    """
+    if not isinstance(hits_payload, dict) or not hits_payload:
+        return hits_payload
+    out = {k: hits_payload[k] for k in ("sample_id", "member_ids")
+           if k in hits_payload}
+    out["query"] = _cut_query(hits_payload.get("query"))
+    if "hits" in hits_payload:
+        out["hits"] = _cut_rows(hits_payload["hits"], MAP_HIT_FIELDS)
+    if "neighborhood" in hits_payload:
+        out["neighborhood"] = _cut_neighborhood(hits_payload["neighborhood"])
+    comparison = hits_payload.get("comparison")
+    if comparison:
+        cut = {"query_b": _cut_query(comparison.get("query_b"))}
+        if "member_ids" in comparison:
+            cut["member_ids"] = comparison["member_ids"]
+        if "hits_b" in comparison:
+            cut["hits_b"] = _cut_rows(comparison["hits_b"], MAP_HIT_FIELDS)
+        if "neighborhood_b" in comparison:
+            cut["neighborhood_b"] = _cut_neighborhood(comparison["neighborhood_b"])
+        out["comparison"] = cut
+    return out
+
+
+def evidence_payload(hits_payload: dict | None) -> dict | None:
+    """The payload as the drawer reads it: both evidence arms, in full.
+
+    The drawer searches and prints the long GEO text, so its rows are not cut;
+    it is the hit lists, which the drawer never reads, that are left behind.
+    `neighborhood_drawer_state` returns the same value on this as on the full
+    payload.
+    """
+    if not isinstance(hits_payload, dict) or not hits_payload:
+        return hits_payload
+    out = {k: hits_payload[k] for k in ("mode", "neighborhood")
+           if k in hits_payload}
+    out["query"] = _cut_query(hits_payload.get("query"))
+    comparison = hits_payload.get("comparison")
+    if comparison:
+        cut = {"query_b": _cut_query(comparison.get("query_b"))}
+        if "neighborhood_b" in comparison:
+            cut["neighborhood_b"] = comparison["neighborhood_b"]
+        out["comparison"] = cut
+    return out
+
+
+def retrieval_summary(hits_payload: dict | None) -> dict | None:
+    """What the rail and the viewport need, which is almost nothing.
+
+    The cohorts' roles and names, two counts, the query's label, and Fit
+    results' window for every 2-D projection and tick combination - computed
+    here by `_frame_for` itself, because `update_viewport` fires on every zoom
+    and would otherwise have to carry the hits to answer the one click that
+    frames them. None when there is nothing to draw, as `_retrieval_overlay`.
+    """
+    full = _retrieval_overlay(hits_payload)
+    if full is None:
+        return None
+    return {
+        "cohorts": [{"role": c["role"], "label": c["label"]}
+                    for c in full["cohorts"]],
+        # Distinct samples, not drawn marks: `hit_points` concatenates the
+        # arms, so a hit both retrieved appears in it twice.
+        "hit_count": len(set(full["hit_points"])),
+        "shared_count": len(full["shared_points"]),
+        "query_label": full["query_label"],
+        "frames": {method: {",".join(roles): _frame_for(hits_payload, method,
+                                                        "2d", roles)
+                            for roles in FRAME_ROLE_SETS}
+                   for method in data.METHODS},
+    }
+
+
+def summary_frame(summary: dict | None, method: str, dims: str,
+                  roles: tuple[str, ...]):
+    """Fit results' window, looked up rather than recomputed from the hits.
+
+    Equal to `_frame_for(hits_payload, method, dims, roles)` for the payload the
+    summary was derived from. None in 3-D, as `frame_points` is.
+    """
+    if not summary or dims != "2d":
+        return None
+    return ((summary.get("frames") or {}).get(method) or {}).get(",".join(roles))
+
+
+def map_stores(hits_payload: dict | None):
+    """The three cuts of one hits-store payload, in Output order."""
+    return (overlay_payload(hits_payload), evidence_payload(hits_payload),
+            retrieval_summary(hits_payload))
+
+
+def retrieval_group_outputs(summary: dict | None, dims: str, freeze: bool):
+    """The rail's retrieval group: shown, its action label, and its ticks.
+
+    `freeze` keeps the ticks as the reader left them across a 2-D/3-D switch.
+    """
+    single = [{"label": " Show it on the map", "value": "on"}]
+
+    def ticks(options, value):
+        return ((no_update, no_update) if freeze else (options, value))
+
+    if summary is None:
+        return ({"display": "none"}, "Fit results", *ticks(single, ["on"]))
+
+    action_label = "Fit results" if dims == "2d" else "View results"
+    cohorts = summary["cohorts"]
+    if len(cohorts) < 2:
+        return {}, action_label, *ticks(single, ["on"])
+    options = [
+        {"label": f"  {c['label'] or 'cohort'}", "value": key}
+        for c, key in zip(cohorts, ("on", ROLE_B))
+    ]
+    return {}, action_label, *ticks(options, ["on", ROLE_B])
+
+
+def retrieval_summary_children(summary: dict | None, show_retrieval):
+    """One line saying what the ticks are currently drawing.
+
+    This used to be the map's only key for the retrieval: a swatch per cohort
+    and a paragraph explaining that a ring inside a square is a hit both arms
+    found. All of that moved onto the plot, into
+    `layout.retrieval_key_children`, next to the marks it decodes - the ticks
+    directly above already carry each cohort's name, so the rail was naming
+    them twice and explaining glyphs nowhere near them.
+
+    What is left is the control's own feedback, and it reads the ticks rather
+    than the payload so a hidden arm is reported as hidden.
+    """
+    if summary is None:
+        return ""
+
+    cohorts = summary["cohorts"]
+    roles = _roles_from_checklist(show_retrieval)
+    shown = [c for c in cohorts if c["role"] in roles]
+    if not shown:
+        # The tick hides the overlay outright, and saying so is the whole job
+        # of this line. It used to describe the retrieval regardless, so
+        # unticking left the rail describing marks over a map with none of
+        # them on it.
+        return ("Not drawn. Tick it above to put it back on the map."
+                if len(cohorts) < 2 else
+                "Neither arm is drawn. Tick one to put it back on the map.")
+
+    if len(cohorts) < 2:
+        n = summary["hit_count"]
+        query = summary["query_label"] or "an OSDR sample"
+        # The sentence used to carry a trailing clause about the marks sitting
+        # where they do in the space, which narrated the picture the reader is
+        # already looking at rather than telling them anything about it.
+        # Removed on 2026-08-11; the count is the part that carries
+        # information, so the sentence stops after it. The phrase is pinned in
+        # `tests/test_app.py::REMOVED_COPY`, which is why it is described here
+        # rather than quoted.
+        return [
+            html.B(query.split("|")[-1]),
+            f" and its {n} nearest ARCHS4 neighbor{'s' if n != 1 else ''}.",
+        ]
+
+    if len(shown) < 2:
+        return [html.B(shown[0]["label"] or "One arm"),
+                " only. Tick both to see which samples they share."]
+    # Distinct samples, not drawn marks - see `retrieval_summary`. Quoting the
+    # length of the concatenation made the rail say "10 hits, 2 of them
+    # retrieved by both" for the same search whose banner on the other view
+    # said "share 2 of 8 retrieved samples". Two surfaces, one comparison, two
+    # numbers.
+    return [
+        "Both arms drawn, ",
+        html.B(f"{summary['hit_count']}"), " samples retrieved, ",
+        html.B(f"{summary['shared_count']}"), " of them by both.",
+    ]
+
+
 def find_status_children(found: dict | None):
     """What the find box says under itself, and it is four different sentences.
 
@@ -650,6 +885,27 @@ def coverage_children(color_by: str):
 
 def register(app):
     @app.callback(
+        Output("map-overlay-store", "data"),
+        Output("map-evidence-store", "data"),
+        Output("map-retrieval-store", "data"),
+        Input("hits-store", "data"),
+        # The map's own workspace, as a trigger. hits-store lives on the shell
+        # and never remounts, and after a client-side route change Dash reruns
+        # a callback only when one of its *inputs* is newly mounted - the same
+        # reason `derive_results` takes `results-panel.id`.
+        Input("map-workspace", "id"),
+    )
+    def derive_map_stores(hits_payload, _mounted):
+        """Read hits-store once per visit, and hand each consumer its cut.
+
+        The only map callback that takes the full payload. Everything that
+        fires per interaction - the figure on every zoom, the viewport on every
+        relayout, the drawer on every keystroke - reads one of the three cuts
+        instead. See docs/map-overlay-stores.md.
+        """
+        return map_stores(hits_payload)
+
+    @app.callback(
         Output("manifold-graph", "figure"),
         Output("plot-badges", "children"),
         Output("legend", "style"),
@@ -669,10 +925,11 @@ def register(app):
         Input("budget", "value"),
         Input("viewport-store", "data"),
         # The retrieval lives on the shell, so the map can draw a search that
-        # was run before the user walked over here. An Input rather than a
-        # State: running a new retrieval should redraw the map that is showing
-        # the old one.
-        Input("hits-store", "data"),
+        # was run before the user walked over here. This is its cut to the
+        # three fields a drawn hit reads, because this callback fires on every
+        # zoom and the full payload is 472 KB at k=1,000. An Input rather than
+        # a State: a new retrieval should redraw the map showing the old one.
+        Input("map-overlay-store", "data"),
         Input("show-retrieval", "value"),
         Input("find-store", "data"),
         Input("neighborhood-open-store", "data"),
@@ -680,13 +937,13 @@ def register(app):
         Input("neighborhood-focus-store", "data"),
     )
     def update_figure(method, dims, color_by, layers, budget, viewport,
-                      hits_payload, show_retrieval, found, open_state, arm,
+                      overlay_store, show_retrieval, found, open_state, arm,
                       focus):
         vp = tuple(viewport) if viewport else None
         roles = _roles_from_checklist(show_retrieval)
-        retrieval = _retrieval_overlay(hits_payload, roles) if roles else None
+        retrieval = _retrieval_overlay(overlay_store, roles) if roles else None
         state = open_state or {}
-        neighborhood = (_neighborhood_overlays(hits_payload, arm or ROLE_A, focus, roles)
+        neighborhood = (_neighborhood_overlays(overlay_store, arm or ROLE_A, focus, roles)
                         if state.get("open") else None)
         fig, legend_data, badges = render.build_figure(
             method, dims, color_by, layers or [], budget,
@@ -705,7 +962,7 @@ def register(app):
         # ticked, so an unticked cohort can keep its row, receded. `retrieval`
         # above is the drawn subset and is what the figure gets.
         key = layout.retrieval_key_children(
-            _retrieval_overlay(hits_payload), roles, dims,
+            _retrieval_overlay(overlay_store), roles, dims,
             neighborhood=neighborhood)
         corpus = layout.corpus_key_children(layers)
         found_key = layout.found_key_children(found)
@@ -922,10 +1179,10 @@ def register(app):
         Output("frame-retrieval", "children"),
         Output("show-retrieval", "options"),
         Output("show-retrieval", "value"),
-        Input("hits-store", "data"),
+        Input("map-retrieval-store", "data"),
         Input("dims", "value"),
     )
-    def show_retrieval_group(hits_payload, dims):
+    def show_retrieval_group(summary, dims):
         """Reveal the retrieval control only when there is a retrieval.
 
         An always-visible control that does nothing until you have searched
@@ -944,37 +1201,25 @@ def register(app):
         what is drawn and therefore has to depend on the ticks - which this one
         writes, so it cannot also read them.
         """
-        freeze = ctx.triggered_id == "dims"
-        single = [{"label": " Show it on the map", "value": "on"}]
-
-        def ticks(options, value):
-            return ((no_update, no_update) if freeze else (options, value))
-
-        overlay = _retrieval_overlay(hits_payload)
-        if overlay is None:
-            return ({"display": "none"}, "Fit results", *ticks(single, ["on"]))
-
-        action_label = "Fit results" if dims == "2d" else "View results"
-        if len(overlay["cohorts"]) < 2:
-            return {}, action_label, *ticks(single, ["on"])
-        options = [
-            {"label": f"  {c['label'] or 'cohort'}", "value": key}
-            for c, key in zip(overlay["cohorts"], ("on", ROLE_B))
-        ]
-        return {}, action_label, *ticks(options, ["on", ROLE_B])
+        return retrieval_group_outputs(summary, dims,
+                                       freeze=ctx.triggered_id == "dims")
 
     @app.callback(
         Output("neighborhood-open-store", "data"),
         Input("frame-retrieval", "n_clicks"),
         Input("neighborhood-close", "n_clicks"),
-        Input("hits-store", "data"),
+        # A new retrieval closes the drawer. Only *that* one arrived matters
+        # here, so this is the store's timestamp rather than its 472 KB; the
+        # component id is still "hits-store", which is what the transition
+        # reads.
+        Input("hits-store", "modified_timestamp"),
         State("neighborhood-open-store", "data"),
+        State("map-retrieval-store", "data"),
         prevent_initial_call=True,
     )
-    def set_neighborhood_open(_frame, _close, hits_payload, previous):
-        has_retrieval = _retrieval_overlay(hits_payload) is not None
+    def set_neighborhood_open(_frame, _close, _stamp, previous, summary):
         return next_neighborhood_open_state(
-            ctx.triggered_id, previous, has_retrieval)
+            ctx.triggered_id, previous, summary is not None)
 
     @app.callback(
         Output("neighborhood-drawer", "style"),
@@ -1022,15 +1267,17 @@ def register(app):
         Output("neighborhood-tab", "options"),
         Output("neighborhood-search", "style"),
         Output("neighborhood-body", "children"),
-        Input("hits-store", "data"),
+        # Both evidence arms in full and nothing else: this fires on every tab
+        # and every keystroke in the drawer's search box.
+        Input("map-evidence-store", "data"),
         Input("neighborhood-arm", "value"),
         Input("neighborhood-tab", "value"),
         Input("neighborhood-search", "value"),
         Input("neighborhood-focus-store", "data"),
     )
-    def render_neighborhood(hits_payload, arm, tab, search, focus):
+    def render_neighborhood(evidence, arm, tab, search, focus):
         state = neighborhood_drawer_state(
-            hits_payload, arm or ROLE_A, tab or "overview", search, focus)
+            evidence, arm or ROLE_A, tab or "overview", search, focus)
         return (state["heading"], state["arm_options"],
                 state["arm_style"], state["tabs"], state["search_style"],
                 state["body"])
@@ -1043,15 +1290,17 @@ def register(app):
         Input({"type": "neighborhood-study", "value": ALL}, "n_clicks"),
         Input({"type": "neighborhood-sample", "value": ALL}, "n_clicks"),
         Input("manifold-graph", "clickData"),
-        Input("hits-store", "data"),
+        # A new retrieval resets the focus; its arrival is all that matters,
+        # so this is the timestamp, as in `set_neighborhood_open`.
+        Input("hits-store", "modified_timestamp"),
         State("neighborhood-focus-store", "data"),
         prevent_initial_call=True,
     )
     def select_neighborhood(_study_clicks, _sample_clicks, click_data,
-                            hits_payload, current_focus):
+                            stamp, current_focus):
         trigger = ctx.triggered_id
         if trigger == "hits-store":
-            changed = hits_payload
+            changed = stamp
         elif trigger == "manifold-graph":
             changed = click_data
         else:
@@ -1061,67 +1310,11 @@ def register(app):
 
     @app.callback(
         Output("retrieval-summary", "children"),
-        Input("hits-store", "data"),
+        Input("map-retrieval-store", "data"),
         Input("show-retrieval", "value"),
     )
-    def describe_the_retrieval(hits_payload, show_retrieval):
-        """One line saying what the ticks are currently drawing.
-
-        This used to be the map's only key for the retrieval: a swatch per
-        cohort and a paragraph explaining that a ring inside a square is a hit
-        both arms found. All of that moved onto the plot, into
-        `layout.retrieval_key_children`, next to the marks it decodes - the
-        ticks directly above already carry each cohort's name, so the rail was
-        naming them twice and explaining glyphs nowhere near them.
-
-        What is left is the control's own feedback, and it reads the ticks
-        rather than the payload so a hidden arm is reported as hidden.
-        """
-        full = _retrieval_overlay(hits_payload)
-        if full is None:
-            return ""
-
-        roles = _roles_from_checklist(show_retrieval)
-        shown = [c for c in full["cohorts"] if c["role"] in roles]
-        if not shown:
-            # The tick hides the overlay outright, and saying so is the whole
-            # job of this line. It used to describe the retrieval regardless, so
-            # unticking left the rail describing marks over a map with none of
-            # them on it.
-            return ("Not drawn. Tick it above to put it back on the map."
-                    if len(full["cohorts"]) < 2 else
-                    "Neither arm is drawn. Tick one to put it back on the map.")
-
-        if len(full["cohorts"]) < 2:
-            n = len(set(full["hit_points"]))
-            query = full["query_label"] or "an OSDR sample"
-            # The sentence used to carry a trailing clause about the marks
-            # sitting where they do in the space, which narrated the picture the
-            # reader is already looking at rather than telling them anything
-            # about it. Removed on 2026-08-11; the count is the part that
-            # carries information, so the sentence stops after it. The phrase is
-            # pinned in `tests/test_app.py::REMOVED_COPY`, which is why it is
-            # described here rather than quoted.
-            return [
-                html.B(query.split("|")[-1]),
-                f" and its {n} nearest ARCHS4 neighbor{'s' if n != 1 else ''}.",
-            ]
-
-        if len(shown) < 2:
-            return [html.B(shown[0]["label"] or "One arm"),
-                    " only. Tick both to see which samples they share."]
-        # Distinct samples, not drawn marks. `hit_points` is a concatenation
-        # across the arms, so a hit both retrieved appears in it twice - and
-        # quoting its length made the rail say "10 hits, 2 of them retrieved by
-        # both" for the same search whose banner on the other view said "share
-        # 2 of 8 retrieved samples". Two surfaces, one comparison, two numbers.
-        n_shared = len(full["shared_points"])
-        n_hits = len(set(full["hit_points"]))
-        return [
-            "Both arms drawn, ",
-            html.B(f"{n_hits}"), " samples retrieved, ",
-            html.B(f"{n_shared}"), " of them by both.",
-        ]
+    def describe_the_retrieval(summary, show_retrieval):
+        return retrieval_summary_children(summary, show_retrieval)
 
     @app.callback(
         Output("viewport-store", "data"),
@@ -1142,7 +1335,10 @@ def register(app):
         # frame button, which would be two ways to write one value and would
         # still leave a plain scroll-zoom with no way back.
         Input("reset-view", "n_clicks"),
-        State("hits-store", "data"),
+        # Fit results' windows, precomputed. This fires on every relayout, so
+        # carrying the hits here would post them on every zoom to answer the
+        # one click that frames them.
+        State("map-retrieval-store", "data"),
         State("find-store", "data"),
         State("method", "value"),
         State("dims", "value"),
@@ -1152,7 +1348,7 @@ def register(app):
         prevent_initial_call=True,
     )
     def update_viewport(relayout, method, dims, _frame_clicks, _find_clicks,
-                        _reset_clicks, hits_payload, found, method_state,
+                        _reset_clicks, summary, found, method_state,
                         dims_state, show_retrieval):
         from dash import ctx
         if ctx.triggered_id in ("method", "dims", "reset-view"):
@@ -1164,7 +1360,7 @@ def register(app):
             return None
         if ctx.triggered_id == "frame-retrieval":
             roles = _roles_from_checklist(show_retrieval) or (ROLE_A, ROLE_B)
-            window = _frame_for(hits_payload, method_state, dims_state, roles)
+            window = summary_frame(summary, method_state, dims_state, roles)
             return window if window else no_update
         if ctx.triggered_id == "frame-find":
             # `no_update`, never None. None is this callback's "reset to the

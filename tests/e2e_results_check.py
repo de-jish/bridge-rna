@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import re
 import subprocess
@@ -151,6 +152,32 @@ def plot_layout(page) -> dict:
 def pick_plot(page, label: str) -> None:
     page.locator("#results-plot-kind").get_by_text(label, exact=True).click()
     settle(page, 1500)
+
+
+#: Every store that carries some part of a retrieval to a map callback.
+RETRIEVAL_STORES = ("hits-store", "map-overlay-store", "map-evidence-store",
+                    "map-retrieval-store")
+
+
+def _record_map_post(request, posts: list[dict]) -> None:
+    """Note what one callback request uploaded of the retrieval, by store.
+
+    Dash posts every Input and State with every call, so this is the cost the
+    map's derived stores exist to bound (docs/map-overlay-stores.md).
+    """
+    if request.method != "POST" or "/_dash-update-component" not in request.url:
+        return
+    try:
+        body = json.loads(request.post_data or "{}")
+    except ValueError:
+        return
+    heavy = {}
+    for dep in (body.get("inputs") or []) + (body.get("state") or []):
+        for item in (dep if isinstance(dep, list) else [dep]):
+            if isinstance(item, dict) and item.get("id") in RETRIEVAL_STORES:
+                heavy[f"{item['id']}.{item.get('property')}"] = len(
+                    json.dumps(item.get("value")))
+    posts.append({"output": str(body.get("output") or ""), "heavy": heavy})
 
 
 def no_page_overflow(page) -> bool:
@@ -328,9 +355,56 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     settle(page)
 
     print("\n[a visit to the map and back]")
+    stored = page.evaluate("() => (sessionStorage.getItem('hits-store') || '').length")
+    posts: list[dict] = []
+    def record(req):
+        _record_map_post(req, posts)
+    page.on("request", record)
     page.locator("#see-on-map").click()
     page.wait_for_selector("#manifold-graph .js-plotly-plot", timeout=120_000)
-    page.wait_for_timeout(1500)
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && (gd.data || []).some(t => t.name === 'retrieved hit'); }",
+        timeout=120_000)
+    settle(page, 2000)
+    rings = page.evaluate(
+        "() => document.querySelector('#manifold-graph .js-plotly-plot').data"
+        ".filter(t => t.name === 'retrieved hit').reduce((n, t) => n + t.x.length, 0)")
+    c.ok(rings == 1000, f"the map draws all 1,000 matches as rings ({rings})")
+    arrived = list(posts)
+    readers = [p for p in arrived if "hits-store.data" in p["heavy"]]
+    c.ok(len(readers) == 1 and "map-overlay-store" in readers[0]["output"],
+         f"arriving posts the {stored:,}-char hits-store once, to the derivation "
+         f"({[p['output'][:40] for p in readers]})")
+    # A zoom and a tick toggle: the two interactions a reader repeats most.
+    del posts[:]
+    page.evaluate("""() => {
+      const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+      const x = gd.layout.xaxis.range, y = gd.layout.yaxis.range;
+      const cx = (x[0] + x[1]) / 2, cy = (y[0] + y[1]) / 2;
+      const w = (x[1] - x[0]) / 4, h = (y[1] - y[0]) / 4;
+      Plotly.relayout(gd, {'xaxis.range[0]': cx - w, 'xaxis.range[1]': cx + w,
+                           'yaxis.range[0]': cy - h, 'yaxis.range[1]': cy + h});
+    }""")
+    settle(page, 2500)
+    page.locator("#show-retrieval input").first.click()
+    settle(page, 2500)
+    page.locator("#show-retrieval input").first.click()
+    settle(page, 2500)
+    interacting = list(posts)
+    c.ok(not any("hits-store.data" in p["heavy"] for p in interacting),
+         "no zoom or tick posts hits-store")
+    figure = [p for p in interacting if "manifold-graph.figure" in p["output"]]
+    rest = [p for p in interacting if "manifold-graph.figure" not in p["output"]]
+    worst_rest = max((sum(p["heavy"].values()) for p in rest), default=0)
+    c.ok(figure and worst_rest <= 4_000,
+         f"every map callback but the figure carries at most 4 KB of retrieval "
+         f"data per zoom or tick (largest {worst_rest:,} B over {len(rest)} calls)")
+    worst_figure = max((sum(p["heavy"].values()) for p in figure), default=0)
+    c.ok(0 < worst_figure <= stored // 3,
+         f"the figure carries only the hits it draws: {worst_figure:,} B "
+         f"against the {stored:,}-char payload")
+    page.remove_listener("request", record)
     page.locator(".app-nav").get_by_text("Retrieve").click()
     page.wait_for_selector("#results-table-wrap tbody tr", timeout=60_000)
     settle(page)

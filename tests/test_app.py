@@ -922,7 +922,10 @@ def test_one_callback_owns_neighborhood_focus_state(app):
     inputs = {(str(i["id"]), i["property"])
               for i in app.callback_map[writers[0]]["inputs"]}
     assert ("manifold-graph", "clickData") in inputs
-    assert ("hits-store", "data") in inputs
+    # A new retrieval resets the focus, and its arrival is all this reads:
+    # the timestamp, never the 472 KB payload.
+    assert ("hits-store", "modified_timestamp") in inputs
+    assert ("hits-store", "data") not in inputs
     assert any("neighborhood-study" in component_id
                for component_id, _property in inputs)
     assert any("neighborhood-sample" in component_id
