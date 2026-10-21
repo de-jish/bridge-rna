@@ -64,7 +64,11 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                      "substantia nigra", "neuron", "neural", "glia", "glial",
                      "astrocyte", "oligodendrocyte", "microglia", "olfactory bulb",
                      "prefrontal", "frontal lobe", "temporal lobe", "occipital",
-                     "putamen", "cerebellar")),
+                     "putamen", "cerebellar",
+                     # The ventricles' CSF-secreting tissue, not the eye's
+                     # choroid: 396 ARCHS4 samples were filed under Eye by the
+                     # bare "choroid" stem before this was named here.
+                     "choroid plexus")),
     ("Nerve / spinal cord", ("spinal cord", "sciatic", "dorsal root", "drg",
                              "peripheral nerve", "schwann")),
     # --- Solid organs. ---
@@ -121,8 +125,25 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Vasculature", ("endothelial", "huvec", "umbilical vein", "aorta", "aortic",
                      "artery", "arterial", "\\bvein\\b", "venous", "vascular",
                      "vasculature", "pericyte", "smooth muscle cell")),
-    ("Eye", ("retina", "retinal", "\\beye\\b", "cornea", "\\blens\\b", "choroid",
-             "photoreceptor", "rpe\\b", "optic")),
+    # Eye anatomy, measured against the real corpus: before "eyecup", "eyeball",
+    # sclera, iris, conjunctiva, ciliary body, trabecular meshwork, limbus,
+    # macula, vitreous and photoreceptor names were missing, 560 ARCHS4 samples
+    # naming one of them read as Other, Cultured cells or Cell line. Each short
+    # stem is anchored where a neighbour word would otherwise fire: "\bsclera\b"
+    # not sclerosis, "\biris\b" not irisin, "conjunctiva" not GEO's
+    # mistranslated "conjunctive tissue", "limbal" not limbic, and photoreceptors
+    # by plural only, never a neuron's growth cone. "choroid" here is the eye's
+    # vascular layer; the choroid plexus is a brain tissue and is claimed by the
+    # Brain / CNS rule above. Ocular adnexa (lacrimal, meibomian and Harderian
+    # glands, eyelid) are deliberately not named: they are exocrine glands and
+    # skin beside the eye rather than the eye, and remain Other.
+    ("Eye", ("retina", "retinal", "\\beye\\b", "\\beyes\\b", "eyecup", "eyeball",
+             "cornea", "\\blens\\b", "choroid", "photoreceptor", "rpe\\b",
+             "\\barpe-?19\\b", "optic", "\\bsclera\\b", "scleral", "\\biris\\b",
+             "conjunctiva", "uvea", "ocular melanoma", "ciliary body",
+             "ciliary epithel", "trabecular meshwork", "limbal", "\\blimbus\\b",
+             "macula", "vitreous", "hyalocyte", "pterygi",
+             "\\brods\\b", "(?<!growth )\\bcones\\b")),
     ("Bladder", ("bladder", "urothel", "urinary")),
     ("Salivary gland", ("salivary", "parotid", "submandibular gland")),
     # --- Last resorts. These are not tissues, but they name a large and

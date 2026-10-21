@@ -2,6 +2,10 @@
 """Fetch per-sample GEO metadata for the 940,455 ARCHS4 points.
 
     python precompute/fetch_archs4_meta.py
+    python precompute/fetch_archs4_meta.py --retissue [--out PATH]   # offline
+
+``--retissue`` re-derives only the tissue bucket from the cached GEO fields,
+for when ``manifold/tissue.py`` changes and the metadata itself has not.
 
 Output: ``cache/archs4_metadata.parquet``, one row per ARCHS4 point in the fixed
 global order, carrying ``geo_accession``, ``series_id``, ``title``,
@@ -202,11 +206,60 @@ def derive_tissue(df: pd.DataFrame) -> pd.Series:
     )
 
 
+def retissue(src: Path, dst: Path) -> pd.DataFrame:
+    """Re-derive only the ``tissue`` column of an existing metadata parquet.
+
+    The bucket is a pure function of the cached ``characteristics`` and
+    ``source_name``, so a change to ``manifold/tissue.py`` does not need the
+    network: every other column is carried over byte for byte, in the same
+    order, and only ``tissue`` is recomputed. Returns the (from, to) transition
+    counts so a vocabulary change is reviewed as a table rather than trusted.
+    """
+    df = pd.read_parquet(src)
+    missing = {"source_name", "characteristics", "tissue"} - set(df.columns)
+    if missing:
+        raise SystemExit(f"ABORT: {src} has no {sorted(missing)} column; "
+                         "run this script without --retissue to rebuild it.")
+    before = df["tissue"].astype(str).to_numpy()
+    df["tissue"] = derive_tissue(df)
+    after = df["tissue"].to_numpy()
+    moved = before != after
+    transitions = (pd.DataFrame({"from": before[moved], "to": after[moved]})
+                   .value_counts().rename("samples").reset_index())
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(dst, index=False)
+    return transitions
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Cache ARCHS4 per-sample GEO metadata.")
     ap.add_argument("--limit", type=int, default=0,
                     help="Debug: only annotate the first N ARCHS4 points.")
+    ap.add_argument("--retissue", action="store_true",
+                    help="Offline: re-derive only the tissue column of the existing "
+                         f"{paths.ARCHS4_METADATA_PARQUET.name} after a change to "
+                         "manifold/tissue.py. No network, about a minute.")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="With --retissue: write here instead of replacing the "
+                         "cached parquet, so a candidate can be reviewed first.")
     args = ap.parse_args()
+
+    if args.out is not None and not args.retissue:
+        ap.error("--out only applies to --retissue")
+    if args.retissue:
+        src = paths.ARCHS4_METADATA_PARQUET
+        if not src.exists():
+            raise SystemExit(f"ABORT: --retissue needs an existing {src}; run this "
+                             "script without it first.")
+        dst = args.out or src
+        t0 = time.time()
+        transitions = retissue(src, dst)
+        log(f"re-derived tissue in {time.time() - t0:.1f}s; "
+            f"{int(transitions['samples'].sum()):,} samples changed bucket")
+        for row in transitions.itertuples(index=False):
+            log(f"        {row[0][:24]:26s} -> {row[1][:24]:26s} {row[2]:>8,}")
+        log(f"[done] wrote {dst}")
+        return
 
     try:
         import requests
