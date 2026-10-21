@@ -196,3 +196,23 @@ def test_export_is_the_visible_rows_in_table_order():
     text = R.to_csv(shown, results, filters, sort, {}, "2026-10-21 00:00:00 UTC")
     frame = pd.read_csv(io.StringIO(text), comment="#")
     assert frame["gsm"].tolist() == ["GSM2", "GSM1"]
+
+
+def test_a_selection_never_rebuilds_the_network(monkeypatch):
+    """network-focus.js keeps the clicked node's emphasis only while the figure
+    it decorated is the one on screen; a rebuild on every click dropped it."""
+    from types import SimpleNamespace
+
+    from dash import no_update
+
+    import app as shell
+
+    app = shell.build_app()
+    cb = next(getattr(e["callback"], "__wrapped__", e["callback"])
+              for e in app.callback_map.values()
+              if any(i["id"] == "results-plot-kind" for i in e["inputs"]))
+    monkeypatch.setattr(V, "ctx", SimpleNamespace(triggered_id="selected-node-store"))
+    filters = [None] * len(V.FILTER_INPUTS)
+    selected = {"kind": "gsm", "node_id": "GSM1"}
+    assert cb(None, *filters, V.DEFAULT_SORT, "network", selected, "sample") == (no_update,) * 4
+    assert cb(None, *filters, V.DEFAULT_SORT, "rank", selected, "sample")[0] is not no_update

@@ -778,6 +778,14 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
     )
     def update_plot(results, *args):
         *filter_values, sort, kind, selected, mode = args
+        # The network draws no selection of its own: assets/network-focus.js
+        # emphasises the clicked node in the SVG, and a rebuilt figure is a new
+        # graph to it, so redrawing on a click dropped that emphasis the moment
+        # the pointer left (e2e_network_style.py caught it). The other three
+        # views mark the selection themselves and do redraw.
+        if (ctx.triggered_id == "selected-node-store"
+                and (_safe_str(kind) or DEFAULT_PLOT_KIND) == "network"):
+            return no_update, no_update, no_update, no_update
         rows, _hidden = visible_rows(results, filters_from_inputs(filter_values), sort)
         try:
             fig, caption, legend = build_plot(_safe_str(kind) or DEFAULT_PLOT_KIND,
