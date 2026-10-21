@@ -342,8 +342,8 @@ def _cell(row: dict, key: str, kind: str, k: int) -> Any:
         if twins:
             children.append(html.Span(
                 "Same profile: " + ", ".join(twins), className="result-twin",
-                title="An identical expression profile is also deposited under "
-                      "this accession."))
+                title="An identical expression profile is also deposited as "
+                      + ", ".join(twins) + "."))
         return html.Td(children, className="col-gsm")
     cls = f"col-{key}"
     if kind == "num":
@@ -353,9 +353,21 @@ def _cell(row: dict, key: str, kind: str, k: int) -> Any:
         text = f"{int(value):,}" if key.startswith("rank") else f"{float(value):.4f}"
         return html.Td(text, className=f"{cls} col-num")
     text = _safe_str(value)
+    if kind == "species":
+        # The conventional short binomial: at 1,400 px the full "Mus musculus"
+        # pushed the column past the table's edge. Hover names it in full.
+        return html.Td(_short_binomial(text), className=cls, title=text or None)
     if kind == "text":
         return html.Td(text, className=f"{cls} col-text", title=text or None)
     return html.Td(text, className=cls)
+
+
+def _short_binomial(name: str) -> str:
+    """"Mus musculus" -> "M. musculus"; anything else unchanged."""
+    parts = name.split()
+    if len(parts) == 2 and parts[0][:1].isupper() and parts[1].islower():
+        return f"{parts[0][0]}. {parts[1]}"
+    return name
 
 
 def _header(key: str, label: str, kind: str, sort: dict) -> Any:
@@ -382,7 +394,8 @@ def render_table(rows: list[dict], results: dict, sort: dict,
         )
         for row in rows
     ]
-    return html.Table(className="results-table", children=[
+    return html.Table(className="results-table" + (
+        " results-table--comparison" if results.get("comparison") else ""), children=[
         html.Caption("Matches, ranked by embedding cosine similarity",
                      className="visually-hidden"),
         html.Thead(html.Tr([_header(key, label, kind, sort)

@@ -216,3 +216,11 @@ def test_a_selection_never_rebuilds_the_network(monkeypatch):
     selected = {"kind": "gsm", "node_id": "GSM1"}
     assert cb(None, *filters, V.DEFAULT_SORT, "network", selected, "sample") == (no_update,) * 4
     assert cb(None, *filters, V.DEFAULT_SORT, "rank", selected, "sample")[0] is not no_update
+
+
+@pytest.mark.parametrize("name,short", [
+    ("Mus musculus", "M. musculus"), ("Homo sapiens", "H. sapiens"),
+    ("", ""), ("Unknown", "Unknown"), ("mus musculus", "mus musculus"),
+])
+def test_species_shows_the_short_binomial_and_hovers_the_full_one(name, short):
+    assert V._short_binomial(name) == short

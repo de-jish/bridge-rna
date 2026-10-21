@@ -1292,7 +1292,7 @@ summary:focus-visible,
 }
 .results-table {
   width: 100%;
-  min-width: 760px;
+  min-width: 680px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -1322,14 +1322,20 @@ summary:focus-visible,
 /* Fixed widths for everything measurable, so Title - the only column whose
    length varies by an order of magnitude, and the most informative - takes
    what is left: about 270 px at 1,600 px wide, against 100 px before. */
-.results-table .col-rank_a, .results-table .col-rank_b { width: 62px; }
-.results-table .col-score_a, .results-table .col-score_b { width: 74px; }
-/* Wide enough for "Same profile: GSM2349280" on one line, so an identical
-   profile marks its row without doubling its height. */
-.results-table .col-gsm { width: 158px; }
-.results-table .col-gse { width: 102px; }
-.results-table .col-tissue { width: 122px; }
-.results-table .col-species { width: 104px; }
+.results-table .col-rank_a { width: 58px; }
+.results-table .col-score_a { width: 74px; }
+/* A comparison's "Rank A" / "Score A" plus the sort mark need more; at the
+   single-query widths they wrapped and doubled the header's height. */
+.results-table--comparison .col-rank_a,
+.results-table--comparison .col-rank_b { width: 70px; }
+.results-table--comparison .col-score_a,
+.results-table--comparison .col-score_b { width: 82px; }
+/* The "Same profile" note truncates here with the full list on hover, so an
+   identical profile marks its row without widening the column. */
+.results-table .col-gsm { width: 124px; }
+.results-table .col-gse { width: 100px; }
+.results-table .col-tissue { width: 128px; }
+.results-table .col-species { width: 100px; }
 
 .results-table .col-num {
   text-align: right;
@@ -1337,7 +1343,14 @@ summary:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 .results-table .col-gse { font-family: var(--font-mono); font-size: 12.5px; }
-.results-table .col-species { font-style: italic; }
+/* One line: "Mus musculus" wrapping made every row of a page double height. */
+.results-table .col-species {
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.results-table thead th { white-space: nowrap; }
 .results-table .col-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1468,6 +1481,14 @@ summary:focus-visible,
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Between the stacked layout and a wide screen the table is the column that
+   runs short: at 1,400 px the centre was 644 px, the fixed columns took 570
+   of it and Title kept 74. The inspector's label/value rows read the same at
+   328 px, so it gives up 56 px here rather than the table scrolling sideways. */
+@media (min-width: 1181px) and (max-width: 1480px) {
+  .app-grid { grid-template-columns: 288px minmax(0, 1fr) 328px; }
 }
 
 @media (max-width: 1180px) {
