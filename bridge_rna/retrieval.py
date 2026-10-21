@@ -37,7 +37,7 @@ import tempfile
 from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -289,7 +289,7 @@ def run_cached_query_retrieval(sample_id: str, topk: int) -> pd.DataFrame:
     idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk)
     hits = _annotate_from_cache(idx, score)
     hits["archs4_index"] = idx.astype(int)
-    return hits.sort_values("score", ascending=False).reset_index(drop=True)
+    return _ordered(hits)
 
 
 # --- Shared machinery: the query vector sources and the cosine scan --------
@@ -399,6 +399,26 @@ def _load_precomputed_osdr_queries(path: Path) -> pd.DataFrame:
     )
 
 
+def _tie_exact_top(block: np.ndarray, take: int) -> np.ndarray:
+    """Column positions of each row's `take` best scores, lower column on a tie.
+
+    `argpartition` alone keeps an arbitrary member of a tie that straddles the
+    cut. Exact ties are common in this index (a profile deposited under two
+    accessions has a bit-identical vector; one query had 229 tied neighbours in
+    its top 1,000), and on the real corpus a 30-deep scan kept the later of two
+    tied rows at rank 30 while a 1,000-deep scan kept the earlier one. Only the
+    rare rows with a tie at their cut pay for a full sort.
+    """
+    part = np.argpartition(block, -take, axis=1)[:, -take:]
+    kept = np.take_along_axis(block, part, axis=1)
+    cut = kept.min(axis=1, keepdims=True)
+    straddles = (block == cut).sum(axis=1) > (kept == cut).sum(axis=1)
+    for r in np.flatnonzero(straddles):
+        cols = np.arange(block.shape[1])
+        part[r] = np.lexsort((cols, -block[r]))[:take]
+    return part
+
+
 def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
                         block_bytes: int = 200_000_000,
                         progress: Any = None, *,
@@ -459,18 +479,26 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
         block = (x @ Qt).T[:m]                          # (m, rows in block)
 
         take = min(k, block.shape[1])
-        part = np.argpartition(block, -take, axis=1)[:, -take:]
+        part = _tie_exact_top(block, take)
         cand_idx = np.concatenate([best_idx, part + start], axis=1)
         cand_score = np.concatenate(
             [best_score, np.take_along_axis(block, part, axis=1)], axis=1)
         keep = min(k, cand_idx.shape[1])
-        sel = np.argpartition(cand_score, -keep, axis=1)[:, -keep:]
+        # Candidates are at most 2k per query, so an exact (-score, row) sort
+        # is cheap here, and it is what makes the kept set independent of k.
+        sel = np.lexsort((cand_idx, -cand_score), axis=-1)[:, :keep]
         best_idx = np.take_along_axis(cand_idx, sel, axis=1)
         best_score = np.take_along_axis(cand_score, sel, axis=1)
         if progress is not None:
             progress(end, n)
 
-    order = np.argsort(-best_score, axis=1)
+    # Best first, and an exact tie goes to the lower reference row. Ties are
+    # not hypothetical here: one expression profile deposited under two GSM
+    # accessions has a bit-identical vector, so both score exactly the same,
+    # and `argsort`'s default is not stable. Without a tie key the order of
+    # such a pair depended on how deep the scan ran, which would have let the
+    # 1,000-deep score profile reorder a top 5 it was only meant to contain.
+    order = np.lexsort((best_idx, -best_score), axis=-1)
     return (np.take_along_axis(best_idx, order, axis=1),
             np.take_along_axis(best_score, order, axis=1))
 
@@ -764,15 +792,14 @@ def run_uploaded_retrieval(
     same schema - gse / title / tissue / species and a map position - as a
     precomputed OSDR sample's.
     """
-    hits, _ = run_uploaded_retrieval_with_neighborhood(
+    return run_uploaded_retrieval_with_neighborhood(
         counts_path,
         sample_column,
         topk,
         neighborhood_depth=topk,
         entrez_email=entrez_email,
         enable_biopython_metadata=enable_biopython_metadata,
-    )
-    return hits
+    ).hits
 
 
 def run_uploaded_retrieval_with_neighborhood(
@@ -783,18 +810,18 @@ def run_uploaded_retrieval_with_neighborhood(
     neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return requested upload hits and their evidence neighborhood in one scan."""
+) -> UploadRetrieval:
+    """Return requested upload hits, evidence neighborhood and score curve."""
     q_vec = embed_uploaded_counts(counts_path, sample_column)
     index_vecs, _, _ = _load_archs4_index()
-    scan_k = max(int(topk), int(neighborhood_depth))
+    scan_k = _scan_depth(topk, neighborhood_depth)
     idx, score = _topk_cosine_from_memmap(index_vecs, q_vec, scan_k)
     ranked = _annotate_from_cache(idx, score)
     ranked["archs4_index"] = idx.astype(int)
     hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
     if enable_biopython_metadata and _safe_str(entrez_email):
         hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
-    return hits, neighborhood
+    return UploadRetrieval(hits, neighborhood, score_profile(ranked))
 
 
 # --- The fifth query-vector source: a whole experimental group ---------------
@@ -807,7 +834,7 @@ def run_cohort_retrieval_with_neighborhood(
     topk: int,
     *,
     neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
-) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
+) -> CohortRetrieval:
     """Pool a cohort and return requested hits plus one evidence prefix.
 
     The pooled vector is the only new thing. The cosine scan, the offline
@@ -818,9 +845,9 @@ def run_cohort_retrieval_with_neighborhood(
     is why nothing downstream of the hits frame needs to know a cohort produced
     it.
 
-    Only the pooled vector is ranked. Returns `(hits, neighborhood, rows)`;
-    member vectors remain available for the existing cohort geometry without
-    loading them twice.
+    Only the pooled vector is ranked. Returns `(hits, neighborhood, rows,
+    profile)`; member vectors remain available for the existing cohort geometry
+    without loading them twice.
     """
     from .cohorts import cohort_query_vector
 
@@ -840,7 +867,7 @@ def run_cohort_retrieval_with_neighborhood(
     q_mat = cohort_query_vector(rows).reshape(1, -1)
 
     index_vecs, _, _ = _load_archs4_index()
-    scan_k = max(int(topk), int(neighborhood_depth))
+    scan_k = _scan_depth(topk, neighborhood_depth)
     idx, score = _topk_cosine_matrix(
         index_vecs=index_vecs, q_mat=q_mat, k=scan_k,
         preserve_matrix_product=True)
@@ -849,16 +876,16 @@ def run_cohort_retrieval_with_neighborhood(
     ranked["archs4_index"] = idx[0].astype(int)
     hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
 
-    return hits, neighborhood, rows
+    return CohortRetrieval(hits, neighborhood, rows, score_profile(ranked))
 
 
 def run_cohort_retrieval(sample_ids: list[str] | tuple[str, ...], topk: int
                          ) -> tuple[pd.DataFrame, np.ndarray]:
     """Pool a cohort's cached vectors into one requested-depth result."""
-    hits, _neighborhood, rows = run_cohort_retrieval_with_neighborhood(
+    result = run_cohort_retrieval_with_neighborhood(
         sample_ids, topk, neighborhood_depth=topk
     )
-    return hits, rows
+    return result.hits, result.rows
 
 
 def search_hits(
@@ -904,13 +931,94 @@ def search_hits(
     )
 
 
+# --- What one scan returns ----------------------------------------------------
+
+# How deep the score-by-rank curve reaches. The scan already runs to the
+# 250-deep evidence neighborhood, and the memmap pass dominates its cost at any
+# k, so reaching 1,000 is measured at the same 0.4-0.5 s. It is also the most a
+# user can ask for, which means a request for 1,000 matches costs nothing extra.
+SCORE_PROFILE_DEPTH = 1000
+MAX_MATCHES = SCORE_PROFILE_DEPTH
+
+
+class SampleRetrieval(NamedTuple):
+    """One sample's requested hits, its evidence prefix, and its score curve."""
+
+    hits: pd.DataFrame
+    neighborhood: pd.DataFrame | None
+    mode: str
+    profile: list[float]
+
+
+class CohortRetrieval(NamedTuple):
+    hits: pd.DataFrame
+    neighborhood: pd.DataFrame
+    rows: np.ndarray
+    profile: list[float]
+
+
+class UploadRetrieval(NamedTuple):
+    hits: pd.DataFrame
+    neighborhood: pd.DataFrame
+    profile: list[float]
+
+
+def _scan_depth(topk: int, neighborhood_depth: int) -> int:
+    return max(int(topk), int(neighborhood_depth), SCORE_PROFILE_DEPTH)
+
+
+def _ordered(ranked: pd.DataFrame) -> pd.DataFrame:
+    """Best score first; an exact tie goes to the lower reference row.
+
+    The same tie rule as `_topk_cosine_matrix`, restated because a ranked frame
+    can arrive from a path that never went through it (the precomputed table).
+    """
+    if "archs4_index" in ranked.columns:
+        ordered = ranked.sort_values(["score", "archs4_index"],
+                                     ascending=[False, True], kind="mergesort")
+    else:
+        ordered = ranked.sort_values("score", ascending=False, kind="mergesort")
+    return ordered.reset_index(drop=True)
+
+
+def score_profile(ranked: pd.DataFrame,
+                  depth: int = SCORE_PROFILE_DEPTH) -> list[float]:
+    """The best `depth` scores of one scan, best first, as plain floats.
+
+    Only scores, never identities: the curve says how quickly similarity falls
+    away with rank, and the rows past the requested k are not results.
+    """
+    if ranked is None or ranked.empty:
+        return []
+    scores = _ordered(ranked)["score"].head(int(depth))
+    return [float(s) for s in scores.to_numpy(dtype=np.float64)]
+
+
+def reference_vectors(indices: Sequence[int]) -> np.ndarray:
+    """Unit-normalized ARCHS4 vectors for memmap rows, in the order given.
+
+    Float64, because the identical-profile rule compares cosine distances
+    near 1e-6, which float32 accumulation would blur. Reading 1,000 rows was
+    measured at about 1 ms once the scan has warmed the pages.
+    """
+    idx = np.asarray([int(i) for i in indices], dtype=np.int64)
+    if idx.size == 0:
+        return np.zeros((0, 0), dtype=np.float64)
+    index_vecs, _, _ = _load_archs4_index()
+    order = np.argsort(idx, kind="stable")
+    block = np.empty((idx.size, int(index_vecs.shape[1])), dtype=np.float64)
+    block[order] = np.asarray(index_vecs[idx[order]], dtype=np.float64)
+    norms = np.linalg.norm(block, axis=1, keepdims=True)
+    return block / np.maximum(norms, 1e-12)
+
+
 def split_ranked_hits(
     ranked: pd.DataFrame,
     requested_k: int,
     neighborhood_depth: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split one ranked scan into the requested prefix and evidence prefix."""
-    ordered = ranked.sort_values("score", ascending=False).reset_index(drop=True)
+    ordered = _ordered(ranked)
     requested = ordered.head(max(1, int(requested_k))).copy().reset_index(drop=True)
     neighborhood = (
         ordered.head(max(1, int(neighborhood_depth))).copy().reset_index(drop=True)
@@ -926,19 +1034,23 @@ def search_hits_with_neighborhood(
     neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
-) -> tuple[pd.DataFrame, pd.DataFrame | None, str]:
-    """Retrieve requested hits plus a locatable evidence prefix when available."""
+) -> SampleRetrieval:
+    """Retrieve requested hits, a locatable evidence prefix, and a score curve.
+
+    The demo and precomputed paths scan only the requested depth, so their
+    curve is just the requested scores and they carry no neighborhood.
+    """
     row = samples_df.loc[samples_df["sample_id"] == sample_id]
     if row.empty:
         raise ValueError(f"Unknown sample_id: {sample_id}")
 
-    scan_k = max(int(topk), int(neighborhood_depth))
+    scan_k = _scan_depth(topk, neighborhood_depth)
     if cached_query_vector(sample_id) is not None:
         ranked = run_cached_query_retrieval(sample_id, scan_k)
         hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
         if enable_biopython_metadata and _safe_str(entrez_email):
             hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
-        return hits, neighborhood, "cached"
+        return SampleRetrieval(hits, neighborhood, "cached", score_profile(ranked))
 
     hits, mode = search_hits(
         samples_df,
@@ -947,7 +1059,7 @@ def search_hits_with_neighborhood(
         entrez_email,
         enable_biopython_metadata,
     )
-    return hits, None, mode
+    return SampleRetrieval(hits, None, mode, score_profile(hits))
 
 
 

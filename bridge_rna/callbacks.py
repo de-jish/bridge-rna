@@ -493,7 +493,7 @@ def register(app) -> None:
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
         try:
-            hits_df, neighborhood_df, mode = search_hits_with_neighborhood(
+            hits_df, neighborhood_df, mode, profile = search_hits_with_neighborhood(
                 samples_df=samples_df,
                 sample_id=sample_id,
                 topk=int(topk),
@@ -535,6 +535,7 @@ def register(app) -> None:
             "biopython_enabled": bool(enable_biopython),
             "mode": mode,
             "hits": hits_df.to_dict(orient="records"),
+            "score_profile": profile,
             "query": _query_dict(q_row),
             "neighborhood": _evidence_payload(
                 neighborhood_df, label=_safe_str(q_row.get("sample_name")),
@@ -897,7 +898,7 @@ def register(app) -> None:
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
 
         try:
-            hits_df, neighborhood_df, rows = (
+            hits_df, neighborhood_df, rows, profile = (
                 run_cohort_retrieval_with_neighborhood(members, topk=int(topk))
             )
             geometry = C.cohort_geometry(members, rows)
@@ -908,8 +909,9 @@ def register(app) -> None:
             other_hits, other_neighborhood, other_geometry = (
                 None, None, None
             )
+            other_profile: list[float] = []
             if other is not None:
-                other_hits, other_neighborhood, other_rows = (
+                other_hits, other_neighborhood, other_rows, other_profile = (
                     run_cohort_retrieval_with_neighborhood(
                         list(other.members), topk=int(topk)
                     )
@@ -932,6 +934,7 @@ def register(app) -> None:
             "biopython_enabled": bool(enable_biopython),
             "mode": COHORT_MODE,
             "hits": hits_df.to_dict(orient="records"),
+            "score_profile": profile,
             "query": _query_dict(query),
             # The map draws every pooled member rather than one query point,
             # because a cohort has no single position in the space.
@@ -968,6 +971,7 @@ def register(app) -> None:
         payload["comparison"] = {
             "query_b": _query_dict(other_query),
             "hits_b": other_hits.to_dict(orient="records"),
+            "score_profile_b": other_profile,
             "shared": sorted(shared),
             "overlap": overlap,
             "facet": facet_label,
@@ -1108,7 +1112,7 @@ def register(app) -> None:
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
 
         try:
-            hits_df, neighborhood_df = run_uploaded_retrieval_with_neighborhood(
+            hits_df, neighborhood_df, profile = run_uploaded_retrieval_with_neighborhood(
                 counts_path=upload_store["path"],
                 sample_column=column,
                 topk=int(topk),
@@ -1141,6 +1145,7 @@ def register(app) -> None:
             "biopython_enabled": bool(enable_biopython),
             "mode": UPLOAD_MODE,
             "hits": hits_df.to_dict(orient="records"),
+            "score_profile": profile,
             "query": _query_dict(query),
             "neighborhood": _evidence_payload(neighborhood_df, label=column),
         }

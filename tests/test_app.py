@@ -275,7 +275,7 @@ def test_cached_sample_callback_carries_its_evidence_neighborhood(
     monkeypatch.setattr(
         retrieval_callbacks,
         "search_hits_with_neighborhood",
-        lambda **_kwargs: (hits, neighborhood, "cached"),
+        lambda **_kwargs: (hits, neighborhood, "cached", [0.9, 0.8]),
     )
     monkeypatch.setattr(
         retrieval_callbacks,
@@ -306,7 +306,7 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
     monkeypatch.setattr(
         retrieval_callbacks,
         "search_hits_with_neighborhood",
-        lambda **_kwargs: (hits, None, "demo"),
+        lambda **_kwargs: (hits, None, "demo", [0.9, 0.8]),
     )
     monkeypatch.setattr(
         retrieval_callbacks,
@@ -337,7 +337,7 @@ def test_upload_callback_carries_evidence_without_expanding_the_network(
     monkeypatch.setattr(
         retrieval_callbacks,
         "run_uploaded_retrieval_with_neighborhood",
-        lambda **_kwargs: (hits, neighborhood),
+        lambda **_kwargs: (hits, neighborhood, [0.9, 0.8]),
     )
     monkeypatch.setattr(
         retrieval_callbacks,
@@ -389,8 +389,8 @@ def test_comparison_callback_keeps_independent_evidence_for_both_arms(
         C, "find_cohort", lambda cohort_id, facets=None: by_id.get(cohort_id)
     )
     results = {
-        cohort_a.members: (hits_a, neighborhood_a, rows),
-        cohort_b.members: (hits_b, neighborhood_b, rows),
+        cohort_a.members: (hits_a, neighborhood_a, rows, [0.9, 0.8]),
+        cohort_b.members: (hits_b, neighborhood_b, rows, [0.7, 0.6]),
     }
     monkeypatch.setattr(
         retrieval_callbacks,

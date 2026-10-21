@@ -337,7 +337,7 @@ def test_cohort_evidence_preserves_requested_hits_and_member_rows(
     corpus, fixture_retrieval
 ):
     keys = _cohort_keys(corpus, 4)
-    hits, neighborhood, rows = retrieval.run_cohort_retrieval_with_neighborhood(
+    hits, neighborhood, rows, _profile = retrieval.run_cohort_retrieval_with_neighborhood(
         keys, topk=6, neighborhood_depth=250
     )
     assert len(hits) == 6 and len(neighborhood) == 250
@@ -365,7 +365,8 @@ def test_cohort_requested_hits_and_evidence_share_one_pooled_scan(
     retrieval.run_cohort_retrieval_with_neighborhood(
         _cohort_keys(corpus, 4), topk=6, neighborhood_depth=250
     )
-    assert calls == [(250, 1, True)], "only the pooled biological query is scored"
+    assert calls == [(retrieval.SCORE_PROFILE_DEPTH, 1, True)], \
+        "only the pooled biological query is scored"
 
 
 def test_agreement_is_jaccard_and_agrees_with_the_validators_definition():

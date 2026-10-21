@@ -112,12 +112,13 @@ def test_uploaded_search_keeps_top_250_in_the_same_scan(
         return real(index_vecs, q_vec, k)
 
     monkeypatch.setattr(retrieval, "_topk_cosine_from_memmap", counted)
-    hits, neighborhood = retrieval.run_uploaded_retrieval_with_neighborhood(
+    hits, neighborhood, profile = retrieval.run_uploaded_retrieval_with_neighborhood(
         counts_path="ignored.csv", sample_column="s", topk=5,
         neighborhood_depth=250, enable_biopython_metadata=False,
     )
 
-    assert calls == [250]
+    assert calls == [retrieval.SCORE_PROFILE_DEPTH]
+    assert profile[:5] == hits["score"].tolist()
     assert len(hits) == 5
     assert len(neighborhood) == 250
     assert hits["archs4_index"].tolist() == neighborhood.head(5)["archs4_index"].tolist()

@@ -167,12 +167,13 @@ def test_sample_search_keeps_top_250_in_the_same_scan(monkeypatch, corpus):
 
     monkeypatch.setattr(retrieval, "_topk_cosine_from_memmap", counted)
     samples = _samples_frame(corpus)
-    hits, neighborhood, mode = retrieval.search_hits_with_neighborhood(
+    hits, neighborhood, mode, profile = retrieval.search_hits_with_neighborhood(
         samples, str(samples["sample_id"].iloc[0]), topk=5,
         neighborhood_depth=250, enable_biopython_metadata=False)
 
     assert mode == "cached"
-    assert calls == [250]
+    assert calls == [retrieval.SCORE_PROFILE_DEPTH]
+    assert len(profile) == retrieval.SCORE_PROFILE_DEPTH
     assert len(hits) == 5
     assert len(neighborhood) == 250
     assert hits["archs4_index"].tolist() == neighborhood.head(5)["archs4_index"].tolist()
@@ -200,7 +201,7 @@ def test_only_requested_hits_are_sent_for_network_enrichment(monkeypatch, corpus
         retrieval, "_enrich_hits_from_ncbi_eutils",
         lambda frame, _email: (seen.append(len(frame)) or frame))
     samples = _samples_frame(corpus)
-    hits, neighborhood, _ = retrieval.search_hits_with_neighborhood(
+    hits, neighborhood, _, _ = retrieval.search_hits_with_neighborhood(
         samples, str(samples["sample_id"].iloc[0]), topk=5,
         neighborhood_depth=250, entrez_email="test@example.org",
         enable_biopython_metadata=True)
@@ -443,8 +444,8 @@ def test_cohort_results_match_the_legacy_pooled_row(corpus, size, topk):
     old_ranked["archs4_index"] = old_idx[0].astype(int)
     expected_hits, expected_evidence = retrieval.split_ranked_hits(old_ranked, topk, 250)
 
-    hits, evidence, returned_rows = retrieval.run_cohort_retrieval_with_neighborhood(
-        keys, topk=topk)
+    hits, evidence, returned_rows, _profile = (
+        retrieval.run_cohort_retrieval_with_neighborhood(keys, topk=topk))
     pd.testing.assert_frame_equal(hits, expected_hits, check_exact=True)
     pd.testing.assert_frame_equal(evidence, expected_evidence, check_exact=True)
     np.testing.assert_array_equal(returned_rows, rows)
@@ -549,3 +550,79 @@ def test_the_ai_summary_reports_a_missing_backend_before_it_fetches_anything(mon
     assert "BEDROCK_API_URL" in (ai.unavailable_reason() or "")
     monkeypatch.setattr(ai, "BEDROCK_API_URL", "https://example.invalid/q")
     assert ai.unavailable_reason() is None
+
+
+# --- The score profile and the tie rule (docs/retrieval-results.md) ---------
+
+@pytest.mark.parametrize("topk", [3, 5, 30, 250, 1000])
+def test_requested_hits_do_not_depend_on_how_deep_the_scan_ran(corpus, topk):
+    """The 1,000-deep profile scan must return exactly the top k a k-deep scan does."""
+    samples = _samples_frame(corpus)
+    sample_id = str(samples["sample_id"].iloc[3])
+    direct = retrieval.run_cached_query_retrieval(sample_id, topk)
+    result = retrieval.search_hits_with_neighborhood(
+        samples, sample_id, topk=topk, enable_biopython_metadata=False)
+    pd.testing.assert_frame_equal(result.hits, direct, check_exact=True)
+
+
+def test_profile_is_the_scan_scores_best_first(corpus):
+    samples = _samples_frame(corpus)
+    result = retrieval.search_hits_with_neighborhood(
+        samples, str(samples["sample_id"].iloc[0]), topk=7,
+        enable_biopython_metadata=False)
+    profile = result.profile
+    assert len(profile) == retrieval.SCORE_PROFILE_DEPTH
+    assert all(isinstance(s, float) for s in profile)
+    assert profile[:7] == result.hits["score"].tolist()
+    assert all(a >= b for a, b in zip(profile, profile[1:]))
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 10, 1000])
+def test_exact_score_ties_are_ordered_by_reference_row(k):
+    """Bit-identical profiles score exactly equal; the lower row must rank first.
+
+    The duplicates straddle scan blocks (the block height floor is 2,000 rows),
+    so this also covers ties met in different merges.
+    """
+    rng = np.random.default_rng(11)
+    vecs = rng.normal(size=(5000, 16)).astype(np.float32)
+    query = rng.normal(size=16).astype(np.float32)
+    for row in (4500, 100, 2600):
+        vecs[row] = query * 3.0
+    idx, score = retrieval._topk_cosine_matrix(vecs, query, k=k, block_bytes=1)
+    # At k=1 and k=2 the tie straddles the cut itself, which is where an
+    # unordered partition used to keep an arbitrary member.
+    assert idx[0, :3].tolist() == [100, 2600, 4500][:k]
+    assert len(set(score[0, :min(k, 3)].tolist())) == 1
+
+
+def test_ordered_frames_break_ties_by_reference_row():
+    ranked = pd.DataFrame({"gsm": list("abcd"), "score": [0.5, 0.9, 0.9, 0.9],
+                           "archs4_index": [3, 40, 7, 12]})
+    assert retrieval._ordered(ranked)["gsm"].tolist() == ["c", "d", "b", "a"]
+    assert retrieval.score_profile(ranked, depth=2) == [0.9, 0.9]
+
+
+def test_reference_vectors_are_unit_rows_in_the_order_asked(corpus):
+    vecs, _, _ = retrieval._load_archs4_index()
+    asked = [17, 3, 3, 999]
+    got = retrieval.reference_vectors(asked)
+    raw = np.asarray(vecs[[17, 3, 3, 999]], dtype=np.float64)
+    expected = raw / np.linalg.norm(raw, axis=1, keepdims=True)
+    np.testing.assert_allclose(got, expected, rtol=0, atol=1e-12)
+    assert retrieval.reference_vectors([]).shape == (0, 0)
+
+
+def test_cohort_and_upload_paths_return_their_profiles(corpus, monkeypatch):
+    from tests.test_cohorts import _cohort_keys  # noqa: PLC0415
+
+    cohort = retrieval.run_cohort_retrieval_with_neighborhood(
+        _cohort_keys(corpus, 3), topk=4)
+    assert len(cohort.profile) == retrieval.SCORE_PROFILE_DEPTH
+    assert cohort.profile[:4] == cohort.hits["score"].tolist()
+
+    q = retrieval.cached_query_vector(str(_samples_frame(corpus)["sample_id"].iloc[1]))
+    monkeypatch.setattr(retrieval, "embed_uploaded_counts", lambda *_a, **_k: q)
+    upload = retrieval.run_uploaded_retrieval_with_neighborhood(
+        "ignored.csv", "s", topk=4, enable_biopython_metadata=False)
+    assert upload.profile[:4] == upload.hits["score"].tolist()
