@@ -369,6 +369,14 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     both_b = ranks(page, headers.index("Rank B"))
     c.ok(len(both_a) == len(both_b) > 0, "Both keeps rows ranked by both cohorts")
     shot(page, "05-comparison-both")
+    # The retrieved-by options carry cohort names, which pushed the page
+    # sideways at narrow widths until they were allowed to wrap.
+    for width in (900, 390):
+        page.set_viewport_size({"width": width, "height": 900})
+        settle(page, 700)
+        c.ok(no_page_overflow(page), f"a comparison has no horizontal page scroll at {width}px")
+        shot(page, f"06-comparison-{width}")
+    page.set_viewport_size({"width": 1680, "height": 1010})
 
     print("\n[console]")
     real = [e for e in console_errors if "favicon" not in e]

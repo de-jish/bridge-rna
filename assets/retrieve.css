@@ -1277,6 +1277,15 @@ summary:focus-visible,
 .results-seg .dash-options-list-option:focus-within {
   outline: 2px solid var(--focus-ring); outline-offset: 1px;
 }
+/* A wide filter's options can carry cohort names ("Only Liver · Basal
+   Control"), so they wrap rather than push the page sideways: unwrapped, a
+   comparison scrolled to 1,008 px at 900 and 522 px at 390. Found by
+   e2e_cohort_check.py in the browser-suites session. */
+.results-filter--wide .results-seg:not(.results-seg--mini) { flex-wrap: wrap; }
+.results-filter--wide .results-seg:not(.results-seg--mini) .dash-options-list-option {
+  white-space: normal;
+  text-align: center;
+}
 .results-seg--mini { padding: 2px; }
 .results-seg--mini .dash-options-list-option { padding: 1px 8px; font-size: 11.5px; }
 
