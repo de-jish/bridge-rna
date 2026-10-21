@@ -615,7 +615,7 @@ The OSDR overlay is always a white-ringed `diamond`, so the 2,108 spaceflight sa
 
 | candidate | worst contrast vs a categorical hue |
 | --- | --- |
-| `#2b7fff` (network cohort A) | **1.03:1** vs `#3987e5`, the 155,761-point Blood / immune bucket |
+| `#2b7fff` (network cohort A) | **1.03:1** vs `#3987e5`, the 155,757-point Blood / immune bucket |
 | `#d9791b` (network cohort B) | **1.00:1** vs `#9085e9` |
 | `#0bab9f` (network shared) | **1.07:1** vs `#c98500` |
 | `#ffffff` | **3.07:1** worst case, 16.9:1 vs `PLOT_BG` |
@@ -662,21 +662,21 @@ ARCHS4 has no curated tissue column at all; the signal is in GEO free text.
 Measured over `cache/archs4_metadata.parquet`: 90,449 distinct lowercased `source_name` values, and 433,961 samples carrying a `tissue:` key inside `characteristics` with 8,886 distinct lowercased values.
 `derive_tissue` reads eleven characteristics keys best-evidence-first (`tissue`, `organ`, `organ part`, `source tissue`, `tissue type`, `tissue region`, `anatomical site`, `body site`, `cell type`, `celltype`, `cell line`) and falls back to `source_name`; `cell type` is deliberately near the end because it often carries a cell-line name where `tissue` would have carried an organ.
 
-**851,881 of 940,455 ARCHS4 samples - 90.6% - land in a bucket other than `Other` or `Unknown`.**
+**852,341 of 940,455 ARCHS4 samples - 90.6% - land in a bucket other than `Other` or `Unknown`.**
 Top buckets over ARCHS4:
 
 | bucket | n | % of ARCHS4 |
 | --- | --- | --- |
-| Blood / immune | 155,761 | 16.6% |
-| Brain / CNS | 103,182 | 11.0% |
-| Other | 87,692 | 9.3% |
-| Embryo / stem cell | 67,408 | 7.2% |
+| Blood / immune | 155,757 | 16.6% |
+| Brain / CNS | 102,634 | 10.9% |
+| Other | 87,232 | 9.3% |
+| Embryo / stem cell | 66,353 | 7.1% |
 | Liver | 55,242 | 5.9% |
-| Tumor / cancer | 53,117 | 5.6% |
+| Tumor / cancer | 52,657 | 5.6% |
 | Lung | 40,710 | 4.3% |
 | Intestine | 35,318 | 3.8% |
 | Bone marrow | 34,409 | 3.7% |
-| Cultured cells | 32,042 | 3.4% |
+| Cultured cells | 31,930 | 3.4% |
 | Breast / mammary | 31,499 | 3.3% |
 
 The `Tissue` color-by therefore covers **942,563 of 942,563 points, 100%**.
