@@ -338,7 +338,7 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
          "returning from the map repaints the same results")
 
     print("\n[narrow layout]")
-    for width in (1180, 900, 390):
+    for width in (1180, 900, 390, 320):
         page.set_viewport_size({"width": width, "height": 900})
         settle(page, 700)
         c.ok(no_page_overflow(page), f"no horizontal page scroll at {width}px")
@@ -371,7 +371,7 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     shot(page, "05-comparison-both")
     # The retrieved-by options carry cohort names, which pushed the page
     # sideways at narrow widths until they were allowed to wrap.
-    for width in (900, 390):
+    for width in (900, 390, 320):
         page.set_viewport_size({"width": width, "height": 900})
         settle(page, 700)
         c.ok(no_page_overflow(page), f"a comparison has no horizontal page scroll at {width}px")

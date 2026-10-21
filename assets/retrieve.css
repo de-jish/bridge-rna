@@ -1139,9 +1139,13 @@ summary:focus-visible,
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
+/* Sized to its rows, capped at the column: a five-match result used to sit
+   in a 700 px panel that was mostly empty, with the plot pushed below the
+   fold. Now few rows let the plot rise into view, and a full page still
+   scrolls inside the table frame with the head and pager in place. */
 .results-panel {
   flex: none;
-  height: max(520px, calc(100% - 96px));
+  max-height: max(520px, calc(100% - 96px));
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -1292,8 +1296,8 @@ summary:focus-visible,
 /* --- The table -------------------------------------------------------------- */
 
 .results-table-wrap {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 1 auto;
+  min-height: 160px;
   overflow: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
@@ -1502,7 +1506,7 @@ summary:focus-visible,
 
 @media (max-width: 1180px) {
   .results-workspace { overflow: visible; }
-  .results-panel { height: auto; }
+  .results-panel { max-height: none; }
   .results-table-wrap { flex: none; max-height: 70vh; }
 }
 
@@ -1511,7 +1515,9 @@ summary:focus-visible,
   .results-filter,
   .results-filter--wide,
   .results-filter--grow { flex: 1 1 100%; max-width: none; }
-  .results-seg--plot { width: 100%; }
+  /* Four options do not fit beside each other at 320 px; "Network" was
+     pushed 50 px past the edge. They wrap to a second row instead. */
+  .results-seg--plot { width: 100%; flex-wrap: wrap; }
   .results-seg--plot .dash-options-list-option { flex: 1 1 auto; padding: 6px 8px; }
   .results-actions { flex-wrap: wrap; }
 }
