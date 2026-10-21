@@ -588,11 +588,16 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
         Output("see-on-map", "style"),
         Output("see-on-map", "children"),
         Input("hits-store", "data"),
-        # Not prevented: this is also how a view rebuilt by the router, after a
-        # visit to the map, repaints the table from the session's hits-store.
+        # The view's own panel, as a trigger. After a client-side route change
+        # Dash reruns a callback only when one of its *inputs* is newly
+        # mounted, and hits-store lives on the shell, which never remounts - so
+        # with hits-store alone, coming back from the map showed an empty table
+        # beside 472 KB of results still sitting in session storage. Measured
+        # in the browser before this input was added.
+        Input("results-panel", "id"),
         prevent_initial_call="initial_duplicate",
     )
-    def derive_results(payload):
+    def derive_results(payload, _mounted):
         defaults = R.default_filters()
         reset = [
             defaults["series"], defaults["series_mode"], defaults["tissue"],

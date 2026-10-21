@@ -74,8 +74,18 @@ def settle(page, ms: int = 900) -> None:
 
 
 def choose(page, dropdown_id: str, text: str, exact: bool = False) -> None:
+    """Pick an option by typing it into the dropdown's search box.
+
+    Typed, not scrolled to: a series list at k=1,000 holds 140 options and
+    Dash 4 renders only the visible part of it, so the text of an option far
+    down the list is simply not in the page until the list is narrowed.
+    """
     page.locator(f"#{dropdown_id}").click()
     page.wait_for_timeout(400)
+    search = page.locator(".dash-dropdown-content .dash-dropdown-search")
+    if search.count():
+        search.first.fill(text)
+        page.wait_for_timeout(400)
     page.locator(".dash-dropdown-content").get_by_text(text, exact=exact).first.click()
     page.keyboard.press("Escape")
     settle(page, 1200)
