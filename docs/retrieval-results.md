@@ -182,6 +182,64 @@ It summarizes the first 20 filtered rows in table order and says so ("Summarizin
 GEO enrichment runs only on those 20.
 Before this, the prompt silently kept the first 20 hits while enrichment fetched every hit, which at k=1,000 would have been a thousand network round trips.
 
+## Contracts
+
+These are fixed before the parallel work starts, so the pure modules and the integration can be built at the same time.
+
+### `results-store`
+
+```python
+{
+  "mode": "cached" | "precomputed" | "demo" | "uploaded" | "cohort",
+  "k": int,                      # matches requested per query
+  "comparison": bool,            # a cohort A/B comparison
+  "label_a": str, "label_b": str,  # query or cohort names ("" for b when single)
+  "query_id": str,               # hits-store["sample_id"], for export provenance
+  "reference_count": int,        # 940,455 on the real corpus
+  "profile_a": [float, ...],     # top-1,000 scores, best first (shorter for demo)
+  "profile_b": [float, ...],     # [] when not a comparison
+  "rows": [Row, ...],            # best rank first: min(rank_a, rank_b), then archs4_index
+}
+
+Row = {
+  "gsm": str, "gse": str, "title": str, "source_name": str,
+  "tissue": str, "species": str,          # "" when unknown
+  "archs4_index": int | None,             # None on the demo path
+  "rank_a": int | None, "score_a": float | None,  # None: not in A's top k
+  "rank_b": int | None, "score_b": float | None,  # always None when single
+  "identical": [str, ...],                # other GSMs in these rows with an identical profile
+}
+```
+
+For a single query every row has `rank_a` 1..k contiguous.
+For a comparison the rows are the union of both top-k lists, joined on GSM.
+
+### Filters, sort and page
+
+```python
+Filters = {
+  "series": [str],                 # GSE accessions; empty means no series filter
+  "series_mode": "only" | "hide",
+  "tissue": [str], "species": [str],  # empty means all
+  "min_score": float | None,       # a row passes if its best present score >= this
+  "text": str,                     # case-insensitive substring of gsm, gse, title, source_name
+  "merge_identical": bool,
+  "retrieved_by": "either" | "both" | "a" | "b",  # "a" means A and not B
+}
+Sort = {"column": "rank_a" | "score_a" | "rank_b" | "score_b" | "gsm" | "gse"
+                   | "title" | "tissue" | "species",
+        "descending": bool}
+```
+
+Filters apply first and merging second, so a twin survives when its better-ranked copy was filtered out.
+Sorting never renumbers ranks, and a row with no value in the sort column goes last in either direction.
+Ties in any sort column fall back to best rank.
+
+### Figures
+
+Every result figure carries `customdata` rows of `[kind, node_id]`, where `kind` is `"gsm"` or `"gse"`, matching the network.
+The existing `select_node` callback reads only that, so it serves every plot.
+
 ## Out of scope
 
 The Compare tab and whitening (PRs #2 and #3), a mini map, saved shortlists, and any claim that a tissue or series is over- or under-represented.
