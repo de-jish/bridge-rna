@@ -50,16 +50,28 @@ STUDY = "OSD-137"
 # definition; the picker opens on its largest, which is what gets searched.
 SWEEP = [("OSD-101", 5), ("OSD-104", 12), ("OSD-168", 25)]
 
-NETWORK_READY_JS = """() => {
-  const gd = document.querySelector('#network-graph .js-plotly-plot');
-  if (!gd || !gd._fullData || !gd._fullData.length) return false;
-  return gd._fullData.some(t => t.customdata && t.customdata.length);
-}"""
+# The match table replaced the retrieval network as the result surface on
+# 2026-10-21. The network survives as one of four plot views under the table
+# (`#results-plot`, chosen with `#results-plot-kind`), so the node checks below
+# switch to it first; which GSMs were retrieved is read off the table.
+TABLE_GSMS_JS = """() => [...document.querySelectorAll(
+  '#results-table-wrap tr.result-row')].map(tr => tr.dataset.gsm)"""
+
+# One row per match, with each rank and score cell as the table prints it.
+# A blank rank is "not in that cohort's top k", rendered as visually hidden text.
+TABLE_ROWS_JS = """() => [...document.querySelectorAll(
+  '#results-table-wrap tr.result-row')].map(tr => {
+    const cell = k => tr.querySelector('td.col-' + k);
+    const read = k => { const td = cell(k);
+      return td && !td.classList.contains('is-missing') ? td.innerText.trim() : null; };
+    return {gsm: tr.dataset.gsm, rank_a: read('rank_a'), score_a: read('score_a'),
+            rank_b: read('rank_b'), score_b: read('score_b')};
+  })"""
 
 # Every node the network drew, by kind, read out of what Plotly is rendering
 # rather than out of what the callback returned.
 NODES_JS = """() => {
-  const gd = document.querySelector('#network-graph .js-plotly-plot');
+  const gd = document.querySelector('#results-plot .js-plotly-plot');
   if (!gd || !gd._fullData) return null;
   const out = {};
   for (const t of gd._fullData) {
@@ -85,7 +97,7 @@ INSPECTOR_FIT_JS = """() => {
 }"""
 
 QUERY_NODE_JS = """() => {
-  const gd = document.querySelector('#network-graph .js-plotly-plot');
+  const gd = document.querySelector('#results-plot .js-plotly-plot');
   if (!gd || !gd._fullData) return null;
   for (const t of gd._fullData) {
     if (!t.customdata) continue;
@@ -274,31 +286,120 @@ def banner(page) -> str:
     return page.locator("#search-status").inner_text().replace("\n", " ")
 
 
-def _topk_handle(page):
-    """Dash 4 renders dcc.Slider as a radix slider plus a *hidden* number input.
-
-    So the number box cannot be filled - Playwright refuses to type into an
-    invisible element, correctly - and the handle is driven by keyboard instead,
-    which is exact where dragging by pixel offset is not.
-    """
-    return page.locator("#topk-slider [role=slider]").first
-
-
 def topk_value(page) -> int:
-    return int(_topk_handle(page).get_attribute("aria-valuenow"))
+    """The exact k, which the number box beside the log slider holds.
+
+    The slider moves in log10(k) from 3 to 1,000 since 2026-10-21, so its
+    `aria-valuenow` is a logarithm and stepping it with arrow keys moves k by
+    a fraction of a percent; the box is the control that takes an exact k.
+    """
+    return int(page.locator("#topk-input").input_value())
 
 
 def set_topk(page, k: int) -> None:
-    handle = _topk_handle(page)
-    handle.focus()
-    current = topk_value(page)
-    key = "ArrowRight" if k > current else "ArrowLeft"
-    for _ in range(abs(k - current)):
-        page.keyboard.press(key)
-    page.wait_for_timeout(800)
+    box = page.locator("#topk-input")
+    box.fill(str(k))
+    # The box debounces, so the value is published on Enter or blur, the way a
+    # keyboard user commits it; `sync_match_count` then moves the slider.
+    box.press("Enter")
+    page.wait_for_function(
+        """k => { const s = document.querySelector('#topk-slider [role=slider]');
+                  return s && Math.abs(Math.pow(10, +s.getAttribute('aria-valuenow')) - k)
+                              < Math.max(0.6, k * 0.01); }""",
+        arg=k, timeout=30_000)
     got = topk_value(page)
     if got != k:
         raise AssertionError(f"could not set top-k to {k}, stuck at {got}")
+
+
+def _results_update(output: str):
+    """Match the completed results callback a new result (not a filter) caused."""
+    def matches(response) -> bool:
+        if (response.request.method != "POST"
+                or "/_dash-update-component" not in response.url):
+            return False
+        try:
+            payload = response.request.post_data_json or {}
+        except Exception:
+            return False
+        return (output in str(payload.get("output", ""))
+                and "results-store.data" in payload.get("changedPropIds", []))
+    return matches
+
+
+def _plot_update(changed_prop: str):
+    """Match the completed results-plot callback one interaction caused."""
+    def matches(response) -> bool:
+        if (response.request.method != "POST"
+                or "/_dash-update-component" not in response.url):
+            return False
+        try:
+            payload = response.request.post_data_json or {}
+        except Exception:
+            return False
+        return ("results-plot.figure" in str(payload.get("output", ""))
+                and changed_prop in payload.get("changedPropIds", []))
+    return matches
+
+
+def settle_table(page, response) -> list[str]:
+    """Wait until the table shows the rows the awaited response was built from.
+
+    The rows come from the request's own `results-store` input rather than from
+    the DOM before and after, so two searches with the same answer cannot pass
+    on the first one's table. The table pages at 50, best rank first.
+    """
+    rows: list = []
+    for item in (response.request.post_data_json or {}).get("inputs", []):
+        if (isinstance(item, dict) and item.get("id") == "results-store"
+                and item.get("property") == "data"):
+            rows = (item.get("value") or {}).get("rows") or []
+    expected = [str(r.get("gsm")) for r in rows]
+    page.wait_for_function(
+        """exp => { const got = [...document.querySelectorAll(
+                      '#results-table-wrap tr.result-row')].map(tr => tr.dataset.gsm);
+                    if (got.length !== Math.min(exp.length, 50)) return false;
+                    const want = new Set(exp);
+                    return got.every(g => want.has(g)); }""",
+        arg=expected, timeout=60_000)
+    return expected
+
+
+def settle_plot(page, response) -> None:
+    """Wait until Plotly is drawing the figure the awaited response carried."""
+    figure = response.json()["response"]["results-plot"]["figure"]
+    expected = [t.get("customdata") for t in figure.get("data", [])]
+    page.wait_for_function(
+        """exp => { const gd = document.querySelector('#results-plot .js-plotly-plot');
+                    if (!gd || !gd.data) return false;
+                    return JSON.stringify(gd.data.map(t => t.customdata || null))
+                        === JSON.stringify(exp.map(c => c || null)); }""",
+        arg=expected, timeout=60_000)
+
+
+def show_plot(page, label: str) -> None:
+    """Choose one of the four plot views and wait for it to be drawn."""
+    option = page.locator(
+        f"#results-plot-kind .dash-options-list-option:has-text('{label}')").first
+    if option.locator("input").is_checked():
+        return
+    with page.expect_response(_plot_update("results-plot-kind.value"),
+                              timeout=90_000) as plot_info:
+        option.click()
+    settle_plot(page, plot_info.value)
+    page.wait_for_timeout(300)
+
+
+def query_node(page):
+    """Pixel centre of the query star, with the plot scrolled into view.
+
+    The plot sits below the match table in a workspace that scrolls on its
+    own, so the star can be laid out below the fold, where a mouse click lands
+    on nothing.
+    """
+    page.locator("#results-plot").scroll_into_view_if_needed()
+    page.wait_for_timeout(300)
+    return page.evaluate(QUERY_NODE_JS)
 
 
 def offer_count(text: str) -> int:
@@ -329,15 +430,16 @@ def wait_for_map(page) -> None:
 def run_cohort_search(page, c: "Checks", timeout: int = 180_000) -> float:
     """Click Search and wait for *this* search, not for evidence of any search.
 
-    The obvious predicates - "the network has nodes", "the running indicator is
+    The obvious predicates - "the table has rows", "the running indicator is
     empty" - are both already true the moment a second search starts, because
-    the first one left a network on screen and an idle spinner. Waiting on them
+    the first one left a table on screen and an idle spinner. Waiting on them
     returns immediately and the caller then reads the *previous* result's
     banner, which is exactly how the comparison step first appeared to fail
     while the app was doing the right thing.
 
-    Wait for this callback's response and inspect its payload. The running
-    indicator and graph then settle before the visible result is read.
+    Wait for this callback's response and inspect its payload, then for the
+    table and the plot that response caused. The running indicator then settles
+    before the visible result is read.
     """
     t0 = time.time()
     def is_cohort_response(response):
@@ -346,7 +448,11 @@ def run_cohort_search(page, c: "Checks", timeout: int = 180_000) -> float:
         request = response.request.post_data_json or {}
         return "cohort-search-button.n_clicks" in request.get("changedPropIds", [])
 
-    with page.expect_response(is_cohort_response, timeout=timeout) as response_info:
+    with page.expect_response(is_cohort_response, timeout=timeout) as response_info, \
+            page.expect_response(_results_update("results-table-wrap.children"),
+                                 timeout=timeout) as table_info, \
+            page.expect_response(_results_update("results-plot.figure"),
+                                 timeout=timeout) as plot_info:
         page.locator("#cohort-search-button").click()
     payload = response_info.value.json()["response"]["hits-store"]["data"] or {}
     c.ok(bool(payload and payload.get("hits")), "the cohort response carries retrieved hits")
@@ -354,7 +460,8 @@ def run_cohort_search(page, c: "Checks", timeout: int = 180_000) -> float:
          "neither cohort result carries retired stability diagnostics")
     c.ok(page.locator("#stability-panel").count() == 0,
          "retrieval does not restore the retired stability panel")
-    page.wait_for_function(NETWORK_READY_JS, timeout=timeout)
+    settle_table(page, table_info.value)
+    settle_plot(page, plot_info.value)
     page.wait_for_function(
         "() => { const el = document.querySelector('#cohort-running-indicator');"
         " return el && !el.innerText.trim(); }", timeout=timeout)
@@ -400,8 +507,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"no search ran at page load: {msg[:70]!r}")
     c.ok(not msg.strip(), "the status area stays empty before a search")
     c.ok("Select an OSDR sample, then run a search." in
-         page.locator("#network-graph").inner_text(),
-         "the empty network gives the next step")
+         page.locator("#results-plot").inner_text(),
+         "the empty plot gives the next step")
     shot(page, "01-sample-mode")
 
     # ---- 2. defining a cohort --------------------------------------
@@ -467,6 +574,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
 
     # ---- 4. a pooled search ----------------------------------------
     print("\n=== 4. pooling and searching ===")
+    cohort_label = page.locator("#cohort-dropdown").inner_text().strip()
     secs = run_cohort_search(page, c)
     depth = topk_value(page)
     msg = banner(page)
@@ -477,21 +585,37 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok("pooled samples" in msg, "and says how many samples went in")
     c.ok(STUDY in msg, "and names the cohort rather than one animal")
 
+    listed = page.evaluate(TABLE_GSMS_JS)
+    c.ok(len(listed) == depth,
+         f"the table lists the {depth} matches asked for, saw {len(listed)}")
+    # The network is one of four plot views now, so the node and legend checks
+    # choose it first. It stays chosen for sections 5 and 7, which click nodes.
+    c.ok(not page.locator("#graph-legend").is_visible(),
+         "the network legend is hidden while the default plot is drawn")
+    show_plot(page, "Network")
     nodes = page.evaluate(NODES_JS) or {}
     c.ok(nodes.get("query", 0) == 1,
          f"one pooled query node, saw {nodes.get('query')}")
-    c.ok(nodes.get("gsm", 0) >= 5, f"the hits are drawn: {nodes.get('gsm')}")
+    c.ok(nodes.get("gsm", 0) == depth,
+         f"the network draws the same {depth} hits: {nodes.get('gsm')}")
     legend = page.locator("#graph-legend").inner_text()
     c.ok("Pooled cohort query" in legend,
          f"the legend says a cohort is the query: {legend[:60]!r}")
-    subtitle = page.locator("#canvas-subtitle").inner_text()
-    c.ok("Pooled OSDR cohort" in subtitle,
-         f"so does the subtitle: {subtitle[:60]!r}")
+    # The canvas subtitle that said "Pooled OSDR cohort" went with the canvas;
+    # the sentence above the table now carries its job, by naming the cohort
+    # rather than one animal.
+    summary = page.locator("#results-summary").inner_text()
+    # The picker reads "<label> · N samples[ · low N]", and the label itself
+    # carries " · " between its facets, so strip the size suffix, not a split.
+    named = re.sub(r"\s+·\s+\d+ samples.*$", "", cohort_label).strip()
+    c.ok(bool(named) and named in summary
+         and "ranked by embedding cosine similarity" in summary,
+         f"so does the summary over the table: {summary[:80]!r}")
     shot(page, "04-pooled-search")
 
     # ---- 5. the inspector ------------------------------------------
     print("\n=== 5. the inspector describes a group ===")
-    pos = page.evaluate(QUERY_NODE_JS)
+    pos = query_node(page)
     if c.ok(pos is not None, "the query node is locatable"):
         page.mouse.click(pos["x"], pos["y"])
         page.wait_for_timeout(1500)
@@ -579,10 +703,12 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     }""")
     c.ok(bounds, "both cohort definitions fit visibly in the desktop inspector")
     shot(page, "06-both-cohorts")
-    hit = page.evaluate(QUERY_NODE_JS.replace("!== 'query'", "!== 'gsm'"))
-    c.ok(hit is not None, "a match is available for inspector interaction")
-    if hit:
-        page.mouse.click(hit["x"], hit["y"])
+    # A match is opened from the table, the way a user does now; the query
+    # star below is still the network's, which section 4 left on screen.
+    hit = page.locator("#results-table-wrap tr.result-row").first
+    c.ok(hit.count() == 1, "a match is available for inspector interaction")
+    if hit.count():
+        hit.locator("td.col-title").click()
         page.locator(".comparison-selected-details").wait_for(state="visible", timeout=60000)
         c.ok(paired.count() == 2 and page.locator(".comparison-cohort[open]").count() == 0,
              "both cohort summaries remain above selected match metadata")
@@ -593,7 +719,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         summary_b.press("Enter")
         c.ok(paired.nth(1).get_attribute("open") is not None,
              "Cohort B definitions expand from the keyboard while inspecting a match")
-        pos = page.evaluate(QUERY_NODE_JS)
+        pos = query_node(page)
         page.mouse.click(pos["x"], pos["y"])
         page.wait_for_function("document.querySelectorAll('.comparison-cohort[open]').length === 2")
 
@@ -631,13 +757,32 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok("edge width" not in legend.lower(),
          "the legend no longer claims width measures cosine similarity")
     widths = page.evaluate("""() => {
-      const gd = document.querySelector('#network-graph .js-plotly-plot');
+      const gd = document.querySelector('#results-plot .js-plotly-plot');
       return [...new Set(gd._fullData.filter(t => t.mode === 'lines')
         .map(t => t.line.width))];
     }""")
     c.ok(widths == [3], "every rendered comparison edge has the same 3px width")
-    subtitle = page.locator("#canvas-subtitle").inner_text()
-    c.ok("Two pooled cohorts" in subtitle, "so does the subtitle")
+    # The canvas subtitle ("Two pooled cohorts searched separately") went with
+    # the canvas. Its job now belongs to the sentence over the table, and the
+    # table itself shows the two arms as two rank columns.
+    summary = page.locator("#results-summary").inner_text()
+    c.ok("across both cohorts" in summary,
+         f"so does the summary over the table: {summary[:80]!r}")
+    headers = [h.strip() for h in page.locator(
+        "#results-table-wrap thead th").all_inner_texts()]
+    c.ok(headers[:4] == ["Rank A", "Score A", "Rank B", "Score B"],
+         f"the table carries each cohort's own rank and score: {headers}")
+    c.ok(page.locator("#filter-retrieved-by-group").is_visible(),
+         "and offers the retrieved-by filter that only a comparison has")
+    table = page.evaluate(TABLE_ROWS_JS)
+    both = [r for r in table if r["rank_a"] and r["rank_b"]]
+    shared_banner = shared_count(page)
+    c.ok(len(both) == shared_banner,
+         f"rows ranked by both cohorts are the banner's shared hits: "
+         f"{len(both)} against {shared_banner}")
+    c.ok(all((r["rank_a"] is None) == (r["score_a"] is None)
+             and (r["rank_b"] is None) == (r["score_b"] is None) for r in table),
+         "a rank and its score are blank together, never one without the other")
 
     # Cohort roles remain explicit in the combined inspector.
     # .details-kicker is uppercased by CSS, so read it case-insensitively
@@ -1065,9 +1210,9 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         c.ok("pooled mean" in msg,
              f"{study} at k={topk} answered from the pooled path "
              f"({secs:.1f}s): {label.strip()[:44]!r}")
-        nodes = page.evaluate(NODES_JS) or {}
-        c.ok(nodes.get("gsm", 0) == topk,
-             f"and drew exactly {topk} hits, saw {nodes.get('gsm')}")
+        listed = page.evaluate(TABLE_GSMS_JS)
+        c.ok(len(listed) == topk and len(set(listed)) == topk,
+             f"and listed exactly {topk} distinct hits, saw {len(listed)}")
         page.locator("#see-on-map").click()
         wait_for_map(page)
         drawn = page.evaluate(MAP_QUERY_JS) or {}

@@ -25,10 +25,16 @@ async def check(url: str, out: Path):
         ai_started, release_ai = asyncio.Event(), asyncio.Event()
         cleared = asyncio.Event()
 
+        # Since 2026-10-21 the button feeds a clientside callback that writes
+        # `ai-request-store` with only the rows in view, and the server
+        # generates from that store, so the generating request is the one the
+        # store changed. A new result clears the panel through either
+        # `hits-store.modified_timestamp` or `results-visible-store.data`;
+        # while a generation is in flight Dash reports only the second.
         async def handle_request(route):
             payload = route.request.post_data_json
             if ("ai-summary-output" in payload.get("output", "")
-                    and "ai-summary-button.n_clicks" in payload.get("changedPropIds", [])):
+                    and "ai-request-store.data" in payload.get("changedPropIds", [])):
                 ai_started.set()
                 await release_ai.wait()
                 await route.fulfill(content_type="application/json", body=json.dumps({
@@ -43,14 +49,18 @@ async def check(url: str, out: Path):
             if response.request.method != "POST":
                 return
             payload = response.request.post_data_json or {}
+            changed = payload.get("changedPropIds", [])
             if ("ai-summary-output" in payload.get("output", "")
-                    and "hits-store.data" in payload.get("changedPropIds", [])):
+                    and ("hits-store.modified_timestamp" in changed
+                         or "results-visible-store.data" in changed)):
                 cleared.set()
 
         await page.route("**/_dash-update-component", handle_request)
         page.on("response", response_received)
         await page.goto(url)
-        await expect(page.locator("#sample-preview")).to_contain_text("Mmus")
+        # The first paint reads the OSDR catalog; on a loaded machine that is
+        # well past the 5 s default, which is not what this check is about.
+        await expect(page.locator("#sample-preview")).to_contain_text("Mmus", timeout=60000)
         await expect(page.locator("#search-status")).to_be_empty()
         ai = page.locator(".ai-panel")
         assert await ai.get_attribute("open") is None
@@ -61,8 +71,11 @@ async def check(url: str, out: Path):
         await ai.locator("summary").click()
         await page.screenshot(path=str(out / "after-retrieve.png"))
 
+        # The table's first paint publishes an empty visible-row list, which
+        # clears the panel before any search; only a clear after it counts.
+        cleared.clear()
         await page.locator("#search-button").click()
-        await expect(page.locator("#search-status")).to_contain_text("Retrieved", timeout=60000)
+        await expect(page.locator("#search-status")).to_contain_text("Retrieved", timeout=180000)
         await expect(page.locator("#details-panel a[title*='OSDR']").first).to_be_visible(timeout=60000)
         await asyncio.wait_for(cleared.wait(), 30)
         await page.screenshot(path=str(out / "after-results.png"))
@@ -73,7 +86,7 @@ async def check(url: str, out: Path):
         await asyncio.wait_for(ai_started.wait(), 10)
         cleared.clear()
         await page.locator("#search-button").click()
-        await asyncio.wait_for(cleared.wait(), 60)
+        await asyncio.wait_for(cleared.wait(), 180)
         release_ai.set()
         await page.wait_for_timeout(1500)
         await expect(page.locator("#ai-summary-output")).to_be_empty()
@@ -81,13 +94,17 @@ async def check(url: str, out: Path):
         print("PASS: keyboard disclosure, source link, late AI response invalidation", flush=True)
         await ai.locator("summary").click()
 
+        # The network canvas became one of four plots under the match table on
+        # 2026-10-21; its PNG export is the results plot's now, on whichever
+        # view is shown (Score by rank by default).
         async with page.expect_download() as download_info:
-            await page.locator("#network-graph").get_by_role(
+            await page.locator("#results-plot").get_by_role(
                 "button", name="Download plot as a PNG").click()
         download = await download_info.value
-        await download.save_as(str(out / "network-export.png"))
-        assert (out / "network-export.png").stat().st_size > 1000
-        print("PASS: existing network PNG export", flush=True)
+        assert download.suggested_filename.endswith(".png"), download.suggested_filename
+        await download.save_as(str(out / "results-plot-export.png"))
+        assert (out / "results-plot-export.png").stat().st_size > 1000
+        print("PASS: results plot PNG export", flush=True)
         await expect(page.get_by_text("Snapshot succeeded", exact=False).first).not_to_be_visible(
             timeout=20000)
 

@@ -1295,7 +1295,12 @@ summary:focus-visible,
 
 /* --- The table -------------------------------------------------------------- */
 
+/* `position: relative` contains the visually hidden "Not in top k" labels in
+   a comparison's blank cells: they are absolutely positioned, and with no
+   positioned ancestor they escaped this scroller and widened a 320 px page to
+   328 px (found by e2e_cohort_check.py). */
 .results-table-wrap {
+  position: relative;
   flex: 0 1 auto;
   min-height: 160px;
   overflow: auto;

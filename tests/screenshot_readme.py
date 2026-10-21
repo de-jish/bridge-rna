@@ -8,7 +8,8 @@ not accept a fixed viewport. Both views are fixed-height instruments that scroll
 internally (`assets/01-shell.css`), so a viewport shorter than the content does
 not produce a scrollable page: it produces a *silently clipped* one. The
 shipped `docs/bridge-rna-interface.png` was clipped that way, losing 410 px of
-the inspector and the bottom of the retrieval network.
+the inspector and the bottom of the retrieval network, which was then the
+whole results canvas.
 
 So both ways a frame can be cut are measured rather than assumed, and they need
 different instruments.
@@ -141,7 +142,7 @@ EDGE_INK_JS = """async ([selector, band, tol]) => {
   const d = ctx.getImageData(0, 0, c.width, c.height).data;
   const at = (x, y) => { const i = (y * c.width + x) * 4; return [d[i], d[i+1], d[i+2]]; };
   // The paper colour, taken from the figure rather than assumed, so this works
-  // on the map's navy canvas and the retrieval network's white one alike.
+  // on the map's navy canvas and the retrieval plot's white one alike.
   const bg = at(1, 1);
   let ink = 0, total = 0, worst = null, allInk = 0;
   for (let y = 0; y < c.height; y++) {
@@ -164,8 +165,19 @@ EDGE_INK_JS = """async ([selector, band, tol]) => {
 }"""
 
 
+# Scroll containers that overflow by design, at every window height, so growing
+# the window can never fit them. Since 2026-10-21 the retrieval workspace sizes
+# the Matches panel to the window (`.results-panel` is `max(520px, 100% - 96px)`
+# tall in assets/retrieve.css) and lets the plot's head show below it, so the
+# plot is reached by scrolling the workspace whatever the height: measured, the
+# overflow stayed at +373 px from 1,010 to 2,201 px tall. Every other container,
+# the inspector included, must still fit.
+BY_DESIGN_SCROLLERS = ("results-workspace",)
+
+
 def overflow_report(page) -> list[dict]:
-    return page.evaluate(OVERFLOW_JS)
+    return [o for o in page.evaluate(OVERFLOW_JS)
+            if not any(c in o["cls"].split() for c in BY_DESIGN_SCROLLERS)]
 
 
 def describe(over: list[dict]) -> str:
@@ -308,24 +320,16 @@ def set_colorby(page, text: str):
     page.wait_for_timeout(600)
 
 
-def top_hit_xy(page):
-    """Pixel centre of the highest-scoring ARCHS4 hit in the network."""
-    return page.evaluate(
-        """() => {
-          const gd = document.querySelector('#network-graph .js-plotly-plot');
-          if (!gd || !gd._fullData) return null;
-          const t = gd._fullData[gd._fullData.length - 1];
-          if (!t || !t.customdata) return null;
-          for (let i = 0; i < t.customdata.length; i++) {
-            if (t.customdata[i][0] !== 'gsm') continue;
-            const xa = gd._fullLayout.xaxis, ya = gd._fullLayout.yaxis;
-            const r = gd.getBoundingClientRect();
-            return {x: r.left + xa._offset + xa.l2p(t.x[i]),
-                    y: r.top + ya._offset + ya.l2p(t.y[i]),
-                    label: t.customdata[i][1]};
-          }
-          return null;
-        }""")
+# A search has landed when the match table lists its rows and the default plot,
+# Score by rank, marks the same number of retrieved matches. The table replaced
+# the retrieval network as the result surface on 2026-10-21.
+RESULTS_READY_JS = """() => {
+  const rows = document.querySelectorAll('#results-table-wrap tr.result-row');
+  const gd = document.querySelector('#results-plot .js-plotly-plot');
+  if (!rows.length || !gd || !gd._fullData) return false;
+  return gd._fullData.some(t => t.meta && t.meta.role === 'in_table'
+                                && t.x && t.x.length === rows.length);
+}"""
 
 
 def capture_retrieval(page, base: str, out: Path) -> list[str]:
@@ -342,31 +346,30 @@ def capture_retrieval(page, base: str, out: Path) -> list[str]:
     print("== retrieve: run the search ==", flush=True)
     t0 = time.time()
     page.locator("#search-button").click()
-    page.wait_for_function(
-        "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
-        " if (!gd || !gd._fullData) return false;"
-        " const t = gd._fullData[gd._fullData.length - 1];"
-        " return !!(t && t.customdata && t.customdata.length > 3); }",
-        timeout=180_000)
+    page.wait_for_function(RESULTS_READY_JS, timeout=180_000)
     page.wait_for_timeout(1500)
     status = page.locator("#search-status").inner_text().replace("\n", " ")
     print(f"     {time.time() - t0:.1f}s -> {status[:160]}", flush=True)
 
     print("== retrieve: open the top hit in the inspector ==", flush=True)
-    pos = top_hit_xy(page)
-    if not pos:
-        raise SystemExit("no ARCHS4 hit node in the network")
-    print(f"     clicking {pos['label']}", flush=True)
-    page.mouse.click(pos["x"], pos["y"])
+    # The table is in rank order, so its first row is the highest-scoring hit.
+    top = page.locator("#results-table-wrap tr.result-row").first
+    if not top.count():
+        raise SystemExit("no ARCHS4 match in the table")
+    print(f"     clicking {top.get_attribute('data-gsm')}", flush=True)
+    top.locator("td.col-title").click()
     page.wait_for_function(
         "() => { const d = document.querySelector('#details-panel');"
         " return d && d.innerText.includes('GSM'); }", timeout=90_000)
     # The GEO enrichment for the opened hit arrives after the panel does, and it
     # is most of the panel's height - fitting before it lands fits the wrong
-    # content. Wait for the record itself, not for a duration.
+    # content. Wait for the record itself, not for a duration. The section
+    # titles were CSS-uppercased before the HDS restyle of 2026-09-19 and are
+    # not now, so match them as whole lines in either case: "Publication title"
+    # in the query's own panel must not count.
     page.wait_for_function(
         "() => { const d = document.querySelector('#details-panel');"
-        " return d && /PUBLICATION|STUDY CONTEXT/.test(d.innerText); }",
+        " return d && /^(publication|study context)$/im.test(d.innerText); }",
         timeout=90_000)
     page.wait_for_timeout(2500)
 
@@ -376,12 +379,11 @@ def capture_retrieval(page, base: str, out: Path) -> list[str]:
     print("== retrieve: fit the window to the content ==", flush=True)
     fit_viewport(page, settle)
     hits = page.evaluate(
-        """() => { const gd = document.querySelector('#network-graph .js-plotly-plot');
-             const t = gd._fullData[gd._fullData.length - 1];
-             return t.customdata.filter(c => c[0] === 'gsm').map(c => c[1]); }""")
+        """() => [...document.querySelectorAll('#results-table-wrap tr.result-row')]
+                   .map(tr => tr.dataset.gsm)""")
     print(f"     hits on screen: {', '.join(hits)}", flush=True)
     shoot(page, out / "bridge-rna-interface.png")
-    return overflow_report(page), edge_ink(page, "#network-graph .js-plotly-plot")
+    return overflow_report(page), edge_ink(page, "#results-plot .js-plotly-plot")
 
 
 def capture_map(page, base: str, out: Path) -> list[str]:

@@ -16,7 +16,7 @@ Filter them by GEO series, tissue category, species, minimum score or text, merg
 A plot of the same rows shows how fast similarity falls with rank, how the matches cluster, which series they come from, or the classic query-to-study network.
 The inspector links to source records; optional AI interpretation is available under **AI summary**.
 
-![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours and the three GEO studies they came from drawn as a network, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)
+![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours listed by rank with score, GEO series, title, tissue category and species, the score-by-rank curve to depth 1,000 below them, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)
 
 The screenshot above is a real retrieval.
 The query is a mouse left-eye sample, and the studies it pulls back are all mouse retina studies.

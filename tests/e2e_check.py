@@ -64,32 +64,17 @@ COUNT_JS = """() => {
 }"""
 
 
-# The retrieval network is drawn as one node trace after the edge traces, and
-# its customdata carries [kind, node_id, hover] per node - so the last trace
-# having several nodes is the signal that a search has landed.
-NETWORK_READY_JS = """() => {
-  const gd = document.querySelector('#network-graph .js-plotly-plot');
-  if (!gd || !gd._fullData || !gd._fullData.length) return false;
-  const t = gd._fullData[gd._fullData.length - 1];
-  return !!(t && t.customdata && t.customdata.length > 3);
-}"""
-
-# Pixel centre of the first GSM node, via Plotly's own data->pixel transform,
-# so the check clicks the node a user would click.
-GSM_NODE_JS = """() => {
-  const gd = document.querySelector('#network-graph .js-plotly-plot');
-  if (!gd || !gd._fullData) return null;
-  const t = gd._fullData[gd._fullData.length - 1];
-  if (!t || !t.customdata) return null;
-  for (let i = 0; i < t.customdata.length; i++) {
-    if (t.customdata[i][0] !== 'gsm') continue;
-    const xa = gd._fullLayout.xaxis, ya = gd._fullLayout.yaxis;
-    const r = gd.getBoundingClientRect();
-    return {x: r.left + xa._offset + xa.l2p(t.x[i]),
-            y: r.top + ya._offset + ya.l2p(t.y[i]),
-            id: t.customdata[i][1]};
-  }
-  return null;
+# A search has landed when the match table lists its rows and the default plot,
+# Score by rank, marks them. The table replaced the retrieval network as the
+# result surface on 2026-10-21; the network is now one of four plot views and
+# is not drawn unless chosen. The plot's marks carry [kind, node_id] customdata
+# and the "in_table" trace is the retrieved matches, so its length is k.
+RESULTS_READY_JS = """() => {
+  const rows = document.querySelectorAll('#results-table-wrap tr.result-row');
+  const gd = document.querySelector('#results-plot .js-plotly-plot');
+  if (!rows.length || !gd || !gd._fullData) return false;
+  return gd._fullData.some(t => t.meta && t.meta.role === 'in_table'
+                                && t.x && t.x.length === rows.length);
 }"""
 
 
@@ -791,13 +776,28 @@ def main() -> int:
                  and any("corpus-osdr" in s for s in shapes),
                  f"each with its own glyph: {shapes}")
             # A key is what you are looking at, so an untickable layer leaves it.
+            # Each toggle redraws 942,563 points, which held the renderer's
+            # main thread for ~20 s on a loaded machine, past Playwright's 30 s
+            # default for a read; wait on the key itself rather than a sleep.
             page.locator("#layers input[type=checkbox]").nth(1).uncheck()
             page.wait_for_timeout(2500)
-            corpus = page.locator("#legend-corpus").inner_text()
+            try:
+                page.wait_for_function(
+                    "() => !(document.querySelector('#legend-corpus') || {})"
+                    ".textContent.includes('OSDR')", timeout=120_000)
+            except Exception:
+                pass  # read it anyway; the check below says what it saw
+            corpus = page.locator("#legend-corpus").inner_text(timeout=120_000)
             c.ok("OSDR" not in corpus,
                  f"unticking a layer drops its row from the key: {corpus!r}")
             page.locator("#layers input[type=checkbox]").nth(1).check()
             page.wait_for_timeout(2500)
+            try:
+                page.wait_for_function(
+                    "() => (document.querySelector('#legend-corpus') || {textContent: ''})"
+                    ".textContent.includes('OSDR')", timeout=120_000)
+            except Exception:
+                pass
 
             print("\n=== 3. two color-bys, and the nine that were removed ===")
             # This section used to pick "Flight vs Ground" and assert that the
@@ -835,6 +835,17 @@ def main() -> int:
                     page.locator(".dash-dropdown-content").get_by_text(
                         field, exact=False).first.click()
                     page.wait_for_timeout(2500)
+                    # Wait for the legend to name the field rather than trusting
+                    # the sleep: a 942,563-point redraw on a loaded machine took
+                    # longer than 2.5 s and read the previous field's title. A
+                    # legend that never updates still fails, after the timeout.
+                    try:
+                        page.wait_for_function(
+                            "f => (document.querySelector('#legend-title') || {})"
+                            ".textContent.toLowerCase().includes(f)",
+                            arg=field.lower(), timeout=60_000)
+                    except Exception:
+                        pass
                     info = wait_for_points(page)
                     title = page.locator("#legend-title").inner_text()
                     rows = page.locator("#legend-list .bm-legend-item").count()
@@ -1005,20 +1016,25 @@ def main() -> int:
             c.ok(rp.evaluate(fits), "the view fits the window before a search")
 
             rp.locator("#search-button").click()
-            rp.wait_for_function(NETWORK_READY_JS, timeout=180_000)
+            rp.wait_for_function(RESULTS_READY_JS, timeout=180_000)
             rp.wait_for_timeout(1500)
             search_status = rp.locator("#search-status").inner_text()
             c.ok("precomputed OSDR embedding" in search_status,
                  f"the real OSDR query used the cached path: {search_status[:90]!r}")
             c.ok(dash_changes.count("search-button.n_clicks") == 1,
                  "the requested retrieval ran exactly once")
-            c.ok(rp.evaluate(fits), "the view still fits once the network is drawn")
+            listed = rp.locator("#results-table-wrap tr.result-row").count()
+            c.ok(listed == int(rp.locator("#topk-input").input_value()),
+                 f"the table lists exactly the k matches asked for ({listed})")
+            c.ok(rp.evaluate(fits), "the view still fits once the matches are drawn")
 
-            # Open the hit whose record is longest, since the bug only showed
-            # up on a hit with enough metadata to overflow the inspector.
-            pos = rp.evaluate(GSM_NODE_JS)
-            if pos:
-                rp.mouse.click(pos["x"], pos["y"])
+            # Open a match from the table, the way a user does: a click on the
+            # row selects it. The bug this section exists for showed up on a hit
+            # with enough metadata to overflow the inspector, which the filler
+            # below now forces rather than hopes for.
+            first_row = rp.locator("#results-table-wrap tr.result-row").first
+            if first_row.count():
+                first_row.locator("td.col-title").click()
                 rp.wait_for_function(
                     "() => { const d = document.querySelector('#details-panel');"
                     " return d && d.innerText.includes('GSM'); }", timeout=90_000)
@@ -1063,7 +1079,7 @@ def main() -> int:
                 c.ok(geom["aiBottom"] <= geom["ch"],
                      f"the AI panel stays on screen (bottom at {geom['aiBottom']})")
             else:
-                c.ok(False, "no GSM node to open in the inspector")
+                c.ok(False, "no match row to open in the inspector")
             check_neighborhood_explorer(rp, c, dash_changes)
             rp.close()
 

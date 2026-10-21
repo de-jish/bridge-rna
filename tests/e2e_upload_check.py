@@ -56,21 +56,13 @@ FLT_ID = f"OSD-100|{FLT_COL}"
 GC_ID = f"OSD-100|{GC_COL}"
 
 
-# Every GSM node the retrieval network drew, with the score parsed out of the
-# hover text. The last trace is the node trace and its customdata is
-# [kind, node_id, hover] - the same contract `e2e_check.py` relies on.
-HITS_JS = """() => {
-  const gd = document.querySelector('#network-graph .js-plotly-plot');
-  if (!gd || !gd._fullData || !gd._fullData.length) return null;
-  const t = gd._fullData[gd._fullData.length - 1];
-  if (!t || !t.customdata) return null;
-  const out = {gsm: [], query: null};
-  for (const row of t.customdata) {
-    if (row[0] === 'gsm') out.gsm.push([row[1], row[2]]);
-    if (row[0] === 'query') out.query = row[2];
-  }
-  return out;
-}"""
+# Every match the table lists, in rank order, with the score as the table
+# prints it (four decimals). The table replaced the retrieval network as the
+# result surface on 2026-10-21; it shows all k rows on one page here, where the
+# network hover rounded the score to three decimals.
+HITS_JS = """() => [...document.querySelectorAll('#results-table-wrap tr.result-row')]
+  .map(tr => [tr.dataset.gsm,
+              ((tr.querySelector('td.col-score_a') || {}).innerText || '').trim()])"""
 
 FITS_JS = ("() => document.scrollingElement.scrollHeight"
            " <= document.scrollingElement.clientHeight")
@@ -183,16 +175,61 @@ def banner(page) -> tuple[str, str]:
     return el.inner_text().strip(), (el.get_attribute("class") or "")
 
 
-def read_hits(page) -> tuple[list[tuple[str, str]], str]:
-    """[(gsm, score-as-shown)] plus the query node's hover text."""
-    info = page.evaluate(HITS_JS)
-    if not info:
-        return [], ""
-    out = []
-    for gsm, hover in info["gsm"]:
-        m = re.search(r"Score:\s*([0-9.]+)", hover or "")
-        out.append((str(gsm), m.group(1) if m else "?"))
-    return out, str(info.get("query") or "")
+def read_hits(page) -> list[tuple[str, str]]:
+    """[(gsm, score-as-shown)] in the table's rank order."""
+    return [(str(gsm), score or "?") for gsm, score in page.evaluate(HITS_JS) or []]
+
+
+def query_identity(page, expected: str) -> str:
+    """The inspector's text once it describes the query that just ran.
+
+    With nothing selected the inspector describes the query, and its Sample ID
+    is what the network's query node used to carry in its hover. It is filled
+    by a clientside pick plus a server render after the table lands, so wait
+    for the id rather than for a duration; a miss returns what is there.
+    """
+    try:
+        page.wait_for_function(
+            "id => (document.querySelector('#details-panel') || {innerText: ''})"
+            ".innerText.includes(id)", arg=expected, timeout=60_000)
+    except Exception:
+        pass
+    return page.locator("#details-panel").inner_text()
+
+
+def _table_update(response) -> bool:
+    """The table callback a new result (not a filter or a page) caused."""
+    if (response.request.method != "POST"
+            or "/_dash-update-component" not in response.url):
+        return False
+    try:
+        payload = response.request.post_data_json or {}
+    except Exception:
+        return False
+    return ("results-table-wrap.children" in str(payload.get("output", ""))
+            and "results-store.data" in payload.get("changedPropIds", []))
+
+
+def settle_table(page, response) -> None:
+    """Wait until the table shows the rows the awaited response was built from.
+
+    The rows come from the request's own `results-store` input. Two runs that
+    must produce identical hits are what this file asserts, so "wait until the
+    table changes" would hang on exactly the case it exists to check, and
+    "wait until it has rows" would read the previous run's table.
+    """
+    rows: list = []
+    for item in (response.request.post_data_json or {}).get("inputs", []):
+        if (isinstance(item, dict) and item.get("id") == "results-store"
+                and item.get("property") == "data"):
+            rows = (item.get("value") or {}).get("rows") or []
+    expected = [str(r.get("gsm")) for r in rows][:50]
+    page.wait_for_function(
+        """exp => { const got = [...document.querySelectorAll(
+                      '#results-table-wrap tr.result-row')].map(tr => tr.dataset.gsm);
+                    return got.length === exp.length
+                        && got.every((g, i) => g === exp[i]); }""",
+        arg=expected, timeout=60_000)
 
 
 def open_mode(page, key: str) -> None:
@@ -264,14 +301,20 @@ def picked_column(page) -> str:
 
 def upload_search(page) -> float:
     open_mode(page, "upload")
-    page.locator("#upload-search-button").click()
-    return _wait_run(page, "#upload-running-indicator")
+    with page.expect_response(_table_update, timeout=300_000) as table_info:
+        page.locator("#upload-search-button").click()
+        secs = _wait_run(page, "#upload-running-indicator")
+    settle_table(page, table_info.value)
+    return secs
 
 
 def catalog_search(page) -> float:
     open_mode(page, "sample")
-    page.locator("#search-button").click()
-    return _wait_run(page, "#query-running-indicator")
+    with page.expect_response(_table_update, timeout=300_000) as table_info:
+        page.locator("#search-button").click()
+        secs = _wait_run(page, "#query-running-indicator")
+    settle_table(page, table_info.value)
+    return secs
 
 
 # --- the run ----------------------------------------------------------------
@@ -326,7 +369,7 @@ def main() -> int:
                 page.wait_for_selector(".sample-preview", timeout=60_000)
                 page.wait_for_timeout(1200)
                 secs = catalog_search(page)
-                hits, _ = read_hits(page)
+                hits = read_hits(page)
                 truth[sid] = hits
                 msg, kind = banner(page)
                 c.ok(len(hits) > 0, f"catalog search for {sid} drew {len(hits)} hits "
@@ -364,16 +407,22 @@ def main() -> int:
                     c.ok(held == column,
                          f"the column picker holds {column} (shows {held!r})")
                     secs = upload_search(page)
-                    hits, qhover = read_hits(page)
+                    hits = read_hits(page)
                     msg, kind = banner(page)
                     c.ok(hits == truth[sid],
                          f"uploaded {column} returns exactly the catalog result for "
                          f"{sid} ({len(hits)} hits, {secs:.1f}s)")
                     c.ok("status-good" in kind and "uploaded counts matrix live" in msg,
                          f"the banner names the uploaded path: {msg[:80]}")
-                    c.ok(f"UPLOAD|{EXAMPLE.name}::{column}" in qhover,
-                         f"the query node is identified as the uploaded column: "
-                         f"{qhover[:70]!r}")
+                    # The network's query node carried this id in its hover; the
+                    # network is no longer drawn by default, and the inspector,
+                    # which describes the query until a match is selected, is
+                    # where the id is read now.
+                    upload_id = f"UPLOAD|{EXAMPLE.name}::{column}"
+                    shown = query_identity(page, upload_id)
+                    c.ok(upload_id in shown,
+                         f"the inspector identifies the query as the uploaded "
+                         f"column: {' '.join(shown.split())[:70]!r}")
                     c.ok(page.evaluate(FITS_JS),
                          "the view still fits the window after an uploaded search")
                     tape.append((f"example::{column}", hits))
@@ -388,7 +437,7 @@ def main() -> int:
                         c.ok(not page.locator("#upload-column-control").is_visible(),
                              "the column picker hides again for a one-sample file")
                     secs = upload_search(page)
-                    hits, _ = read_hits(page)
+                    hits = read_hits(page)
                     c.ok(hits == truth[FLT_ID],
                          f"{name}: identical to the catalog answer ({secs:.1f}s)")
                     tape.append((name, hits))
@@ -415,10 +464,10 @@ def main() -> int:
                         continue
                     upload_search(page)
                     msg, kind = banner(page)
-                    hits, _ = read_hits(page)
+                    hits = read_hits(page)
                     c.ok("status-error" in kind and expect in msg.lower(),
                          f"{name}: rejected with the reason: {msg[:90]}")
-                    c.ok(not hits, f"{name}: no hits were drawn for a rejected file")
+                    c.ok(not hits, f"{name}: no matches are listed for a rejected file")
                     c.ok(page.evaluate(FITS_JS),
                          f"{name}: the view still fits the window after a rejection")
                     tape.append((f"reject::{name}", msg))
@@ -427,7 +476,7 @@ def main() -> int:
                 print("\n--- 4. recovery after a rejection ---")
                 upload(page, fx["single"])
                 upload_search(page)
-                hits, _ = read_hits(page)
+                hits = read_hits(page)
                 c.ok(hits == truth[FLT_ID],
                      "a valid upload right after a rejected one is correct again")
                 tape.append(("recovery", hits))

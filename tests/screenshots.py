@@ -9,9 +9,10 @@ something worth showing.
 
 Two independent retrieval walkthroughs (a spaceflight mouse liver, OSD-137, and
 a spaceflight mouse kidney, OSD-102), each: pick a study and sample, run the
-search, open a hit in the inspector, then jump to the map and frame the
-viewport on the query and its neighbours so the retrieved network and its
-position in the whole corpus are shown side by side. The liver query also
+search, show the match table with its default score-by-rank plot and then its
+network view, open a match from the table in the inspector, then jump to the
+map and frame the viewport on the query and its neighbours so the retrieved
+matches and their position in the whole corpus are shown side by side. The liver query also
 widens to top-20 before that. Then a clean map pass: default UMAP view coloured
 by tissue and by species, the find box completing an identifier, a framed study
 beside the reset that undoes it, a zoomed neighbourhood, a hover card, and all
@@ -108,30 +109,50 @@ def set_colorby(page, text: str):
     page.wait_for_timeout(400)
 
 
-def node_xy(page, kind: str, which: int = 0):
-    """Pixel centre of the `which`-th network node of `kind` (query/gsm/gse).
+def wait_results(page, k: int, query: str = "", timeout: int = 180_000) -> None:
+    """Wait until this search's k matches, its banner and its query are on screen.
 
-    Plotly's axis objects expose the data->pixel transform, so this clicks the
-    node a user would click rather than dispatching a synthetic event.
+    The table replaced the retrieval network as the result surface on
+    2026-10-21. Rows alone are not enough: `hits-store` lives on the shell for
+    the session, so a fresh visit repaints the previous walkthrough's five
+    matches before this search has run, and the inspector, which describes the
+    query until a match is chosen, lands one round trip after the table. So the
+    banner must report k hits, the default plot (Score by rank) must mark the
+    same k in its "in_table" trace, and the inspector must name this query.
     """
-    return page.evaluate(
-        """([kind, which]) => {
-          const gd = document.querySelector('#network-graph .js-plotly-plot');
-          if (!gd || !gd._fullData) return null;
-          const t = gd._fullData[gd._fullData.length - 1];
-          if (!t || !t.customdata) return null;
-          let seen = -1;
-          for (let i = 0; i < t.customdata.length; i++) {
-            if (t.customdata[i][0] !== kind) continue;
-            if (++seen !== which) continue;
-            const xa = gd._fullLayout.xaxis, ya = gd._fullLayout.yaxis;
-            const r = gd.getBoundingClientRect();
-            return {x: r.left + xa._offset + xa.l2p(t.x[i]),
-                    y: r.top + ya._offset + ya.l2p(t.y[i]),
-                    label: t.customdata[i][1]};
-          }
-          return null;
-        }""", [kind, which])
+    page.wait_for_function(
+        """([k, query]) => {
+             const status = (document.querySelector('#search-status') || {}).innerText || '';
+             if (!status.includes('Retrieved ' + k.toLocaleString('en-US') + ' hits')) return false;
+             const rows = document.querySelectorAll('#results-table-wrap tr.result-row');
+             const gd = document.querySelector('#results-plot .js-plotly-plot');
+             if (rows.length !== Math.min(k, 50) || !gd || !gd._fullData) return false;
+             if (!gd._fullData.some(t => t.meta && t.meta.role === 'in_table'
+                                         && t.x && t.x.length === k)) return false;
+             const details = (document.querySelector('#details-panel') || {}).innerText || '';
+             return !query || details.includes(query); }""",
+        arg=[k, query], timeout=timeout)
+
+
+def show_plot(page, label: str) -> None:
+    """Choose one of the four plot views and wait until Plotly draws it."""
+    page.locator(
+        f"#results-plot-kind .dash-options-list-option:has-text('{label}')").first.click()
+    marker = {"Network": "network_nodes"}.get(label)
+    if marker:
+        page.wait_for_function(
+            "m => { const gd = document.querySelector('#results-plot .js-plotly-plot');"
+            " return gd && (gd.data || []).some(t => t.meta && t.meta[m]); }",
+            arg=marker, timeout=120_000)
+    page.wait_for_timeout(1500)
+
+
+def set_topk(page, k: int) -> None:
+    """Type an exact k into the box beside the log slider and commit it."""
+    box = page.locator("#topk-input")
+    box.fill(str(k))
+    box.press("Enter")
+    page.wait_for_timeout(800)
 
 
 def osdr_glyph_xy(page):
@@ -226,29 +247,30 @@ def main() -> int:
                 print(f"== retrieve[{q['slug']}]: run the search ==", flush=True)
                 t0 = time.time()
                 page.locator("#search-button").click()
-                # The status banner reports which retrieval path ran; wait for it
-                # to stop saying "select a sample" and for the network to have
-                # nodes.
-                page.wait_for_function(
-                    "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
-                    " if (!gd || !gd._fullData) return false;"
-                    " const t = gd._fullData[gd._fullData.length - 1];"
-                    " return !!(t && t.customdata && t.customdata.length > 3); }",
-                    timeout=180_000)
+                # Wait for the match table and the default plot to show this
+                # search's five matches, not for a duration.
+                wait_results(page, 5, q["sample"])
                 page.wait_for_timeout(1500)
                 status = page.locator("#search-status").inner_text().replace("\n", " ")
                 print(f"     search took {time.time() - t0:.1f}s -> {status[:140]}",
                       flush=True)
-                s.shot(page, f"retrieve-{q['slug']}-02-network")
+                s.shot(page, f"retrieve-{q['slug']}-02-results")
+
+                # The network is the fourth plot view now, drawn under the table.
+                show_plot(page, "Network")
+                page.locator("#plot-panel").scroll_into_view_if_needed()
+                page.wait_for_timeout(600)
+                s.shot(page, f"retrieve-{q['slug']}-02b-network")
+                show_plot(page, "Score by rank")
 
                 print(f"== retrieve[{q['slug']}]: open a hit in the inspector ==",
                       flush=True)
-                pos = node_xy(page, "gsm", 0)
-                if not pos:
-                    print("     no GSM node found", flush=True)
+                row = page.locator("#results-table-wrap tr.result-row").first
+                if not row.count():
+                    print("     no match row found", flush=True)
                 else:
-                    print(f"     clicking {pos['label']}", flush=True)
-                    page.mouse.click(pos["x"], pos["y"])
+                    print(f"     clicking {row.get_attribute('data-gsm')}", flush=True)
+                    row.locator("td.col-title").click()
                     page.wait_for_function(
                         "() => { const d = document.querySelector('#details-panel');"
                         " return d && d.innerText.includes('GSM'); }", timeout=90_000)
@@ -257,42 +279,20 @@ def main() -> int:
 
                 if qi == 0:
                     print("== retrieve: widen to 20 neighbours ==", flush=True)
-                    # Dash 4 renders the slider on Radix: the paired number input
-                    # is hidden, so drive the thumb with the keyboard the way a
-                    # keyboard user would, one step per press from 5 up to 20.
-                    thumb = page.locator("#topk-slider [role=slider]").first
-                    thumb.click()
-                    for _ in range(15):
-                        thumb.press("ArrowRight")
-                        page.wait_for_timeout(60)
-                    page.wait_for_timeout(800)
-                    print("     top-k now "
-                          + page.locator("#topk-slider [role=slider]").first
-                                .get_attribute("aria-valuenow"), flush=True)
+                    # The slider moves in log10(k) from 3 to 1,000, so an exact
+                    # k goes in the number box beside it, the way a user types it.
+                    set_topk(page, 20)
+                    print("     top-k now " + page.locator("#topk-input").input_value(),
+                          flush=True)
                     page.locator("#search-button").click()
-                    page.wait_for_function(
-                        "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
-                        " if (!gd || !gd._fullData) return false;"
-                        " const t = gd._fullData[gd._fullData.length - 1];"
-                        " return !!(t && t.customdata"
-                        "   && t.customdata.filter(c => c[0] === 'gsm').length >= 20); }",
-                        timeout=180_000)
+                    wait_results(page, 20, q["sample"])
                     page.wait_for_timeout(2000)
-                    s.shot(page, "retrieve-liver-04-network-top20")
+                    s.shot(page, "retrieve-liver-04-results-top20")
                     # Reset back to 5 so the map cross-reference below frames the
-                    # same tight neighbourhood the network view showed by default.
-                    thumb = page.locator("#topk-slider [role=slider]").first
-                    thumb.click()
-                    for _ in range(15):
-                        thumb.press("ArrowLeft")
-                        page.wait_for_timeout(60)
+                    # same tight neighbourhood the default view showed.
+                    set_topk(page, 5)
                     page.locator("#search-button").click()
-                    page.wait_for_function(
-                        "() => { const gd = document.querySelector('#network-graph .js-plotly-plot');"
-                        " if (!gd || !gd._fullData) return false;"
-                        " const t = gd._fullData[gd._fullData.length - 1];"
-                        " return !!(t && t.customdata && t.customdata.length > 3); }",
-                        timeout=180_000)
+                    wait_results(page, 5, q["sample"])
                     page.wait_for_timeout(1500)
 
                 print(f"== retrieve[{q['slug']}]: see this retrieval on the map, "
