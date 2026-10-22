@@ -1021,6 +1021,50 @@ def neighborhood_unavailable_children(reason: str) -> list:
         reason or "This retrieval has no matches to explore.")
 
 
+#: The graph's figure before the first real one arrives. dcc.Graph with no
+#: figure draws Plotly's default: a white canvas with axes from -1 to 6, which
+#: flashed between the navy shell and the map on every visit. This is the plot's
+#: own navy with nothing on it, and its `meta` marks it as a placeholder so the
+#: skeleton knows the real figure has not landed yet.
+def placeholder_figure() -> dict:
+    layout = theme.base_figure_layout(False)
+    layout.update(xaxis={"visible": False}, yaxis={"visible": False},
+                  meta={"placeholder": True})
+    return {"data": [], "layout": layout}
+
+
+def map_skeleton() -> html.Div:
+    """What the canvas shows until its first figure is drawn.
+
+    The shapes of what is coming - the two badges over the canvas and the
+    floating key - plus one honest line saying what is being drawn. A
+    clientside callback adds `is-done` once the figure that replaces
+    `placeholder_figure` arrives; later rebuilds keep the old map on screen and
+    use the spinner instead, because by then there is a real map to look at.
+    """
+    _n_archs4, _n_osdr, total = data.counts()
+    return html.Div(
+        id="map-skeleton", className="bm-map-skeleton", role="status",
+        children=[
+            html.Div(className="bm-skel-badges", **{"aria-hidden": "true"}, children=[
+                html.Span(className="sk bm-skel-badge"),
+                html.Span(className="sk bm-skel-badge is-short"),
+            ]),
+            html.Div(className="bm-skel-key", **{"aria-hidden": "true"}, children=[
+                html.Span(className="sk bm-skel-key-title"),
+                html.Span(className="sk bm-skel-key-filter"),
+                *[html.Div(className="bm-skel-key-row", children=[
+                    html.Span(className="sk bm-skel-swatch"),
+                    html.Span(className="sk bm-skel-key-label",
+                              style={"width": f"{width}%"}),
+                ]) for width in (70, 58, 76, 52, 64, 72, 48, 60, 66, 56)],
+            ]),
+            html.P(f"Drawing {total:,} samples" if total else "Drawing the map",
+                   className="bm-skel-status"),
+        ],
+    )
+
+
 def build_view() -> html.Div:
     """The map view, everything below the shared header.
 
@@ -1043,6 +1087,7 @@ def build_view() -> html.Div:
                     html.Div(id="plot-badges", className="bm-badges"),
                 ]),
                 legend_panel(),
+                map_skeleton(),
                 # dcc.Loading wraps its children in two nested divs of its own.
                 # Both need an explicit full height or the chain from
                 # .bm-plot-wrap collapses and the graph falls back to Plotly's
@@ -1062,6 +1107,7 @@ def build_view() -> html.Div:
                     children=dcc.Graph(
                         id="manifold-graph",
                         className="dash-graph",
+                        figure=placeholder_figure(),
                         clear_on_unhover=True,
                         config={
                             "displaylogo": False,

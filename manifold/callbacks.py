@@ -672,6 +672,19 @@ def coverage_children(color_by: str):
 
 
 def register(app):
+    # The skeleton stands in until the first real figure replaces the navy
+    # placeholder. Clientside, so a figure of 942,563 points is never posted
+    # back to the server just to flip one class.
+    app.clientside_callback(
+        """function (figure) {
+            const meta = figure && figure.layout && figure.layout.meta;
+            return meta && meta.placeholder ? "bm-map-skeleton"
+                                            : "bm-map-skeleton is-done";
+        }""",
+        Output("map-skeleton", "className"),
+        Input("manifold-graph", "figure"),
+    )
+
     @app.callback(
         Output("manifold-graph", "figure"),
         Output("plot-badges", "children"),

@@ -182,3 +182,149 @@
 
 .app-brand-mark img { width: 34px; height: 34px; object-fit: contain; }
 .app-title { color: var(--header-fg); font-family: var(--font-heading); }
+
+/* --- Skeletons --------------------------------------------------------------
+   One placeholder language for the boot shell (app.INDEX_STRING) and the map's
+   first figure (manifold.layout.map_skeleton): the shapes of what is coming, in
+   the surface's own neutrals, with one slow sweep of light across them. The
+   sweep is the only motion and stops under reduced motion; the shapes alone
+   still say "the layout is arriving". */
+.sk {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--sk-base) 0%, var(--sk-base) 35%,
+              var(--sk-sheen) 50%, var(--sk-base) 65%, var(--sk-base) 100%);
+  background-size: 300% 100%;
+  animation: sk-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+:root { --sk-base: var(--hds-color-carbon-10); --sk-sheen: var(--hds-color-carbon-05); }
+@keyframes sk-sweep {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sk { animation: none; background: var(--sk-base); }
+}
+
+/* The boot shell: present only while Dash's own loading node is, so it can
+   never outlive the app it stands in for. Dash's "Loading..." stays in the
+   accessibility tree and leaves the screen. */
+.boot-skeleton { display: none; }
+body:has(._dash-loading) .boot-skeleton {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--bg-canvas);
+}
+._dash-loading {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.boot-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 66px;
+  padding: 0 20px;
+  flex: none;
+  background: var(--header-bg);
+  --sk-base: var(--hds-color-carbon-80);
+  --sk-sheen: var(--hds-color-carbon-70);
+}
+.boot-header .sk-mark { width: 34px; height: 34px; border-radius: 50%; }
+/* The brand block holds the title's measured width (title and subtitle,
+   259 px) so the nav and the counts land where the real ones will. */
+.boot-brand {
+  color: var(--header-fg);
+  font: 700 var(--text-xl)/1.15 var(--font-heading);
+  letter-spacing: -0.01em;
+  width: 259px;
+  flex: none;
+}
+.boot-header .sk-nav { width: 62px; height: 14px; flex: none; margin-left: 20px; }
+.boot-header .sk-nav + .sk-nav { margin-left: 28px; }
+.boot-header .sk-meta { width: 110px; height: 26px; flex: none; }
+.boot-header .sk-meta:first-of-type, .boot-header .sk-nav + .sk-meta { margin-left: auto; }
+.boot-header .sk-meta + .sk-meta { margin-left: 30px; }
+@media (max-width: 900px) {
+  .boot-header .sk-meta { display: none; }
+  .boot-brand { width: auto; }
+}
+.boot-body {
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr) 384px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.boot-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-subtle);
+}
+.boot-rail .sk-label { width: 38%; height: 12px; margin-top: 14px; }
+.boot-rail .sk-control { width: 100%; height: 38px; }
+.boot-main { display: contents; }
+.boot-panel, .boot-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 24px;
+  padding: 24px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  align-self: start;
+}
+.boot-inspector { margin-left: 0; }
+.boot-panel .sk-heading, .boot-inspector .sk-heading { width: 30%; height: 22px; }
+.boot-panel .sk-line, .boot-inspector .sk-line { width: 70%; height: 12px; }
+.boot-panel .sk-row { width: 100%; height: 36px; }
+.boot-key { display: none; }
+@media (min-width: 1181px) and (max-width: 1480px) {
+  .boot-body { grid-template-columns: 288px minmax(0, 1fr) 328px; }
+}
+@media (max-width: 1180px) {
+  .boot-body { grid-template-columns: 1fr; }
+  .boot-rail { display: none; }
+  .boot-inspector { display: none; }
+}
+
+/* The map's boot shape: its own 268 px rail beside the navy canvas, with the
+   floating key where the real one will land. */
+[data-boot-route="map"] .boot-body { grid-template-columns: 268px minmax(0, 1fr); }
+[data-boot-route="map"] .boot-rail { padding: 16px; }
+[data-boot-route="map"] .boot-main {
+  display: block;
+  position: relative;
+  background: var(--plot-bg);
+  --sk-base: rgba(255, 255, 255, 0.07);
+  --sk-sheen: rgba(255, 255, 255, 0.13);
+}
+[data-boot-route="map"] .boot-panel,
+[data-boot-route="map"] .boot-inspector { display: none; }
+[data-boot-route="map"] .boot-key {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: absolute;
+  top: 46px; right: 14px;
+  width: 228px;
+  padding: 14px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+}
+.boot-key .sk-key-row { height: 12px; width: 100%; }
+.boot-key .sk-key-row:nth-child(2n) { width: 82%; }
+@media (max-width: 900px) {
+  [data-boot-route="map"] .boot-body { grid-template-columns: 1fr; }
+  [data-boot-route="map"] .boot-rail { display: none; }
+  [data-boot-route="map"] .boot-key { display: none; }
+}

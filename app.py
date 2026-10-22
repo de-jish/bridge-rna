@@ -269,6 +269,15 @@ def build_app() -> Dash:
     return app
 
 
+# The page Dash serves before its JavaScript has mounted anything. Dash's own
+# placeholder is the word "Loading..." in the top-left corner of a blank page,
+# which on the NASA server can sit there for a second or two while the bundles
+# arrive. The skeleton below draws the shell the app is about to become -
+# header, control rail, and the route's main area (the navy map canvas, or the
+# results and inspector panels) - so the first paint is already the layout.
+# It is shown only while Dash's loading node exists (`body:has(._dash-loading)`
+# in 01-shell.css) and is never touched by React. The one-line script picks the
+# route before first paint; without it the retrieval shape is the default.
 INDEX_STRING = """<!DOCTYPE html>
 <html>
     <head>
@@ -276,8 +285,48 @@ INDEX_STRING = """<!DOCTYPE html>
         <title>{%title%}</title>
         {%favicon%}
         {%css%}
+        <script>document.documentElement.dataset.bootRoute = location.pathname.replace(/[/]+$/, "").endsWith("/map") ? "map" : "retrieve";</script>
     </head>
     <body>
+        <div class="boot-skeleton" aria-hidden="true">
+            <div class="boot-header">
+                <span class="sk sk-mark"></span>
+                <span class="boot-brand">Bridge RNA</span>
+                <span class="sk sk-nav"></span>
+                <span class="sk sk-nav"></span>
+                <span class="sk sk-meta"></span>
+                <span class="sk sk-meta"></span>
+            </div>
+            <div class="boot-body">
+                <div class="boot-rail">
+                    <span class="sk sk-label"></span><span class="sk sk-control"></span>
+                    <span class="sk sk-label"></span><span class="sk sk-control"></span>
+                    <span class="sk sk-label"></span><span class="sk sk-control"></span>
+                    <span class="sk sk-label"></span><span class="sk sk-control"></span>
+                    <span class="sk sk-label"></span><span class="sk sk-control"></span>
+                    <span class="sk sk-label"></span><span class="sk sk-control"></span>
+                </div>
+                <div class="boot-main">
+                    <div class="boot-panel">
+                        <span class="sk sk-heading"></span>
+                        <span class="sk sk-line"></span>
+                        <span class="sk sk-row"></span><span class="sk sk-row"></span>
+                        <span class="sk sk-row"></span><span class="sk sk-row"></span>
+                        <span class="sk sk-row"></span>
+                    </div>
+                    <div class="boot-inspector">
+                        <span class="sk sk-heading"></span>
+                        <span class="sk sk-line"></span><span class="sk sk-line"></span>
+                        <span class="sk sk-line"></span>
+                    </div>
+                    <div class="boot-key">
+                        <span class="sk sk-key-row"></span><span class="sk sk-key-row"></span>
+                        <span class="sk sk-key-row"></span><span class="sk sk-key-row"></span>
+                        <span class="sk sk-key-row"></span><span class="sk sk-key-row"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
         {%app_entry%}
         <footer>
             {%config%}
