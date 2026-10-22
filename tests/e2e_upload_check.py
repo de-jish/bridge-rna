@@ -41,6 +41,8 @@ from typing import Any
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+from server_output import drain_server_output
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 EXAMPLE = REPO / "examples" / "osdr_upload_example.csv"
@@ -309,6 +311,7 @@ def main() -> int:
         else:
             print("server never announced itself")
             return 1
+        drain_server_output(server)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)

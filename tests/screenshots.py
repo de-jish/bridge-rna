@@ -41,6 +41,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from server_output import drain_server_output
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 
@@ -190,6 +192,7 @@ def main() -> int:
         else:
             print("server never announced itself")
             return 1
+        drain_server_output(server)
 
         base = f"http://127.0.0.1:{args.port}"
         with sync_playwright() as p:

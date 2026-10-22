@@ -6,6 +6,18 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-21 (the self-starting browser scripts drain their server's output)
+
+`tests/e2e_upload_check.py`, `tests/screenshots.py` and `tests/screenshot_readme.py` started `app.py` with its output on a pipe and read it only until "serving on".
+The dev server logs every request to that pipe, which holds about 64 KB, so a few hundred callbacks into a run it blocked writing a log line and every later request hung.
+They now call `drain_server_output(server)` from the new shared `tests/server_output.py` right after the announcement, the same fix branch `cc/quirky-dhawan-626f46` applied to `e2e_check.py` and `e2e_cohort_check.py` as local copies.
+The shared helper also strips ANSI color codes before matching a request line: Werkzeug colors every non-200 request (a 304 arrives as `"\x1b[36mGET ...`), so the original regex printed every cached asset.
+`tests/test_server_output.py` reproduces the block with a stand-in server that writes 400 KB, and asserts it finishes only when drained.
+Once that branch merges, its two local copies should be replaced by the import.
+
+`screenshot_readme.py` was also broken on main, for an unrelated reason: it waited for the inspector to read `/PUBLICATION|STUDY CONTEXT/`, and the HDS rebrand (5fe9101) set `.details-section-title` to `text-transform: none`, so `innerText` reads "Study context" and the wait timed out every run.
+It now matches a line that is exactly one of those titles, case-blind, so the OSDR "Publication title" row cannot satisfy it early.
+
 ## 2026-09-19 (NASA Human Design System)
 
 Merged `prototype/hds-exploration` into main. The interface now resolves every chrome color through NASA's Human Design System: `assets/00-hds-tokens.css` is HDS's generated token file, `assets/00-tokens.css` maps the app's semantic names onto it, and `manifold/theme.py` mirrors the resolved values for Plotly. Carbon-05 canvas, white panels, black header with a carbon-70 rule, NASA blue `#1c67e3` as the accent, `#d83933` for the one primary query action. Public Sans, Inter and DM Mono are vendored under `assets/fonts/` with their licenses and named in `deploy/common.STATIC_ASSETS` so the ship path carries them.

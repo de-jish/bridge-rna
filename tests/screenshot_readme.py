@@ -51,6 +51,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from server_output import drain_server_output
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 
@@ -363,10 +365,13 @@ def capture_retrieval(page, base: str, out: Path) -> list[str]:
         " return d && d.innerText.includes('GSM'); }", timeout=90_000)
     # The GEO enrichment for the opened hit arrives after the panel does, and it
     # is most of the panel's height - fitting before it lands fits the wrong
-    # content. Wait for the record itself, not for a duration.
+    # content. Wait for the record itself, not for a duration: a line that is
+    # exactly one of its section titles, so an OSDR "Publication title" row
+    # cannot satisfy it. Case-blind, because innerText follows `text-transform`
+    # and the titles stopped being upper-cased when the chrome moved to HDS.
     page.wait_for_function(
         "() => { const d = document.querySelector('#details-panel');"
-        " return d && /PUBLICATION|STUDY CONTEXT/.test(d.innerText); }",
+        " return d && /^(publication|study context)$/im.test(d.innerText); }",
         timeout=90_000)
     page.wait_for_timeout(2500)
 
@@ -443,6 +448,7 @@ def main() -> int:
         else:
             print("server never announced itself")
             return 1
+        drain_server_output(server)
 
         base = f"http://127.0.0.1:{args.port}"
         with sync_playwright() as p:
