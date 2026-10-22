@@ -288,3 +288,4 @@ Each step ends green on pytest and is committed on its own.
 
 - 2026-10-21: spec written from the interview and the measurements above.
 - 2026-10-21: built. Retrieval profile and tie rule; `results.py`, `result_plots.py` and the tissue fix built in parallel by subagents against the contracts above; the view, callbacks, styles and browser suite integrated and verified here.
+- 2026-10-22: Similarity view removed at Joshua's request after review; the plot switch is Score by rank, Series and Network.

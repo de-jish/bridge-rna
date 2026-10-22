@@ -68,10 +68,12 @@ Two mice from the same cage, the same tissue and the same flight condition share
 That is not a defect in either query: the entire top-500 of a 940,455-sample index spans a range of similarity comparable to the gap between two animals in the same cage, so the ordering of the list is decided below the noise floor of the biology.
 
 **Cohort** mode asks the question the study is actually powered to answer.
-It groups the samples the way OSDR already curates them, by study, tissue and flight condition, averages the group's embeddings into one query, and searches with that.
-Measured over all 212 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.74**, a 4.6-fold gain, and it still reads the index only once however large the group is.
+It groups the samples by study, organ and flight condition, averages the group's embeddings into one query, and searches with that.
+Measured over all 204 cohorts in the corpus, this raises the agreement of the result list from 0.16 to **0.75**, a 4.7-fold gain, and it still reads the index only once however large the group is.
 
-You can widen what counts as one cohort by dropping tissue or condition, which merges a study's organs or its arms into one larger group.
+Organ is OSDR's own tissue label, except that a few pairs measured to be the same organ pool together: left and right retina, heart and right ventricle, gastrocnemius and quadriceps.
+Different organs never pool, because the average of a liver and a brain profile resembles no real sample.
+You can widen what counts as one cohort by dropping the flight condition, which merges a study's arms into one larger group.
 Study is always part of the definition and cannot be removed, because samples from one study resemble each other for reasons that include how they were processed, and pooling across studies would average across that.
 Splitting finer than this is deliberately not offered: every further split makes the cohort smaller, and the gain above rises steeply with group size.
 
@@ -291,7 +293,7 @@ Three scripts check the science rather than the software, against the real corpu
 
 ```bash
 .venv/bin/python precompute/validate_artifacts.py --mixing --quality
-.venv/bin/python precompute/validate_cohorts.py   # 6 checks over all 212 cohorts
+.venv/bin/python precompute/validate_cohorts.py   # 6 checks over all 204 cohorts
 .venv/bin/python tests/check_join.py              # the two halves address the same samples
 ```
 

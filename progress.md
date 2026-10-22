@@ -6,6 +6,28 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-22 (review changes: no Similarity plot, cohorts by arm)
+
+Joshua reviewed the results view on `feature/retrieval-table` and asked for three things.
+
+**The Similarity plot is gone**, for single samples and cohorts alike.
+The plot switch is Score by rank, Series and Network; the average-linkage and dendrogram code went with it, and `bridge_rna/similarity.py` keeps only the identical-profile grouping that marks table rows.
+
+**Tissue is no longer a chip under Cohort; Spaceflight arm is the only choice.**
+He read the definition line: Study + Tissue made 83 cohorts against 70 for Study alone.
+Dropping tissue outright would have pooled OSD-457's nine tissues per arm, and OSD-164's liver with spleen, into single queries, so he chose to keep different organs apart.
+A pinned, hidden `organ` facet does that.
+It is OSDR's raw tissue except for three measured pairs in `cohorts.SAME_ORGAN` (left/right retina, heart/right ventricle, gastrocnemius/quadriceps), whose between-tissue cosine sits inside the within-tissue range.
+The shared tissue vocabulary's buckets were tried first and rejected on measurement: they pool temporal bone with mandible (0.85-0.88 between, as far apart as liver and cerebrum) and brown fat with white (0.96).
+Comparisons are offered between arms only.
+Result: 204 cohorts across 70 studies (median 10, max 38) grouping 2,107 of 2,108 samples.
+The full `validate_cohorts.py` sweep passes all six checks: top-5 stability 0.747 against 0.158 for single samples, 4.7x; the size knee is still 5.
+
+Validation: 795 pytest tests, 186 cohort and 57 results browser checks, and both README images recaptured.
+The other four browser suites were not rerun; nothing they exercise changed.
+
+**He asked whether the log rank axis skews the Score by rank plot.** It does, in a specific way; the answer and a recommendation went back to him, and nothing changed in code yet.
+
 ## 2026-10-21 (the retrieval result is a ranked table, not a network)
 
 Branch `feature/retrieval-table`, from `main`, pushed to origin and not merged.

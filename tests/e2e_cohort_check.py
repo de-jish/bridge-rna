@@ -522,10 +522,11 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          "the study picker is shared with Sample mode")
 
     chips = page.locator(".facet-chip")
-    c.ok(chips.count() == 3, f"three facets offered, saw {chips.count()}")
+    c.ok(chips.count() == 2, f"two facets offered, saw {chips.count()}")
     labels = {chips.nth(i).inner_text().strip() for i in range(chips.count())}
-    c.ok(labels == {"Study", "Tissue", "Spaceflight arm"},
-         f"and they are the curated grouping, nothing else: {sorted(labels)}")
+    # Tissue was removed on 2026-10-22; organ is pinned and draws no chip.
+    c.ok(labels == {"Study", "Spaceflight arm"},
+         f"Study and Spaceflight arm, no Tissue: {sorted(labels)}")
     study_chip = page.locator("button.facet-chip", has_text="Study").first
     c.ok(study_chip.is_disabled(), "Study is pinned and cannot be unticked")
     c.ok(bool(study_chip.get_attribute("title")),
@@ -535,10 +536,31 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"every offered facet is on by default, saw {on.count()}")
 
     summary = page.locator("#cohort-facet-summary").inner_text()
-    c.ok("212 cohorts" in summary,
+    c.ok("204 cohorts" in summary,
          f"the definition reports its consequence: {summary[:80]!r}")
-    c.ok("2,105 of 2,108" in summary,
+    c.ok("2,107 of 2,108" in summary,
          "and says how many samples it groups")
+
+    arm_chip = page.locator("button.facet-chip", has_text="Spaceflight arm").first
+    arm_chip.click()
+    try:
+        page.wait_for_function(
+            "document.querySelector('#cohort-facet-summary').textContent"
+            ".includes('79 cohorts')", timeout=15000)
+    except Exception:
+        pass
+    widened = page.locator("#cohort-facet-summary").inner_text()
+    c.ok("79 cohorts" in widened,
+         f"unticking the arm merges arms but never organs: {widened[:60]!r}")
+    arm_chip.click()
+    try:
+        page.wait_for_function(
+            "document.querySelector('#cohort-facet-summary').textContent"
+            ".includes('204 cohorts')", timeout=15000)
+    except Exception:
+        pass
+    c.ok("204 cohorts" in page.locator("#cohort-facet-summary").inner_text(),
+         "and ticking it again restores the default")
 
     choose(page, "study-dropdown", STUDY, exact=True)
     picked = page.locator("#cohort-dropdown").inner_text()

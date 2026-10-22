@@ -393,16 +393,16 @@ def test_comparison_callback_keeps_independent_evidence_for_both_arms(
     from bridge_rna import callbacks as retrieval_callbacks
     from bridge_rna import cohorts as C
 
-    facets = ("study", "tissue", "spaceflight")
+    facets = ("study", "organ", "spaceflight")
     cohort_a = C.Cohort(
         "COHORT|a", "OSD-1", facets,
-        {"study": "OSD-1", "tissue": "Liver", "spaceflight": "Flight"},
-        ("A1", "A2"),
+        {"study": "OSD-1", "organ": "Liver", "spaceflight": "Flight"},
+        ("A1", "A2"), ("Liver",),
     )
     cohort_b = C.Cohort(
         "COHORT|b", "OSD-1", facets,
-        {"study": "OSD-1", "tissue": "Liver", "spaceflight": "Ground"},
-        ("B1", "B2"),
+        {"study": "OSD-1", "organ": "Liver", "spaceflight": "Ground"},
+        ("B1", "B2"), ("Liver",),
     )
     hits_a = _retrieval_frame("GSM-A-", 2, start=10)
     hits_b = _retrieval_frame("GSM-B-", 2, start=20)
@@ -1868,7 +1868,7 @@ def _comparison_payload(members_a, members_b):
     def hit(i, gsm):
         return {"gsm": gsm, "score": 0.99, "archs4_index": i}
     return {
-        "sample_id": "COHORT|study=OSD-1|tissue=Liver|spaceflight=Space Flight",
+        "sample_id": "COHORT|study=OSD-1|organ=Liver|spaceflight=Space Flight",
         "mode": "cohort",
         "hits": [hit(0, "GSM1"), hit(1, "GSM2"), hit(2, "GSM3")],
         "query": {"cohort_label": "Liver · Space Flight", "is_cohort": "1"},

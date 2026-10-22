@@ -73,7 +73,7 @@ MIN_NULL_MARGIN = 0.03           # check 3: a real cohort must beat random by th
 # One definition of "how much do two hit lists share", shared with the live
 # path. `bridge_rna.cohorts.top_k_agreement` is what the app measures during a
 # search and reports in the inspector, so the number a user reads off the screen
-# and the number this gate computes over all 212 cohorts are the same statistic
+# and the number this gate computes over every cohort are the same statistic
 # rather than two that merely resemble each other.
 jaccard = C.top_k_agreement
 
@@ -454,8 +454,8 @@ def main() -> int:
           "cohort")
     print("      the L2-norm spread is ~1.09x. Spherical is kept because it is "
           "the")
-    print("      correct estimator when Tissue is unticked and the spread is "
-          "3.9x.\n")
+    print("      correct estimator whenever a cohort spans tissues, where the "
+          "spread is 3.9x.\n")
 
     print("=" * 72)
     if failures:

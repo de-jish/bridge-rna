@@ -111,7 +111,7 @@ def _cohort_query_series(cohort, geometry, excluded: list[str]) -> pd.Series:
         "sample_name": cohort.describe(),
         "cohort_label": cohort.label,
         "study_id": cohort.study,
-        "tissue": cohort.values.get("tissue", ""),
+        "tissue": cohort.tissue_label,
         "condition": cohort.values.get("spaceflight", ""),
         "is_cohort": "1",
         "grouped_by": grouped,
@@ -641,8 +641,8 @@ def register(app) -> None:
         return (
             list(active),
             ["facet-chip" + (" is-on" if f.key in active else "")
-             + (" is-pinned" if f.pinned else "") for f in C.FACETS],
-            ["true" if f.key in active else "false" for f in C.FACETS],
+             + (" is-pinned" if f.pinned else "") for f in C.CHIP_FACETS],
+            ["true" if f.key in active else "false" for f in C.CHIP_FACETS],
         )
 
     @app.callback(

@@ -39,19 +39,35 @@ class Facet:
     default: bool       # ticked when the view opens
     pinned: bool = False  # cannot be unticked, and why
     reason: str = ""      # the hover text explaining a pinned facet
+    shown: bool = True    # whether the Group by row offers it as a chip
 
 
-# Order is the order the chips appear in. Study first because it is pinned,
-# then the two that complete OSDR's own curated ISA-Tab factor grouping.
+# Order is the order the facets appear in a cohort's id and label. Study first
+# because it is pinned, then organ, then the arm.
 #
-# These three are the whole registry, and that is a deliberate narrowing. An
-# earlier build offered six more columns from the same table - sex, strain,
-# genotype, habitat, mission duration, diet - and every one of them made the
-# cohort *smaller*. Size is the thing the measured stability curve is a
-# function of (0.34 at k=2 against 0.86 at k>=15), so a finer definition trades
-# away the exact quantity the feature exists to buy, and it does so for a
-# contrast the two-arm comparison already answers more directly. The six are
-# recorded in `docs/design-notes.md#cohort-retrieval` rather than left on the rail; adding
+# **Spaceflight arm is the one choice the Group by row offers.** Until
+# 2026-10-22 Tissue was a chip as well, grouping by OSDR's raw tissue value,
+# and Joshua removed it after measuring what it bought: Study + Tissue made 83
+# cohorts against 70 for Study alone, so the chip mostly split left from right
+# retina, heart from right ventricle, and gastrocnemius from quadriceps.
+#
+# Removing it outright would have pooled different tissues into one query in
+# two studies: OSD-457's 96 animals per arm span nine tissues, and OSD-164 pairs
+# liver with spleen. The mean of a liver and a brain embedding resembles no real
+# sample, so its matches would answer no question. So `organ` stays in every
+# definition, pinned and not shown: it is OSDR's own tissue value, except for
+# the pairs in `SAME_ORGAN`, which were measured to be interchangeable. The
+# label names the raw tissues a cohort holds, so "Left retina + Right retina"
+# says what was merged.
+#
+# The registry was larger before. An earlier build offered six more columns
+# from the same table - sex, strain, genotype, habitat, mission duration, diet -
+# and every one of them made the cohort *smaller*. Size is the thing the
+# measured stability curve is a function of (0.34 at k=2 against 0.86 at
+# k>=15), so a finer definition trades away the exact quantity the feature
+# exists to buy, and it does so for a contrast the two-arm comparison already
+# answers more directly. The six are recorded in
+# `docs/design-notes.md#cohort-retrieval` rather than left on the rail; adding
 # one back is one line here, and nothing else in the app hard-codes a facet.
 FACETS: tuple[Facet, ...] = (
     Facet("study", "Study", default=True, pinned=True,
@@ -60,13 +76,17 @@ FACETS: tuple[Facet, ...] = (
                  "already reach 0.9805 mean pairwise cosine against 0.9933 for "
                  "a real cohort, so same-study membership supplies 84% of a "
                  "cohort's coherence on its own."),
-    Facet("tissue", "Tissue", default=True),
+    Facet("organ", "Organ", default=True, pinned=True, shown=False,
+          reason="Different tissues never pool: the mean of two tissues' "
+                 "embeddings resembles no real sample."),
     Facet("spaceflight", "Spaceflight arm", default=True),
 )
 
 FACETS_BY_KEY: dict[str, Facet] = {f.key: f for f in FACETS}
 PINNED_FACETS: tuple[str, ...] = tuple(f.key for f in FACETS if f.pinned)
 DEFAULT_FACETS: tuple[str, ...] = tuple(f.key for f in FACETS if f.default)
+#: The facets the Group by row draws a chip for.
+CHIP_FACETS: tuple[Facet, ...] = tuple(f for f in FACETS if f.shown)
 
 
 def normalize_facets(keys: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
@@ -98,7 +118,8 @@ MIN_COHORT_SIZE = 2
 # is the only thing known: the cohort picker, before any search has run. It is
 # not used to predict or display result stability in the application.
 #
-# Measured 2026-08-05 over all 212 cohorts. Rerun with:
+# Measured 2026-08-05 over all 212 cohorts, and again on 2026-10-22 over the
+# 204 the current definition produces: the knee is still 5. Rerun with:
 #   .venv/bin/python precompute/validate_cohorts.py --stability
 LOW_N_THRESHOLD = 5
 
@@ -133,8 +154,8 @@ def cohort_query_vector(rows: np.ndarray) -> np.ndarray:
     stated reason. Within a real cohort the spread is only 1.09x and the two
     estimators agree to a median cosine of 0.9999994, so this changes almost
     nothing today; it is done because it is the maximum-likelihood estimate of
-    a vMF mean direction, and because it stays correct if anyone unticks Tissue
-    and pools across organs, where the 3.9x spread is real.
+    a vMF mean direction, and because it stays correct if a cohort ever spans
+    tissues, where the 3.9x spread is real.
     """
     arr = np.asarray(rows, dtype=np.float32)
     if arr.ndim != 2 or arr.shape[0] == 0:
@@ -252,6 +273,10 @@ class Cohort:
     facets: tuple[str, ...]   # the definition that produced it
     values: dict[str, str]    # facet key -> value
     members: tuple[str, ...]  # sample_key / sample_id, in metadata order
+    # The raw OSDR tissue values among the members, alphabetically. Organ is
+    # what defines the cohort; these are what the label prints, so a merged
+    # cohort says what it merged rather than only the organ's name.
+    tissues: tuple[str, ...] = ()
 
     @property
     def size(self) -> int:
@@ -269,8 +294,14 @@ class Cohort:
         study's picker, so repeating it in every row is noise. When the study is
         the *only* facet, the whole study is the cohort and it says so.
         """
-        parts = [self.values[k] for k in self.facets if k != "study"]
+        parts = [self.tissue_label if k == "organ" else self.values[k]
+                 for k in self.facets if k != "study"]
         return " · ".join(parts) if parts else "Whole study"
+
+    @property
+    def tissue_label(self) -> str:
+        """The tissues this cohort pools, by OSDR's own names."""
+        return " + ".join(self.tissues) or self.values.get("organ", "")
 
     def describe(self) -> str:
         """The one-line sentence the status banner and the query node use."""
@@ -302,16 +333,69 @@ def cohort_metadata() -> pd.DataFrame:
 
         df = mdata.osdr_metadata()
     except Exception:
-        return pd.DataFrame(columns=["sample_key", *FACETS_BY_KEY])
+        return pd.DataFrame(columns=["sample_key", "tissue", *FACETS_BY_KEY])
     if df is None or df.empty:
-        return pd.DataFrame(columns=["sample_key", *FACETS_BY_KEY])
-    return df.reset_index(drop=True)
+        return pd.DataFrame(columns=["sample_key", "tissue", *FACETS_BY_KEY])
+    return with_organ(df.reset_index(drop=True))
+
+
+# OSDR tissue values that name one organ and pool as one, keyed by the
+# lowercased value. Every other value is its own organ, so a value nobody has
+# measured can never be merged by accident.
+#
+# Each pair was measured on 2026-10-22 inside the studies that carry both: the
+# mean cosine *between* the two tissues sits inside the range *within* each, so
+# pooling them changes what the query resembles by nothing a reader could see.
+#   left / right retina        OSD-194, OSD-397   between 0.989-0.998
+#   heart / right ventricle    OSD-580            between 0.997-0.999
+#   gastrocnemius / quadriceps OSD-401            between 0.9994-0.9995
+#
+# The shared tissue vocabulary (`manifold.tissue`) was tried first and is too
+# coarse for this. It puts temporal bone with mandible and brown fat with white,
+# and those measured 0.85-0.88 and 0.96 between against 0.98-0.999 within: the
+# bone pair is as far apart as liver and cerebrum (0.877). OSD-164's liver and
+# spleen measured 0.87-0.91. None of them pools.
+SAME_ORGAN: dict[str, str] = {
+    "left retina": "Retina",
+    "right retina": "Retina",
+    "heart": "Heart",
+    "heart right ventricle": "Heart",
+    "gastrocnemius": "Gastrocnemius and quadriceps",
+    "quadriceps femoris": "Gastrocnemius and quadriceps",
+}
+
+
+def organ_of(tissue: Any) -> str:
+    """The organ a raw OSDR tissue value pools under: itself, unless measured."""
+    value = _tidy(tissue)
+    if value.lower() in UNKNOWN_VALUES:
+        return "Unknown"
+    return SAME_ORGAN.get(value.lower(), value)
+
+
+def with_organ(df: pd.DataFrame) -> pd.DataFrame:
+    """`df` with an `organ` column derived from its raw `tissue`.
+
+    A frame that already has the column, or has no tissue to derive it from, is
+    returned unchanged.
+    """
+    if "organ" in df.columns or "tissue" not in df.columns:
+        return df
+    out = df.copy()
+    out["organ"] = [organ_of(t) for t in out["tissue"]]
+    return out
 
 
 def cohorts_available() -> bool:
     """Whether cohort mode can offer anything on this machine."""
     df = cohort_metadata()
     return not df.empty and "sample_key" in df.columns
+
+
+def _alphabetical(values) -> tuple[str, ...]:
+    # Alphabetical rather than by count, so every arm of one study prints its
+    # merged tissues in the same order and the picker's rows line up.
+    return tuple(sorted(values, key=lambda value: (value.lower(), value)))
 
 
 def build_cohorts(facets: tuple[str, ...] | list[str] | None = None,
@@ -324,7 +408,7 @@ def build_cohorts(facets: tuple[str, ...] | list[str] | None = None,
     filtering afterwards cannot merge or split anything.
     """
     keys = normalize_facets(facets if facets is not None else DEFAULT_FACETS)
-    df = cohort_metadata() if metadata is None else metadata
+    df = cohort_metadata() if metadata is None else with_organ(metadata)
     if df.empty or "sample_key" not in df.columns:
         return []
 
@@ -343,11 +427,15 @@ def build_cohorts(facets: tuple[str, ...] | list[str] | None = None,
 
     buckets: dict[tuple[str, ...], list[str]] = {}
     bucket_values: dict[tuple[str, ...], dict[str, str]] = {}
+    bucket_tissues: dict[tuple[str, ...], set[str]] = {}
+    has_tissue = "tissue" in df.columns
     for _, row in df.iterrows():
         values = {k: facet_value(row, k) for k in keys}
         signature = tuple(values[k] for k in keys)
         buckets.setdefault(signature, []).append(_safe_str(row["sample_key"]))
         bucket_values.setdefault(signature, values)
+        if has_tissue:
+            bucket_tissues.setdefault(signature, set()).add(facet_value(row, "tissue"))
 
     out = [
         Cohort(
@@ -357,6 +445,7 @@ def build_cohorts(facets: tuple[str, ...] | list[str] | None = None,
             facets=keys,
             values=bucket_values[sig],
             members=tuple(members),
+            tissues=_alphabetical(bucket_tissues.get(sig, {})),
         )
         for sig, members in buckets.items()
     ]
@@ -389,7 +478,11 @@ def sibling_cohorts(cohort: Cohort, metadata: pd.DataFrame | None = None) -> lis
     "One facet apart" is what makes a comparison interpretable. The flight and
     ground arms of one study's liver differ in exactly the arm, so the overlap
     between their two hit sets is about the arm. Two cohorts differing in both
-    tissue and arm would produce a number nobody can attribute.
+    organ and arm would produce a number nobody can attribute.
+
+    The facet they differ in must be one the user can choose, which today means
+    the arm. Two organs of one study are not offered as a comparison: organ is
+    pinned so that organs never pool, not so that they can be contrasted.
     """
     others = build_cohorts(facets=cohort.facets, study=cohort.study,
                            metadata=metadata)
@@ -399,7 +492,7 @@ def sibling_cohorts(cohort: Cohort, metadata: pd.DataFrame | None = None) -> lis
             continue
         differing = [k for k in cohort.facets
                      if other.values.get(k) != cohort.values.get(k)]
-        if len(differing) == 1:
+        if len(differing) == 1 and differing[0] not in PINNED_FACETS:
             out.append(other)
     return out
 

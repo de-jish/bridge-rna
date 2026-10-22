@@ -143,6 +143,10 @@ def build_mode_switch(active: str = DEFAULT_QUERY_MODE) -> Any:
 def build_cohort_facet_chips() -> Any:
     """The Group by row: which columns define a cohort.
 
+    Only the facets a user can choose get a chip. Organ is in every definition
+    and draws none, because a chip that can never change says nothing the
+    cohort's own label does not.
+
     Every chip is a button rather than a checkbox because the pinned one has to
     be legible as "this is part of the definition and cannot be removed" rather
     than as "disabled control", and a disabled checkbox reads as the latter.
@@ -164,7 +168,7 @@ def build_cohort_facet_chips() -> Any:
                        f"Group cohorts by {f.label.lower()}"),
                 **{"aria-pressed": "true" if f.default else "false"},
             )
-            for f in C.FACETS
+            for f in C.CHIP_FACETS
         ],
     )
 

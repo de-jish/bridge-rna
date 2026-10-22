@@ -832,7 +832,10 @@ The metadata fetch runs third because it joins onto artifacts `build_projections
 Flags that appear in older prose and no longer exist: `--skip-hnsw`, `--density-only`, `--pca-fit-sample`, `--umap-fit-sample`, `--pca-components`.
 The current `build_projections.py` takes `--umap-neighbors`, `--tsne-perplexity`, `--tsne-jobs`, `--pca-report`, `--batch`, `--knn-jobs`, `--seed`, `--archs4-limit`, `--skip-umap`, `--skip-tsne`, `--densmap`, and `--dens-lambda`.
 
-## 13. Cohort retrieval, measured (2026-08-05)
+## 13. Cohort retrieval, measured (2026-08-05, re-measured 2026-10-22)
+
+**The definition changed on 2026-10-22** from `(study, tissue, spaceflight)` to `(study, organ, spaceflight)`, with organ pinned and Spaceflight arm the only chip; the subsection "Re-measured under `(study, organ, spaceflight)`" at the end carries the current numbers.
+The 2026-08-05 tables below are kept as measured, under the old definition.
 
 Produced by `precompute/validate_cohorts.py` against the real 963 MB ARCHS4 memmap and the real 2,108 cached OSDR embeddings, over **all 212 cohorts** rather than a sample.
 The whole run is 9,270 query vectors scored in **one 73-second pass** over the memmap, using the same running-top-k streaming technique as `validate_artifacts.py --mixing`.
@@ -840,13 +843,13 @@ Full narrative in [`docs/design-notes.md`](docs/design-notes.md#cohort-retrieval
 
 ### What the user can change, and what was removed (2026-08-05)
 
-The definition is `(study, tissue, spaceflight)`; study is pinned, tissue and arm can be unticked to *widen* it.
+Until 2026-10-22 the definition was `(study, tissue, spaceflight)`; study was pinned, tissue and arm could be unticked to *widen* it.
 There is no way to narrow it, and that is the whole of the registry.
 
 Six further facets were offered and deleted: `sex`, `strain`, `genotype`, `habitat`, `duration`, `diet`.
 Every one of them could only ever split a cohort, and the stability curve below is a function of size, so they traded away the quantity pooling exists to buy.
 The columns remain in `cache/osdr_metadata.parquet`; re-adding one is a single line in `bridge_rna/cohorts.FACETS`, and the deletion touched no other source file, which is the registry design working. They were map color-bys too until 2026-08-12, when those nine were removed for a different reason - see section 7.
-**Every measurement in this section was taken under `(study, tissue, spaceflight)`, which is exactly what remains, so none of it needs re-measuring.**
+**The measurements in this section down to the re-measurement were taken under `(study, tissue, spaceflight)`.**
 
 `R̄`, the vMF resultant length shown as "Group tightness", was removed in the same pass and `resultant_length` deleted.
 Its measurement stands and is the reason: median **0.9991** over all 212 cohorts, and no lower at k=2 than at k=30.
@@ -962,3 +965,46 @@ Pooling a single sample normalizes it twice, once in `cohort_query_vector` and o
 The two runs permute an exact tie rather than disagreeing.
 The gate is therefore float32 score agreement plus an identical top-20 in order, not an identical top-100 - demanding more would demand precision float32 does not have.
 This is the same phenomenon as the rejected kNN tissue-transfer candidate, where the winner beat the runner-up by a median 0.00089 cosine and was "essentially arbitrary", and it is the reason cohort pooling exists.
+
+### Re-measured under `(study, organ, spaceflight)` (2026-10-22)
+
+`precompute/validate_cohorts.py`, full sweep, 9,246 query vectors in one 84.6 s pass. All six checks pass.
+
+| | |
+| --- | --- |
+| Cohorts with 2 or more members | **204** across 70 studies |
+| Size | median **10**, mean 10.3, max 38 |
+| Samples grouped | **2,107 of 2,108** |
+| Cohorts pooling two raw tissues | 10, all from `SAME_ORGAN` (OSD-194, OSD-397, OSD-401, OSD-580) |
+
+| depth | pooled | member vs member | gain |
+| --- | --- | --- | --- |
+| top-5 | **0.747** | **0.158** | 4.7x |
+| top-20 | 0.785 | 0.210 | 3.7x |
+| top-100 | 0.830 | 0.300 | 2.8x |
+
+Nulls: structure-free 0.343 (margin **+0.404**), within-study 0.673 (margin **+0.075**).
+
+| k | cohorts | stability | sd |
+| --- | --- | --- | --- |
+| 2 | 4 | 0.409 | 0.162 |
+| 3 | 16 | 0.449 | 0.288 |
+| 4 | 9 | 0.603 | 0.192 |
+| 5-9 (merged) | 71 | 0.734 | 0.179 |
+| 10-14 | 63 | 0.810 | 0.130 |
+| 15+ | 41 | 0.856 | 0.113 |
+
+The knee is still k >= 5, so `LOW_N_THRESHOLD` stands.
+Spherical against raw mean: median cosine 0.9999994, worst 0.99951, identical top-5 in 111 of 204 cohorts.
+
+Why organ is not the shared tissue vocabulary's bucket, measured as mean cosine within each tissue and between the two, per arm:
+
+| study | tissues | within | between | pooled? |
+| --- | --- | --- | --- | --- |
+| OSD-401 | gastrocnemius / quadriceps | 0.9997-0.9998 | 0.9994-0.9995 | yes |
+| OSD-580 | heart / right ventricle | 0.9964-0.9996 | 0.9969-0.9986 | yes |
+| OSD-397, OSD-194 | left / right retina | 0.9852-0.9990 | 0.9894-0.9981 | yes |
+| OSD-457 | brown / white adipose | 0.9981-0.9997 | 0.9581-0.9659 | no |
+| OSD-164 | liver / spleen | 0.9915-0.9999 | 0.8733-0.9102 | no |
+| OSD-457 | temporal bone / mandible | 0.9772-0.9978 | 0.8549-0.8763 | no |
+| OSD-457 | liver / cerebrum (reference) | - | 0.8774 | no |

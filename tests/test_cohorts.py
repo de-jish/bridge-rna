@@ -25,21 +25,30 @@ def test_study_is_pinned_and_cannot_be_removed():
     boundary: same-study membership alone supplies 84% of a cohort's coherence.
     So the pinned facet has to survive every route into the definition, not just
     the one the UI takes."""
-    assert C.PINNED_FACETS == ("study",)
-    assert "study" in C.normalize_facets([])
-    assert "study" in C.normalize_facets(["tissue"])
-    assert "study" in C.normalize_facets(None)
-    assert C.FACETS_BY_KEY["study"].reason, "a pinned facet must say why"
+    assert C.PINNED_FACETS == ("study", "organ")
+    for keys in ([], ["spaceflight"], None):
+        assert {"study", "organ"} <= set(C.normalize_facets(keys))
+    for key in C.PINNED_FACETS:
+        assert C.FACETS_BY_KEY[key].reason, "a pinned facet must say why"
 
 
 def test_normalize_facets_canonicalizes_order_and_drops_unknowns():
     got = C.normalize_facets(["spaceflight", "tissue", "not-a-column", "study"])
-    assert got == ("study", "tissue", "spaceflight"), (
-        "registry order, unknowns dropped")
+    assert got == ("study", "organ", "spaceflight"), (
+        "registry order, unknowns dropped, and the retired tissue key ignored")
 
 
-def test_default_definition_is_the_curated_isatab_grouping():
-    assert C.DEFAULT_FACETS == ("study", "tissue", "spaceflight")
+def test_default_definition_is_study_organ_and_arm():
+    assert C.DEFAULT_FACETS == ("study", "organ", "spaceflight")
+
+
+def test_spaceflight_arm_is_the_only_choice_on_the_group_by_row():
+    """Tissue was a chip until 2026-10-22. Joshua removed it: it split 70
+    whole-study cohorts into 83, mostly left from right retina. Organ stays in
+    every definition but draws no chip, because it cannot be unticked."""
+    assert [f.key for f in C.CHIP_FACETS] == ["study", "spaceflight"]
+    assert [f.key for f in C.CHIP_FACETS if not f.pinned] == ["spaceflight"]
+    assert not C.FACETS_BY_KEY["organ"].shown
 
 
 def test_the_registry_is_exactly_the_curated_grouping_and_nothing_else():
@@ -48,7 +57,7 @@ def test_the_registry_is_exactly_the_curated_grouping_and_nothing_else():
     size is what the measured stability curve is a function of, so a finer
     definition trades away the quantity the feature exists to buy. Pinned here
     so a facet cannot drift back onto the rail without this test being read."""
-    assert tuple(f.key for f in C.FACETS) == ("study", "tissue", "spaceflight")
+    assert tuple(f.key for f in C.FACETS) == ("study", "organ", "spaceflight")
     assert C.DEFAULT_FACETS == tuple(f.key for f in C.FACETS), (
         "every remaining facet is on by default")
 
@@ -86,11 +95,12 @@ def test_adding_a_facet_only_ever_splits(two_arm_study):
     facet that has since been deleted, which would have been a second way to go
     vacuous, but it was already not testing the invariant it is named for.
     `two_arm_study` crosses two tissues with three arms, so each step of the
-    chain genuinely divides.
+    chain genuinely divides. Organ is pinned, so the coarsest definition is
+    already one cohort per tissue.
     """
-    chain = [["study"], ["study", "tissue"], ["study", "tissue", "spaceflight"]]
+    chain = [["study"], ["study", "spaceflight"]]
     partitions = [C.build_cohorts(keys, metadata=two_arm_study) for keys in chain]
-    assert [len(p) for p in partitions] == [1, 2, 6], (
+    assert [len(p) for p in partitions] == [2, 6], (
         "each step must actually divide, or the containment check is vacuous")
 
     for coarser, finer in zip(partitions, partitions[1:]):
@@ -114,11 +124,13 @@ def test_every_sample_keeps_its_cohort_when_a_facet_is_dropped():
             "widening dropped a sample that the default definition grouped")
 
 
-def test_widening_to_study_alone_gives_one_cohort_per_study():
+def test_unticking_the_arm_gives_one_cohort_per_study_organ():
+    """Organ is pinned, so the widest definition still never pools two organs."""
     cohorts = C.build_cohorts(["study"])
-    studies = {c.study for c in cohorts}
-    assert len(cohorts) == len(studies)
-    assert all(c.label == "Whole study" for c in cohorts)
+    md = C.cohort_metadata()
+    pairs = {(s, C.organ_of(t)) for s, t in zip(md["study"], md["tissue"])}
+    assert len(cohorts) == len(pairs)
+    assert all(c.label == c.tissue_label and c.label for c in cohorts)
 
 
 def test_cohorts_are_listed_largest_first():
@@ -137,7 +149,7 @@ def test_a_cohort_id_from_another_definition_does_not_resolve():
     """The store carries an id, not a member list, so a cohort selected under
     one definition must not silently resolve under a different one."""
     wide = C.build_cohorts(["study"])[0]
-    assert C.find_cohort(wide.cohort_id, facets=["study", "tissue"]) is None
+    assert C.find_cohort(wide.cohort_id, facets=["study", "spaceflight"]) is None
 
 
 def test_study_filter_matches_grouping_then_filtering():
@@ -430,31 +442,23 @@ def test_siblings_differ_in_exactly_one_facet_and_share_the_study(two_arm_study)
     assert tested, "no comparable pair was produced"
 
 
-def test_siblings_are_offered_along_each_axis_but_never_along_two(two_arm_study):
+def test_siblings_are_the_other_arms_of_the_same_organ(two_arm_study):
     """What "one facet apart" buys, stated concretely.
 
     Liver/Space Flight can be compared against the other two Liver arms, where
-    the contrast is the arm, and against Soleus/Space Flight, where the contrast
-    is the tissue. Both are attributable, so both are offered and the UI names
-    which facet differs. Soleus/Ground Control is not offered: it differs in
-    tissue *and* arm, so its overlap number could not be attributed to either.
+    the contrast is the arm. Soleus/Space Flight differs only in organ, which is
+    pinned so that organs never pool, not so that they can be contrasted, so it
+    is not offered. Soleus/Ground Control differs in organ *and* arm, so its
+    overlap number could not be attributed to either.
     """
     liver_flight = next(c for c in C.build_cohorts(metadata=two_arm_study)
-                        if c.values["tissue"] == "Liver"
+                        if c.values["organ"] == "Liver"
                         and c.values["spaceflight"] == "Space Flight")
     siblings = C.sibling_cohorts(liver_flight, metadata=two_arm_study)
 
-    by_facet: dict[str, set] = {}
-    for s in siblings:
-        by_facet.setdefault(C.contrast_facet(liver_flight, s), set()).add(s.label)
-    assert set(by_facet) == {"spaceflight", "tissue"}
-    assert by_facet["spaceflight"] == {"Liver · Ground Control",
-                                       "Liver · Basal Control"}
-    assert by_facet["tissue"] == {"Soleus · Space Flight"}
-
-    offered = {s.label for s in siblings}
-    assert "Soleus · Ground Control" not in offered
-    assert "Soleus · Basal Control" not in offered
+    assert {C.contrast_facet(liver_flight, s) for s in siblings} == {"spaceflight"}
+    assert {s.label for s in siblings} == {"Liver · Ground Control",
+                                           "Liver · Basal Control"}
 
 
 def test_a_cohort_is_never_its_own_sibling(two_arm_study):
@@ -643,3 +647,63 @@ def test_the_cards_dot_colours_are_the_figures_own():
 
     assert token("--accent-teal") == GRAPH_THEME["cohort_a"]
     assert token("--accent-warm") == GRAPH_THEME["cohort_b"]
+
+
+# --- Organ: which tissues pool as one -----------------------------------------
+
+
+def _study(tissues_by_arm: dict[str, list[str]], study: str = "OSD-9"):
+    import pandas as pd
+
+    rows = [{"sample_key": f"{study}|{arm[:3]}_{t}_{i}", "study": study,
+             "tissue": t, "spaceflight": arm}
+            for arm, tissues in tissues_by_arm.items()
+            for i, t in enumerate(tissues)]
+    return pd.DataFrame(rows)
+
+
+def test_only_the_measured_pairs_pool_as_one_organ():
+    """Each merge in SAME_ORGAN was measured: the cosine between the two tissues
+    sits inside the range within each. Everything else is its own organ."""
+    assert C.organ_of("Left retina") == C.organ_of("Right retina") == "Retina"
+    assert C.organ_of("Heart") == C.organ_of("heart right ventricle") == "Heart"
+    assert C.organ_of("Gastrocnemius") == C.organ_of("Quadriceps femoris")
+    assert C.organ_of("Soleus") == "Soleus"
+    assert C.organ_of("Unknown") == C.organ_of("") == "Unknown"
+    assert set(C.SAME_ORGAN) == {k.lower() for k in C.SAME_ORGAN}, "keys are lowercased"
+
+
+@pytest.mark.parametrize("pair", [
+    ("Temporal Bone", "Mandible"),                         # 0.85-0.88 between
+    ("brown adipose tissue", "white adipose tissue"),      # 0.96 between
+    ("Liver", "Spleen"),                                   # 0.87-0.91 between
+    ("Liver", "Cerebrum"),
+])
+def test_distinct_tissues_of_one_study_never_pool(pair):
+    """The shared tissue vocabulary puts temporal bone with mandible and brown
+    fat with white, and both pairs measured clearly apart, so it is not what
+    defines an organ here. OSD-457 and OSD-164 are the real cases."""
+    md = _study({"Space Flight": [pair[0], pair[0], pair[1], pair[1]]})
+    cohorts = C.build_cohorts(metadata=md)
+    assert sorted(c.label for c in cohorts) == sorted(
+        f"{t} · Space Flight" for t in pair)
+
+
+def test_a_merged_cohort_names_what_it_merged_in_the_same_order_on_every_arm():
+    md = _study({"Space Flight": ["Right retina", "Right retina", "Left retina"],
+                 "Ground Control": ["Left retina", "Left retina", "Right retina"]})
+    cohorts = C.build_cohorts(metadata=md)
+    assert sorted(c.label for c in cohorts) == [
+        "Left retina + Right retina · Ground Control",
+        "Left retina + Right retina · Space Flight"]
+    assert all(c.size == 3 for c in cohorts)
+    (flight,) = [c for c in cohorts if c.values["spaceflight"] == "Space Flight"]
+    assert [s.label for s in C.sibling_cohorts(flight, metadata=md)] == [
+        "Left retina + Right retina · Ground Control"]
+
+
+def test_every_real_cohort_pools_one_organ():
+    md = C.cohort_metadata().set_index("sample_key")
+    for c in C.build_cohorts():
+        organs = {C.organ_of(t) for t in md.loc[list(c.members), "tissue"]}
+        assert len(organs) == 1, f"{c.cohort_id} pools {organs}"

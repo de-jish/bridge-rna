@@ -277,6 +277,8 @@ The UI shows it as a pinned chip that cannot be removed, with the reason on hove
 
 #### What the user controls
 
+**Superseded on 2026-10-22: the definition is now `(study, organ, spaceflight arm)` and Spaceflight arm is the only chip.** See "Organ replaces the Tissue chip" below; the table here is the original design.
+
 Three facets are available, drawn from `cache/osdr_metadata.parquet`, which is exactly the table of the 2,108 samples that have a cached embedding.
 
 | facet | default | note |
@@ -287,6 +289,45 @@ Three facets are available, drawn from `cache/osdr_metadata.parquet`, which is e
 
 Unticking one merges cohorts and makes them larger: dropping Tissue pools a study's organs, dropping Spaceflight arm pools its flight animals with its controls.
 The cohort count and the size distribution update live under the chips.
+
+#### Organ replaces the Tissue chip (2026-10-22)
+
+Joshua removed the Tissue chip after reading what it bought on the definition line under the chips: Study + Tissue made 83 cohorts against 70 for Study alone.
+Most of those 13 splits were cosmetic: left from right retina, heart from right ventricle, gastrocnemius from quadriceps.
+He wants cohorts to be about the spaceflight arm.
+
+Removing tissue from the definition outright was measured first and rejected with him.
+It would have pooled different tissues into one query in two studies: OSD-457's 96 animals per arm span nine tissues, and OSD-164 pairs liver with spleen.
+The mean of a liver and a brain embedding resembles no real sample, so the matches for such a cohort answer no question.
+
+So a pinned, hidden facet, **organ**, keeps different organs apart.
+The first version took organ from the shared tissue vocabulary (`manifold.tissue.canonical_tissue`), and measurement rejected it before it shipped.
+The vocabulary is built to color a map, and its buckets are too coarse for pooling: it puts temporal bone with mandible and brown fat with white.
+
+| study | tissues | within each | between the two |
+| --- | --- | --- | --- |
+| OSD-401 | gastrocnemius / quadriceps | 0.9997-0.9998 | 0.9994-0.9995 |
+| OSD-580 | heart / right ventricle | 0.9964-0.9996 | 0.9969-0.9986 |
+| OSD-397, OSD-194 | left / right retina | 0.9852-0.9990 | 0.9894-0.9981 |
+| OSD-457 | brown / white adipose | 0.9981-0.9997 | 0.9581-0.9659 |
+| OSD-164 | liver / spleen | 0.9915-0.9999 | 0.8733-0.9102 |
+| OSD-457 | temporal bone / mandible | 0.9772-0.9978 | 0.8549-0.8763 |
+| OSD-457 | liver / cerebrum, for reference | - | 0.8774 |
+
+Mean pairwise cosine of the cached embeddings, per arm.
+The first three pairs are interchangeable: the cosine between them sits inside the range within each.
+The bone pair is as far apart as liver and cerebrum.
+
+So organ is OSDR's raw tissue value, except for the measured pairs in `bridge_rna/cohorts.SAME_ORGAN`.
+A value nobody has measured is its own organ and can never be merged by accident.
+A merged cohort's label names what it holds, "Left retina + Right retina · Space Flight", alphabetically so every arm of a study reads the same.
+
+Organ siblings are not offered as a comparison: organ is pinned so that organs never pool, not so that two can be contrasted, and Joshua asked for comparisons about the arm.
+Unticking Spaceflight arm still merges a study's arms, now into one cohort per organ: 79 cohorts.
+
+Under the new definition there are 204 cohorts across 70 studies (median 10, max 38) grouping 2,107 of 2,108 samples, against 212 grouping 2,105.
+The full `validate_cohorts.py` sweep passes all six checks: leave-one-out top-5 stability 0.747 against 0.158 for single samples (4.7x, was 0.738 and 4.6x), and the size knee is still 5.
+Numbers in `REFERENCE.md` section 13.
 
 **Six further facets were offered and were removed on 2026-08-05: sex, strain, genotype, habitat, mission duration, diet.**
 They came from the same parquet and cost nothing to offer, which is exactly why they were there, and that turned out to be the wrong reason.
