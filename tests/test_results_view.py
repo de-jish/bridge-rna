@@ -109,36 +109,39 @@ def test_identical_profiles_are_named_in_the_gsm_cell():
     rows = [_row("GSM1", 1, 0.99, identical=["GSM9"]), _row("GSM9", 2, 0.99,
                                                              identical=["GSM1"])]
     html = str(V.render_table(rows, _results(rows), V.DEFAULT_SORT))
-    assert "Same profile: GSM9" in html and "Same profile: GSM1" in html
+    # Plain words since 2026-10-22: "identical profile" read as jargon.
+    assert "Same data as GSM9" in html and "Same data as GSM1" in html
+    panel = str(V.build_results_panel())
+    assert "Merge identical" not in panel and "filter-series-mode" not in panel
 
 
 def test_ranks_are_never_renumbered_by_a_filter():
     rows = [_row(f"GSM{i}", i, 1 - i / 100, gse="GSE1" if i % 2 else "GSE2")
             for i in range(1, 7)]
     results = _results(rows)
-    filters = R.normalize_filters({"series": ["GSE2"], "series_mode": "only"})
-    shown, _hidden = V.visible_rows(results, filters, V.DEFAULT_SORT)
+    filters = R.normalize_filters({"series": ["GSE2"]})
+    shown = V.visible_rows(results, filters, V.DEFAULT_SORT)
     assert [r["rank_a"] for r in shown] == [2, 4, 6]
 
 
-def test_filters_from_the_controls_include_the_merge_checkbox():
-    values = [["GSE1"], "hide", [], [], None, "", ["on"], "either"]
-    filters = V.filters_from_inputs(values)
-    assert filters["series"] == ["GSE1"] and filters["series_mode"] == "hide"
-    assert filters["merge_identical"] is True
+def test_the_filter_controls_have_no_merge_box_and_no_series_mode():
+    """Both removed on 2026-10-22 at Joshua's request."""
+    assert [cid for cid, _key in V.FILTER_INPUTS] == [
+        "filter-series", "filter-tissue", "filter-species", "filter-min-score",
+        "filter-text", "filter-retrieved-by"]
+    filters = V.filters_from_inputs([["GSE1"], [], [], None, "", "either"])
+    assert filters["series"] == ["GSE1"]
     assert V.filters_from_inputs([None] * len(V.FILTER_INPUTS)) == R.default_filters()
 
 
 def test_summary_states_the_rank_rule_only_when_ranks_stop_being_contiguous():
     results = _results([_row("GSM1", 1, 0.99), _row("GSM2", 2, 0.98)])
-    plain = V._summary(results, 2, 0, filtered=False)
+    plain = V._summary(results, 2, filtered=False)
     assert "not biological equivalence" in plain and "Query A" in plain
     assert "positions among all" not in plain
-    filtered = V._summary(results, 1, 0, filtered=True)
+    filtered = V._summary(results, 1, filtered=True)
     assert filtered.startswith("1 of 2 matches shown.")
     assert "positions among all 940,455 reference samples" in filtered
-    merged = V._summary(results, 1, 1, filtered=False)
-    assert "1 identical profile merged" in merged
 
 
 # --- Plot routing -------------------------------------------------------------
@@ -197,9 +200,9 @@ def test_export_is_the_visible_rows_in_table_order():
     rows = [_row(f"GSM{i}", i, 1 - i / 100, gse="GSE1" if i < 3 else "GSE2")
             for i in range(1, 5)]
     results = _results(rows)
-    filters = R.normalize_filters({"series": ["GSE2"], "series_mode": "hide"})
+    filters = R.normalize_filters({"series": ["GSE1"]})
     sort = {"column": "rank_a", "descending": True}
-    shown, _ = V.visible_rows(results, filters, sort)
+    shown = V.visible_rows(results, filters, sort)
     text = R.to_csv(shown, results, filters, sort, {}, "2026-10-21 00:00:00 UTC")
     frame = pd.read_csv(io.StringIO(text), comment="#")
     assert frame["gsm"].tolist() == ["GSM2", "GSM1"]

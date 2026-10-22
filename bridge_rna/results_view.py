@@ -50,12 +50,10 @@ DEFAULT_SORT = {"column": "rank_a", "descending": False}
 # layout, the callbacks and the Clear button.
 FILTER_INPUTS = (
     ("filter-series", "series"),
-    ("filter-series-mode", "series_mode"),
     ("filter-tissue", "tissue"),
     ("filter-species", "species"),
     ("filter-min-score", "min_score"),
     ("filter-text", "text"),
-    ("filter-merge", "merge_identical"),
     ("filter-retrieved-by", "retrieved_by"),
 )
 
@@ -163,11 +161,6 @@ def build_results_panel() -> Any:
                            **{"aria-live": "polite"}),
                 ]),
                 html.Div(className="results-actions", children=[
-                    dcc.Checklist(
-                        id="filter-merge", value=[],
-                        options=[{"label": " Merge identical profiles",
-                                  "value": "on"}],
-                        className="dash-checklist results-merge"),
                     html.Button("Clear filters", id="filter-clear", n_clicks=0,
                                 className="btn-ghost btn-compact",
                                 style={"display": "none"}),
@@ -183,15 +176,8 @@ def build_results_panel() -> Any:
                     role="group",
                     **{"aria-labelledby": "filter-series-label"},
                     children=[
-                        html.Div(className="results-filter-head", children=[
-                            html.Label("Series", id="filter-series-label",
-                                       className="control-label"),
-                            dcc.RadioItems(
-                                id="filter-series-mode", value="only", inline=True,
-                                options=[{"label": "Show only", "value": "only"},
-                                         {"label": "Hide", "value": "hide"}],
-                                className="results-seg results-seg--mini"),
-                        ]),
+                        html.Label("Series", id="filter-series-label",
+                                   className="control-label"),
                         dcc.Dropdown(id="filter-series", multi=True, options=[],
                                      value=[], placeholder="All series",
                                      className="results-dropdown"),
@@ -339,10 +325,13 @@ def _cell(row: dict, key: str, kind: str, k: int) -> Any:
             **{"aria-label": f"Inspect {_safe_str(value)}"})]
         twins = [g for g in row.get("identical") or [] if g]
         if twins:
+            # Plain words, because "identical profile" read as jargon. Two rows
+            # with one score look like an error until this says why.
             children.append(html.Span(
-                "Same profile: " + ", ".join(twins), className="result-twin",
-                title="An identical expression profile is also deposited as "
-                      + ", ".join(twins) + "."))
+                "Same data as " + ", ".join(twins), className="result-twin",
+                title="This sample's expression data is identical to "
+                      + ", ".join(twins)
+                      + ": the same data deposited in GEO under another accession."))
         return html.Td(children, className="col-gsm")
     cls = f"col-{key}"
     if kind == "num":
@@ -413,18 +402,16 @@ def _reference_count() -> int:
 
 def filters_from_inputs(values: list[Any]) -> dict:
     raw = {key: value for (_id, key), value in zip(FILTER_INPUTS, values)}
-    merge = raw.get("merge_identical")
-    raw["merge_identical"] = bool(merge and "on" in merge)
     return R.normalize_filters(raw)
 
 
 def visible_rows(results: dict | None, filters: dict,
-                 sort: dict | None) -> tuple[list[dict], int]:
-    """The rows the table shows, in table order, and how many merging hid."""
+                 sort: dict | None) -> list[dict]:
+    """The rows the table shows, in table order."""
     if not results or not results.get("rows"):
-        return [], 0
-    kept, hidden = R.apply_filters(results["rows"], filters)
-    return R.sort_rows(kept, sort or DEFAULT_SORT), hidden
+        return []
+    return R.sort_rows(R.apply_filters(results["rows"], filters),
+                       sort or DEFAULT_SORT)
 
 
 def _identical_gsm_groups(payload: dict) -> list[list[str]]:
@@ -453,14 +440,11 @@ def _identical_gsm_groups(payload: dict) -> list[list[str]]:
     return [[gsms[i] for i in group] for group in identical_groups(unit)]
 
 
-def _summary(results: dict, shown: int, hidden: int, filtered: bool) -> str:
+def _summary(results: dict, shown: int, filtered: bool) -> str:
     total = len(results.get("rows") or [])
     across = " across both cohorts" if results.get("comparison") else ""
-    if filtered or hidden:
+    if filtered:
         text = f"{shown:,} of {total:,} matches shown{across}."
-        if hidden:
-            noun = "profile" if hidden == 1 else "profiles"
-            text += f" {hidden:,} identical {noun} merged."
         ref = int(results.get("reference_count") or 0)
         if ref:
             text += f" Ranks are positions among all {ref:,} reference samples."
@@ -594,11 +578,7 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
     )
     def derive_results(payload, _mounted):
         defaults = R.default_filters()
-        reset = [
-            defaults["series"], defaults["series_mode"], defaults["tissue"],
-            defaults["species"], defaults["min_score"], defaults["text"],
-            ["on"] if defaults["merge_identical"] else [], defaults["retrieved_by"],
-        ]
+        reset = [defaults[key] for _cid, key in FILTER_INPUTS]
         results = R.build_results(
             payload, reference_count=_reference_count(),
             identical_groups=_identical_gsm_groups(payload) if payload else ())
@@ -660,12 +640,12 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
         if not results or not results.get("rows"):
             return (empty_table_message("Run a search to list its matches here."),
                     "", "", True, True, clear_style, True, 0, [])
-        rows, hidden = visible_rows(results, filters, sort)
+        rows = visible_rows(results, filters, sort)
         # Anything but the pager asks for the first page: a new result, a
         # filter or a sort changes which rows page 3 would hold.
         requested = page if ctx.triggered_id == "results-page-store" else 0
         info = R.page_rows(rows, requested or 0)
-        summary = _summary(results, len(rows), hidden, active)
+        summary = _summary(results, len(rows), active)
         if not rows:
             return (empty_table_message("No matches pass these filters."),
                     summary, "", True, True, clear_style, True, info["page"], [])
@@ -717,9 +697,7 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
     )
     def clear_filters(_n):
         d = R.default_filters()
-        return (d["series"], d["series_mode"], d["tissue"], d["species"],
-                d["min_score"], d["text"], ["on"] if d["merge_identical"] else [],
-                d["retrieved_by"])
+        return tuple(d[key] for _cid, key in FILTER_INPUTS)
 
     @app.callback(
         Output("selected-node-store", "data", allow_duplicate=True),
@@ -781,7 +759,7 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
         if (ctx.triggered_id == "selected-node-store"
                 and (_safe_str(kind) or DEFAULT_PLOT_KIND) == "network"):
             return no_update, no_update, no_update, no_update
-        rows, _hidden = visible_rows(results, filters_from_inputs(filter_values), sort)
+        rows = visible_rows(results, filters_from_inputs(filter_values), sort)
         try:
             fig, caption, legend = build_plot(_safe_str(kind) or DEFAULT_PLOT_KIND,
                                               results, rows, selected,
@@ -810,7 +788,7 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
         if not n_clicks or not results or not results.get("rows"):
             return no_update
         filters = filters_from_inputs(filter_values)
-        rows, _hidden = visible_rows(results, filters, sort)
+        rows = visible_rows(results, filters, sort)
         hits = list((payload or {}).get("hits") or [])
         hits += list(((payload or {}).get("comparison") or {}).get("hits_b") or [])
         lookup: dict[str, dict] = {}

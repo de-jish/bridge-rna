@@ -1,4 +1,4 @@
-"""Tests for `bridge_rna.results`: rows, filters, merge, sort, page and CSV.
+"""Tests for `bridge_rna.results`: rows, filters, sort, page and CSV.
 
 Everything here runs on hand-built hit lists shaped like the hits-store payload
 the search callbacks write, so none of it needs the memmap or the cache.
@@ -263,8 +263,8 @@ def test_default_filters_are_inactive_and_valid():
     f = R.default_filters()
     assert f == R.normalize_filters(None)
     assert not R.filters_active(f)
-    assert set(f) == {"series", "series_mode", "tissue", "species", "min_score",
-                      "text", "merge_identical", "retrieved_by"}
+    assert set(f) == {"series", "tissue", "species", "min_score", "text",
+                      "retrieved_by"}
 
 
 @pytest.mark.parametrize("raw", [None, {}, [], "junk", 3, {"unrelated": 1}])
@@ -274,13 +274,15 @@ def test_normalize_filters_tolerates_garbage(raw):
 
 def test_normalize_filters_coerces_widget_values():
     f = R.normalize_filters({
-        "series": "GSE1", "series_mode": "HIDE", "tissue": ("Eye", None, "", "Eye"),
+        "series": "GSE1", "tissue": ("Eye", None, "", "Eye"),
         "species": None, "min_score": " 0.95 ", "text": "  retina ",
-        "merge_identical": ["on"], "retrieved_by": "Both",
+        "retrieved_by": "Both",
+        # Retired controls a stale session could still send: ignored.
+        "series_mode": "hide", "merge_identical": ["on"],
     })
-    assert f == {"series": ["GSE1"], "series_mode": "hide", "tissue": ["Eye"],
+    assert f == {"series": ["GSE1"], "tissue": ["Eye"],
                  "species": [], "min_score": 0.95, "text": "retina",
-                 "merge_identical": True, "retrieved_by": "both"}
+                 "retrieved_by": "both"}
 
 
 @pytest.mark.parametrize("value, expected", [
@@ -291,18 +293,9 @@ def test_normalize_min_score(value, expected):
     assert R.normalize_filters({"min_score": value})["min_score"] == expected
 
 
-@pytest.mark.parametrize("value, expected", [
-    (True, True), (False, False), ([], False), (["merge"], True), ("on", True),
-    ("off", False), (None, False), (1, True),
-])
-def test_normalize_merge_flag(value, expected):
-    assert R.normalize_filters({"merge_identical": value})["merge_identical"] is expected
-
-
 def test_normalize_rejects_unknown_modes():
-    f = R.normalize_filters({"series_mode": "except", "retrieved_by": "neither",
-                             "text": 5})
-    assert (f["series_mode"], f["retrieved_by"], f["text"]) == ("only", "either", "")
+    f = R.normalize_filters({"retrieved_by": "neither", "text": 5})
+    assert (f["retrieved_by"], f["text"]) == ("either", "")
 
 
 # --- apply_filters ----------------------------------------------------------
@@ -310,100 +303,71 @@ def test_normalize_rejects_unknown_modes():
 
 def run(filters, res=None):
     res = res or single_results()
-    kept, hidden = R.apply_filters(res["rows"], filters)
-    return gsms(kept), hidden
+    return gsms(R.apply_filters(res["rows"], filters))
 
 
 def test_no_filters_keep_every_row():
-    assert run(None) == (["GSM10", "GSM11", "GSM12", "GSM13", "GSM14"], 0)
+    assert run(None) == ["GSM10", "GSM11", "GSM12", "GSM13", "GSM14"]
 
 
-def test_series_only_and_hide():
-    assert run({"series": ["GSE8"]}) == (["GSM12", "GSM14"], 0)
-    assert run({"series": ["GSE8"], "series_mode": "hide"}) == \
-        (["GSM10", "GSM11", "GSM13"], 0)
-    assert run({"series": ["GSE7", "GSE9"]}) == (["GSM10", "GSM11", "GSM13"], 0)
+def test_a_series_filter_shows_only_the_chosen_series():
+    """Show only is the one series mode since 2026-10-22; Hide was removed."""
+    assert run({"series": ["GSE8"]}) == ["GSM12", "GSM14"]
+    assert run({"series": ["GSE7", "GSE9"]}) == ["GSM10", "GSM11", "GSM13"]
+    assert run({"series": ["GSE8"], "series_mode": "hide"}) == ["GSM12", "GSM14"]
 
 
 def test_tissue_and_species():
-    assert run({"tissue": ["Eye"]}) == (["GSM10", "GSM11", "GSM13"], 0)
-    assert run({"species": ["Homo sapiens"]}) == (["GSM12", "GSM14"], 0)
+    assert run({"tissue": ["Eye"]}) == ["GSM10", "GSM11", "GSM13"]
+    assert run({"species": ["Homo sapiens"]}) == ["GSM12", "GSM14"]
 
 
 def test_min_score_is_inclusive():
-    assert run({"min_score": 0.97}) == (["GSM10", "GSM11", "GSM12"], 0)
-    assert run({"min_score": 1.5}) == ([], 0)
+    assert run({"min_score": 0.97}) == ["GSM10", "GSM11", "GSM12"]
+    assert run({"min_score": 1.5}) == []
 
 
 def test_min_score_uses_the_best_present_score_in_a_comparison():
     res = comparison_results()
     # GSM1 scores 0.9 in A and 0.7 in B; its best (0.9) passes 0.85.
-    assert run({"min_score": 0.85}, res) == (["GSM1", "GSM3"], 0)
+    assert run({"min_score": 0.85}, res) == ["GSM1", "GSM3"]
 
 
 def test_text_search_is_case_insensitive_over_four_fields():
-    assert run({"text": "RETINA"}) == (["GSM10", "GSM11"], 0)
-    assert run({"text": "gsm12"}) == (["GSM12"], 0)
-    assert run({"text": "gse9"}) == (["GSM13"], 0)
-    assert run({"text": "Hepato"}) == (["GSM12"], 0)
+    assert run({"text": "RETINA"}) == ["GSM10", "GSM11"]
+    assert run({"text": "gsm12"}) == ["GSM12"]
+    assert run({"text": "gse9"}) == ["GSM13"]
+    assert run({"text": "Hepato"}) == ["GSM12"]
     # Tissue is not a searched field.
-    assert run({"text": "kidney"}) == (["GSM14"], 0)
-    assert run({"text": "Liver"}) == (["GSM12"], 0)
-    assert run({"text": "Mus musculus"}) == ([], 0)
+    assert run({"text": "kidney"}) == ["GSM14"]
+    assert run({"text": "Liver"}) == ["GSM12"]
+    assert run({"text": "Mus musculus"}) == []
 
 
 def test_filters_combine_with_and():
-    assert run({"tissue": ["Eye"], "series": ["GSE7"], "min_score": 0.985}) == (["GSM10"], 0)
+    assert run({"tissue": ["Eye"], "series": ["GSE7"], "min_score": 0.985}) == ["GSM10"]
 
 
 def test_filtering_preserves_input_order():
     res = single_results()
     reordered = list(reversed(res["rows"]))
-    kept, _ = R.apply_filters(reordered, {"tissue": ["Eye"]})
+    kept = R.apply_filters(reordered, {"tissue": ["Eye"]})
     assert gsms(kept) == ["GSM13", "GSM11", "GSM10"]
 
 
 def test_filtering_never_renumbers_ranks():
-    kept, _ = R.apply_filters(single_results()["rows"], {"series": ["GSE8"]})
+    kept = R.apply_filters(single_results()["rows"], {"series": ["GSE8"]})
     assert [r["rank_a"] for r in kept] == [3, 5]
 
 
-def test_merge_keeps_the_best_ranked_twin_and_counts_the_rest():
-    res = single_results(identical_groups=[["GSM10", "GSM13"]])
-    assert run({"merge_identical": True}, res) == (["GSM10", "GSM11", "GSM12", "GSM14"], 1)
-
-
-def test_merge_runs_after_filters_so_a_twin_survives():
-    # GSM10 is the better copy, but the series filter removes it first.
-    res = single_results(identical_groups=[["GSM10", "GSM13"]])
-    assert run({"merge_identical": True, "series": ["GSE9"]}, res) == (["GSM13"], 0)
-    assert run({"merge_identical": True, "text": "re-deposit"}, res) == (["GSM13"], 0)
-
-
-def test_merge_of_a_three_member_group_hides_two():
-    res = single_results(identical_groups=[["GSM11", "GSM12", "GSM14"]])
-    assert run({"merge_identical": True}, res) == (["GSM10", "GSM11", "GSM13"], 2)
-
-
-def test_merge_follows_best_rank_not_input_order():
-    res = single_results(identical_groups=[["GSM10", "GSM13"]])
-    rows = list(reversed(res["rows"]))
-    kept, hidden = R.apply_filters(rows, {"merge_identical": True})
-    assert "GSM10" in gsms(kept) and "GSM13" not in gsms(kept) and hidden == 1
-
-
-def test_merge_off_hides_nothing():
-    res = single_results(identical_groups=[["GSM10", "GSM13"]])
-    assert run({"merge_identical": False}, res)[1] == 0
-
-
-def test_merge_in_a_comparison_uses_the_best_of_either_rank():
-    a = [hit("GSM1", 0.9), hit("GSM2", 0.8), hit("GSM3", 0.7)]
-    b = [hit("GSM3", 0.95), hit("GSM4", 0.5)]
-    res = R.build_results(comparison_payload(a, b), reference_count=1,
-                          identical_groups=[["GSM2", "GSM3"]])
-    # GSM3 is B's rank 1, which beats GSM2's A rank 2.
-    assert run({"merge_identical": True}, res) == (["GSM1", "GSM3", "GSM4"], 1)
+def test_identical_profiles_stay_as_separate_rows():
+    """No merge: each copy of a re-deposited profile keeps its own row and rank,
+    and is marked with the other. The merge checkbox was removed on 2026-10-22."""
+    res = single_results(identical_groups=[["GSM13", "GSM10"]])
+    kept = R.apply_filters(res["rows"], None)
+    assert gsms(kept) == ["GSM10", "GSM11", "GSM12", "GSM13", "GSM14"]
+    by = {r["gsm"]: r for r in kept}
+    assert by["GSM10"]["identical"] == ["GSM13"] and by["GSM13"]["identical"] == ["GSM10"]
 
 
 @pytest.mark.parametrize("mode, expected", [
@@ -413,16 +377,16 @@ def test_merge_in_a_comparison_uses_the_best_of_either_rank():
     ("b", ["GSM3"]),
 ])
 def test_retrieved_by_on_a_comparison(mode, expected):
-    assert run({"retrieved_by": mode}, comparison_results()) == (expected, 0)
+    assert run({"retrieved_by": mode}, comparison_results()) == expected
 
 
 def test_retrieved_by_is_ignored_on_a_single_query():
     for mode in ("both", "a", "b"):
-        assert run({"retrieved_by": mode})[0] == gsms(single_results()["rows"])
+        assert run({"retrieved_by": mode}) == gsms(single_results()["rows"])
 
 
 def test_apply_filters_on_no_rows():
-    assert R.apply_filters([], {"merge_identical": True, "text": "x"}) == ([], 0)
+    assert R.apply_filters([], {"text": "x"}) == []
 
 
 # --- sort_rows --------------------------------------------------------------
@@ -568,7 +532,7 @@ def test_describe_each_filter():
     res = comparison_results()
     lines = R.describe_filters({
         "series": ["GSE1", "GSE2"], "tissue": ["Eye"], "species": ["Mus musculus"],
-        "min_score": 0.99, "text": "retina", "merge_identical": True,
+        "min_score": 0.99, "text": "retina",
         "retrieved_by": "both"}, res)
     assert lines == [
         "Only series: GSE1, GSE2",
@@ -577,14 +541,14 @@ def test_describe_each_filter():
         "Minimum score 0.99",
         'Text contains "retina"',
         "Retrieved by both cohorts",
-        "Identical profiles merged",
     ]
 
 
-def test_describe_hidden_series_and_cohort_names():
+def test_describe_series_and_cohort_names():
     res = comparison_results()
+    # A stale Hide mode is ignored: a series filter only ever shows.
     assert R.describe_filters({"series": ["GSE3"], "series_mode": "hide"}, res) == \
-        ["Hiding series: GSE3"]
+        ["Only series: GSE3"]
     assert R.describe_filters({"retrieved_by": "a"}, res) == \
         ["Retrieved only by Retina · Flight"]
     assert R.describe_filters({"retrieved_by": "b"}, res) == \
@@ -610,15 +574,15 @@ def test_retrieved_by_is_not_active_on_a_single_query():
 
 @pytest.mark.parametrize("change", [
     {"series": ["GSE1"]}, {"tissue": ["Eye"]}, {"species": ["Mus musculus"]},
-    {"min_score": 0.0}, {"text": "x"}, {"merge_identical": True},
+    {"min_score": 0.0}, {"text": "x"},
     {"retrieved_by": "a"},
 ])
 def test_each_filter_alone_is_active(change):
     assert R.filters_active(dict(R.default_filters(), **change))
 
 
-def test_series_mode_alone_is_not_active():
-    assert not R.filters_active({"series_mode": "hide"})
+def test_retired_controls_alone_are_not_active():
+    assert not R.filters_active({"series_mode": "hide", "merge_identical": True})
 
 
 # --- to_csv -----------------------------------------------------------------

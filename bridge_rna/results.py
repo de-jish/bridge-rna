@@ -1,7 +1,7 @@
 """The rows a retrieval returned, and every way the interface narrows them.
 
 This module is the only place that knows how a result row is built, filtered,
-merged, sorted, paged or exported. The table, the plots, the CSV and the AI
+sorted, paged or exported. The table, the plots, the CSV and the AI
 summary all call the same `apply_filters`, so the four can never disagree about
 which rows are in view. That is the reason it exists as one module rather than
 as logic spread through the callbacks.
@@ -14,12 +14,13 @@ writes are fixed in the "Contracts" section of `docs/retrieval-results.md`.
 Two rules from that contract shape most of the code below.
 
 Rank is a fact about the reference collection, never about the table. A row's
-rank is its position among every ARCHS4 sample for that query, so filtering,
-merging and sorting reorder or drop rows but never renumber them.
+rank is its position among every ARCHS4 sample for that query, so filtering
+and sorting reorder or drop rows but never renumber them.
 
-Filters run before identical-profile merging. A merge keeps the best-ranked
-member of a group, and doing it first would let a filter remove that member and
-take its twin with it, so a profile the user asked to see would vanish.
+Identical profiles (one expression profile deposited under two accessions) are
+marked on their rows and never merged. A "Merge identical profiles" checkbox
+existed until 2026-10-22; Joshua found it unclear, and each copy now stays its
+own row with a plain "Same data as GSM..." note.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ from typing import Any
 
 PAGE_SIZE = 50
 
-SERIES_MODES = ("only", "hide")
 RETRIEVED_BY = ("either", "both", "a", "b")
 SORT_COLUMNS = ("rank_a", "score_a", "rank_b", "score_b", "gsm", "gse",
                 "title", "tissue", "species")
@@ -227,10 +227,10 @@ def build_results(
 
 def default_filters() -> dict[str, Any]:
     return {
-        "series": [], "series_mode": "only",
+        "series": [],
         "tissue": [], "species": [],
         "min_score": None, "text": "",
-        "merge_identical": False, "retrieved_by": "either",
+        "retrieved_by": "either",
     }
 
 
@@ -260,17 +260,14 @@ def _flag(value: Any) -> bool:
 def normalize_filters(raw: Any) -> dict[str, Any]:
     """Any widget state, including None and wrong types, as a valid Filters dict."""
     raw = raw if isinstance(raw, Mapping) else {}
-    series_mode = _text(raw.get("series_mode")).lower()
     retrieved_by = _text(raw.get("retrieved_by")).lower()
     text = raw.get("text")
     return {
         "series": _string_list(raw.get("series")),
-        "series_mode": series_mode if series_mode in SERIES_MODES else "only",
         "tissue": _string_list(raw.get("tissue")),
         "species": _string_list(raw.get("species")),
         "min_score": _number(raw.get("min_score")),
         "text": text.strip() if isinstance(text, str) else "",
-        "merge_identical": _flag(raw.get("merge_identical")),
         "retrieved_by": retrieved_by if retrieved_by in RETRIEVED_BY else "either",
     }
 
@@ -293,10 +290,10 @@ def filters_active(filters: Any, results: Mapping[str, Any] | None = None) -> bo
 
 
 def _passes(row: Mapping[str, Any], f: Mapping[str, Any], comparison: bool) -> bool:
-    if f["series"]:
-        listed = row.get("gse", "") in f["series"]
-        if listed != (f["series_mode"] == "only"):
-            return False
+    # A series filter shows only the chosen series. A Hide mode existed until
+    # 2026-10-22 and was removed at Joshua's request.
+    if f["series"] and row.get("gse", "") not in f["series"]:
+        return False
     if f["tissue"] and row.get("tissue", "") not in f["tissue"]:
         return False
     if f["species"] and row.get("species", "") not in f["species"]:
@@ -319,48 +316,13 @@ def _passes(row: Mapping[str, Any], f: Mapping[str, Any], comparison: bool) -> b
 
 
 def apply_filters(rows: Sequence[Mapping[str, Any]],
-                  filters: Any) -> tuple[list[dict[str, Any]], int]:
-    """The rows that pass, in input order, and how many merging then hid."""
+                  filters: Any) -> list[dict[str, Any]]:
+    """The rows that pass, in input order."""
     f = normalize_filters(filters)
     # Every comparison row came from one of two top-k lists and B's list is
     # never empty, so a row set with no B rank is a single query.
     comparison = any(r.get("rank_b") is not None for r in rows)
-    kept = [r for r in rows if _passes(r, f, comparison)]
-    if not f["merge_identical"]:
-        return list(kept), 0
-
-    # Union-find over the survivors only, so a twin whose better copy was
-    # filtered out stands alone and is kept. Groups are measured to be pairs,
-    # but nothing here relies on that.
-    position = {r["gsm"]: i for i, r in enumerate(kept) if r.get("gsm")}
-    parent = list(range(len(kept)))
-
-    def root(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    for i, row in enumerate(kept):
-        for other in row.get("identical") or ():
-            j = position.get(other)
-            if j is not None:
-                parent[root(i)] = root(j)
-
-    winner: dict[int, int] = {}
-    for i, row in enumerate(kept):
-        r = root(i)
-        best = _best_rank(row)
-        current = winner.get(r)
-        if current is None:
-            winner[r] = i
-            continue
-        held = _best_rank(kept[current])
-        if best is not None and (held is None or best < held):
-            winner[r] = i
-    keep = set(winner.values())
-    merged = [row for i, row in enumerate(kept) if i in keep]
-    return merged, len(kept) - len(merged)
+    return [r for r in rows if _passes(r, f, comparison)]
 
 
 # --- sort and page ----------------------------------------------------------
@@ -448,8 +410,7 @@ def describe_filters(filters: Any, results: Mapping[str, Any] | None) -> list[st
     f = normalize_filters(filters)
     lines: list[str] = []
     if f["series"]:
-        verb = "Only series" if f["series_mode"] == "only" else "Hiding series"
-        lines.append(f"{verb}: {', '.join(f['series'])}")
+        lines.append(f"Only series: {', '.join(f['series'])}")
     if f["tissue"]:
         lines.append(f"Tissue category: {', '.join(f['tissue'])}")
     if f["species"]:
@@ -464,8 +425,6 @@ def describe_filters(filters: Any, results: Mapping[str, Any] | None) -> list[st
             "a": f"Retrieved only by {_side_name(results, 'a')}",
             "b": f"Retrieved only by {_side_name(results, 'b')}",
         }[f["retrieved_by"]])
-    if f["merge_identical"]:
-        lines.append("Identical profiles merged")
     return lines
 
 

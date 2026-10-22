@@ -1195,16 +1195,6 @@ summary:focus-visible,
 .results-filter--wide { flex: 2 1 230px; max-width: 340px; }
 .results-filter--grow { flex: 2 1 180px; }
 .results-filter .control-label { margin-bottom: var(--space-1); white-space: nowrap; }
-/* Series names its include/hide switch in its own label row, so all five
-   controls below share one baseline. */
-.results-filter-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  margin-bottom: var(--space-1);
-}
-.results-filter-head .control-label { margin: 0; }
 .results-filter .results-input--score { max-width: 112px; }
 .results-filter:has(.results-input--score) { flex: 0 1 112px; min-width: 96px; }
 .results-filter .dash-dropdown { min-height: var(--control-height); font-size: 13px; }
@@ -1229,11 +1219,6 @@ summary:focus-visible,
 }
 .results-input--score .dash-input-element { font-family: var(--font-mono); }
 
-.results-merge .dash-options-list-option {
-  display: flex; align-items: center; gap: 6px;
-  font-size: var(--text-sm); color: var(--text-primary); white-space: nowrap;
-}
-.results-merge input[type="checkbox"] { accent-color: var(--control-ink); }
 .results-actions { align-items: center; }
 
 /* A segmented RadioItems on the light chrome: the map's .bm-seg pattern,
@@ -1284,13 +1269,11 @@ summary:focus-visible,
    Control"), so they wrap rather than push the page sideways: unwrapped, a
    comparison scrolled to 1,008 px at 900 and 522 px at 390. Found by
    e2e_cohort_check.py in the browser-suites session. */
-.results-filter--wide .results-seg:not(.results-seg--mini) { flex-wrap: wrap; }
-.results-filter--wide .results-seg:not(.results-seg--mini) .dash-options-list-option {
+.results-filter--wide .results-seg { flex-wrap: wrap; }
+.results-filter--wide .results-seg .dash-options-list-option {
   white-space: normal;
   text-align: center;
 }
-.results-seg--mini { padding: 2px; }
-.results-seg--mini .dash-options-list-option { padding: 1px 8px; font-size: 11.5px; }
 
 /* --- The table -------------------------------------------------------------- */
 
