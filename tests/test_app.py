@@ -1370,10 +1370,9 @@ def test_2d_aspect_constraint_preserves_ranges_when_the_canvas_resizes():
     ratio in the axis domains.  Its default ``range`` constraint instead
     changed the visible x range when the neighborhood drawer narrowed the map.
 
-    This holds for the unframed map only. Plotly abandons the domain branch
-    for a range zoomed in from the one it first constrained, which is every
-    framed view, so a frame is held across a resize by `assets/map-frame.js`
-    instead - see `test_a_framed_figure_states_the_window_it_framed`.
+    This holds for the unframed map only. A framed figure switches to
+    ``range`` and is held across a resize by `assets/map-frame.js` instead -
+    see `test_a_framed_figure_states_the_window_it_framed`.
     """
     layout_2d = theme.base_figure_layout(False)
     assert layout_2d["xaxis"]["constrain"] == "domain"
@@ -1416,6 +1415,14 @@ def test_a_framed_figure_states_the_window_it_framed():
     """
     framed = callbacks.viewport_axes((1.0, 2.0, 3.0, 4.0), "2d")
     assert framed["meta"] == {"viewport": [1.0, 2.0, 3.0, 4.0]}
+    # A frame fills the canvas around itself. In domain mode, once the asset
+    # has relayouted a range, Plotly letterboxes the frame on the next wider
+    # canvas - measured as one empty-banded paint on most drawer closes.
+    assert framed["xaxis"]["constrain"] == "range"
+    assert framed["yaxis"]["constrain"] == "range"
+    freed = callbacks.viewport_axes(None, "2d")
+    assert "constrain" not in freed["xaxis"], (
+        "the whole map must keep the theme's domain constraint")
     assert "meta" not in callbacks.viewport_axes(None, "2d")
     assert "meta" not in callbacks.viewport_axes(None, "2d", preserve=True)
     assert callbacks.viewport_axes((1.0, 2.0, 3.0, 4.0), "3d") == {}

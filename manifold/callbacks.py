@@ -595,7 +595,10 @@ def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
     into the layout. `assets/map-frame.js` reads the meta to hold the frame at
     one scale across a canvas resize, which is what makes docking and closing
     the evidence drawer independent of whether the figure or the resize landed
-    first.
+    first. It also switches both axes to `constrain="range"`: the whole map
+    keeps `domain`, which is what stops docking the drawer from zooming it, but
+    a frame should fill the canvas around itself, and in domain mode the first
+    relayout of a range makes Plotly letterbox it on the next wider canvas.
 
     3-D contributes nothing: the viewport store does not drive a `Scatter3d`
     camera, so there is no axis to pin and none to release.
@@ -603,8 +606,11 @@ def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
     if dims != "2d":
         return {}
     if vp:
-        return {"xaxis": dict(range=[vp[0], vp[1]]),
-                "yaxis": dict(range=[vp[2], vp[3]]),
+        # `constrain="range"` while framed: a frame fills the canvas around
+        # itself rather than being letterboxed, and Plotly's domain mode would
+        # letterbox it on the first wider canvas after any relayout of a range.
+        return {"xaxis": dict(range=[vp[0], vp[1]], constrain="range"),
+                "yaxis": dict(range=[vp[2], vp[3]], constrain="range"),
                 "meta": {"viewport": [float(v) for v in vp]}}
     if preserve:
         return {}
