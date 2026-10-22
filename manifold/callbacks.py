@@ -570,7 +570,17 @@ def _fired(prop: str) -> bool:
                for t in (ctx.triggered or []))
 
 
-def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
+def axis_revision(method, dims, resets) -> str:
+    """The `uirevision` of the 2-D axes: it changes exactly when a frame is
+    released on purpose - Reset view, a projection or a dimensionality change.
+
+    See `viewport_axes` for why the layout-wide "keep" is not enough.
+    """
+    return f"{method}:{dims}:{int(resets or 0)}"
+
+
+def viewport_axes(vp, dims: str, *, preserve: bool = False,
+                  revision: str | None = None) -> dict:
     """The axis layout that puts `vp` on screen, or the whole corpus back.
 
     **The `autorange` branch is not a no-op and must not be dropped.**
@@ -600,21 +610,37 @@ def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
     a frame should fill the canvas around itself, and in domain mode the first
     relayout of a range makes Plotly letterbox it on the next wider canvas.
 
+    **Saying `autorange` is necessary and not sufficient**, which is what
+    ``revision`` is for. `uirevision` keeps a GUI zoom unless the figure moves
+    the attribute away from its value *before* that zoom, and a scroll-zoom of
+    the whole map starts from `autorange: true` - the very value a reset
+    restates. Reset view therefore worked only if a framed figure, with
+    explicit ranges, had painted in between. Scrolling quickly enough that Dash
+    superseded every zoomed figure and then pressing Reset left the map zoomed
+    while the store, and the hidden button, said it was not: 3 times in 8 on
+    the real corpus. ``revision`` becomes each axis's own `uirevision`, and it
+    changes exactly when the frame is released on purpose
+    (`axis_revision`), so Plotly drops the GUI zoom then and only then. It is
+    carried on every 2-D branch, the preserving one included, because a
+    revision that came and went would itself count as a change.
+
     3-D contributes nothing: the viewport store does not drive a `Scatter3d`
     camera, so there is no axis to pin and none to release.
     """
     if dims != "2d":
         return {}
+    pin = {} if revision is None else {"uirevision": revision}
     if vp:
         # `constrain="range"` while framed: a frame fills the canvas around
         # itself rather than being letterboxed, and Plotly's domain mode would
         # letterbox it on the first wider canvas after any relayout of a range.
-        return {"xaxis": dict(range=[vp[0], vp[1]], constrain="range"),
-                "yaxis": dict(range=[vp[2], vp[3]], constrain="range"),
+        return {"xaxis": dict(range=[vp[0], vp[1]], constrain="range", **pin),
+                "yaxis": dict(range=[vp[2], vp[3]], constrain="range", **pin),
                 "meta": {"viewport": [float(v) for v in vp]}}
     if preserve:
-        return {}
-    return {"xaxis": dict(autorange=True), "yaxis": dict(autorange=True)}
+        return {"xaxis": dict(pin), "yaxis": dict(pin)} if pin else {}
+    return {"xaxis": dict(autorange=True, **pin),
+            "yaxis": dict(autorange=True, **pin)}
 
 
 def is_framed(viewport, dims: str) -> bool:
@@ -706,10 +732,13 @@ def register(app):
         Input("neighborhood-open-store", "data"),
         Input("neighborhood-arm", "value"),
         Input("neighborhood-focus-store", "data"),
+        # A State, not an Input: the reset already reaches this callback
+        # through `viewport-store`. It is read to name the axis revision.
+        State("reset-view", "n_clicks"),
     )
     def update_figure(method, dims, color_by, layers, budget, viewport,
                       hits_payload, show_retrieval, found, open_state, arm,
-                      focus):
+                      focus, resets):
         vp = tuple(viewport) if viewport else None
         roles = _roles_from_checklist(show_retrieval)
         retrieval = _retrieval_overlay(hits_payload, roles) if roles else None
@@ -725,7 +754,9 @@ def register(app):
             "neighborhood-open-store", "neighborhood-arm",
             "neighborhood-focus-store",
         }
-        fig.update_layout(**viewport_axes(vp, dims, preserve=preserve_view))
+        fig.update_layout(**viewport_axes(
+            vp, dims, preserve=preserve_view,
+            revision=axis_revision(method, dims, resets)))
         badge_children = [_badge(b) for b in badges]
         items = legend_data.get("items", [])
 

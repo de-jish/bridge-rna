@@ -1436,6 +1436,41 @@ def test_a_framed_figure_states_the_window_it_framed():
         "viewport": [1.0, 2.0, 3.0, 4.0]}
 
 
+def test_releasing_a_frame_renames_the_axes_revision_and_nothing_else_does(app):
+    """Reset view must win over a scroll-zoom that never got a figure painted.
+
+    `uirevision` keeps a GUI zoom unless the figure moves the attribute away
+    from its value before the zoom, and from the whole map that value is
+    `autorange: true` - the value a reset restates. Scrolling fast enough that
+    Dash superseded every zoomed figure and then pressing Reset left the map
+    zoomed with the store unframed: 3 times in 8 on the real corpus. So each
+    2-D axis carries its own revision, renamed exactly when a frame is
+    released on purpose, and kept by every other update.
+    """
+    first = callbacks.axis_revision("umap", "2d", None)
+    assert callbacks.axis_revision("umap", "2d", 0) == first
+    assert callbacks.axis_revision("umap", "2d", 1) != first
+    assert callbacks.axis_revision("pca", "2d", None) != first
+    assert callbacks.axis_revision("umap", "3d", None) != first
+
+    for vp, preserve in ((None, False), (None, True), ((1.0, 2.0, 3.0, 4.0), False)):
+        axes = callbacks.viewport_axes(vp, "2d", preserve=preserve, revision=first)
+        assert axes["xaxis"]["uirevision"] == first
+        assert axes["yaxis"]["uirevision"] == first
+    # The preserving branch names the revision and still restates no range.
+    kept = callbacks.viewport_axes(None, "2d", preserve=True, revision=first)
+    assert "range" not in kept["xaxis"] and "autorange" not in kept["xaxis"]
+    assert callbacks.viewport_axes(None, "3d", revision=first) == {}
+
+    key = next(k for k in app.callback_map if "manifold-graph.figure" in k)
+    states = {(s["id"], s["property"]) for s in app.callback_map[key]["state"]}
+    assert ("reset-view", "n_clicks") in states
+    inputs = {i["id"] for i in app.callback_map[key]["inputs"]}
+    assert "reset-view" not in inputs, (
+        "the reset already arrives through viewport-store; an Input would "
+        "rebuild the figure twice per click")
+
+
 def test_the_frame_holder_ships_and_reads_the_meta_the_server_writes():
     """The asset and the server must name the same key, and it must ship."""
     from deploy import common
