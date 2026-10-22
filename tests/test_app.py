@@ -1223,9 +1223,34 @@ def test_zoom_event_becomes_a_viewport():
 
 def test_autorange_resets_the_viewport():
     assert callbacks._viewport_from_relayout({"xaxis.autorange": True}) is None
-    assert callbacks._viewport_from_relayout({"autosize": True}) is None
     assert callbacks._viewport_from_relayout(None) is None
     assert callbacks._viewport_from_relayout({}) is None
+
+
+def test_a_resize_is_not_a_reset():
+    """Docking the evidence drawer resizes the graph; it must not unframe it.
+
+    dcc.Graph forwards a responsive resize as `relayoutData = {"autosize":
+    true}`, and reading that as "whole map" made Fit results do nothing after
+    any scroll-zoom: the click framed the map, the drawer docked, and the
+    resize erased the frame. Reproduced on the real corpus 3 times in 3.
+    """
+    assert callbacks._viewport_from_relayout({"autosize": True}) == "unchanged"
+
+
+def test_holding_a_frame_across_a_resize_cannot_rewrite_the_stored_frame():
+    """`assets/map-frame.js` relayouts with whole-range keys to hold a frame.
+
+    The window it puts on screen is derived from the stored frame and the
+    canvas, so storing it would make the frame drift with every resize - the
+    very order-dependence the asset exists to remove. Plotly adds
+    `autorange: false` to the event when a range is set, which must not read
+    as a reset either.
+    """
+    assert callbacks._viewport_from_relayout({
+        "xaxis.range": [1.0, 2.0], "yaxis.range": [3.0, 4.0],
+        "xaxis.autorange": False, "yaxis.autorange": False,
+    }) == "unchanged"
 
 
 def test_non_zoom_events_leave_the_sample_alone():
@@ -1344,6 +1369,11 @@ def test_2d_aspect_constraint_preserves_ranges_when_the_canvas_resizes():
     The x/y scales remain equal, but Plotly must absorb a new canvas aspect
     ratio in the axis domains.  Its default ``range`` constraint instead
     changed the visible x range when the neighborhood drawer narrowed the map.
+
+    This holds for the unframed map only. Plotly abandons the domain branch
+    for a range zoomed in from the one it first constrained, which is every
+    framed view, so a frame is held across a resize by `assets/map-frame.js`
+    instead - see `test_a_framed_figure_states_the_window_it_framed`.
     """
     layout_2d = theme.base_figure_layout(False)
     assert layout_2d["xaxis"]["constrain"] == "domain"
@@ -1373,6 +1403,39 @@ def test_an_unframed_figure_releases_the_axes_rather_than_omitting_them():
     assert "range" not in freed["xaxis"]
 
     assert callbacks.viewport_axes([1.0, 2.0, 3.0, 4.0], "3d") == {}
+
+
+def test_a_framed_figure_states_the_window_it_framed():
+    """The axis ranges stop naming the frame once Plotly has drawn them.
+
+    Equal-scale axes are fitted by widening one range, and Plotly writes the
+    widened range back into the layout, so a resize after the figure lands
+    starts from the wrong window. `assets/map-frame.js` holds the frame from
+    `meta.viewport` instead; an unframed figure must carry none, or the asset
+    would pin a whole-map view that Plotly's autorange already keeps exact.
+    """
+    framed = callbacks.viewport_axes((1.0, 2.0, 3.0, 4.0), "2d")
+    assert framed["meta"] == {"viewport": [1.0, 2.0, 3.0, 4.0]}
+    assert "meta" not in callbacks.viewport_axes(None, "2d")
+    assert "meta" not in callbacks.viewport_axes(None, "2d", preserve=True)
+    assert callbacks.viewport_axes((1.0, 2.0, 3.0, 4.0), "3d") == {}
+
+    # And it survives Plotly's own layout validation on a real figure, which
+    # is what actually reaches the browser.
+    fig = render.build_figure("pca", "2d", "species", ["archs4", "osdr"],
+                              1500, (1.0, 2.0, 3.0, 4.0))[0]
+    fig.update_layout(**framed)
+    assert fig.to_plotly_json()["layout"]["meta"] == {
+        "viewport": [1.0, 2.0, 3.0, 4.0]}
+
+
+def test_the_frame_holder_ships_and_reads_the_meta_the_server_writes():
+    """The asset and the server must name the same key, and it must ship."""
+    from deploy import common
+    source = (paths.ASSETS_DIR / "map-frame.js").read_text()
+    assert "meta.viewport" in source
+    assert "plotly_react" in source and "plotly_relayout" in source
+    assert common.runtime_path("assets/map-frame.js")
 
 
 def test_one_callback_owns_the_viewport_and_every_framing_action_feeds_it(app):

@@ -383,6 +383,19 @@ def _viewport_from_relayout(relayout: dict | None):
     ``"unchanged"`` for events that are not zooms at all - a hover, a legend
     click, a drag-mode switch - which must leave the current sample alone rather
     than triggering a full resample.
+
+    **A resize is one of those events, not a reset.** `{"autosize": true}` is
+    what a responsive graph emits when its container changes size, and the
+    container changes size every time the evidence drawer docks or closes.
+    Reading it as "back to the whole map" made Fit results do nothing after
+    any scroll-zoom: the click framed the map, the drawer docked, and the
+    resize that followed erased the frame. It stayed hidden only while
+    `relayoutData` already held an earlier `autosize` - dcc.Graph does not
+    resend an unchanged value - which is true until the first zoom.
+
+    Whole-range keys (`"xaxis.range": [a, b]`) are also "unchanged". They are
+    what `assets/map-frame.js` issues to hold a frame across a resize, and the
+    window it puts on screen is derived from the stored one, not a new one.
     """
     if not relayout:
         return None
@@ -390,7 +403,7 @@ def _viewport_from_relayout(relayout: dict | None):
     if all(k in relayout for k in keys):
         x0, x1, y0, y1 = (relayout[k] for k in keys)
         return (min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
-    if relayout.get("xaxis.autorange") or relayout.get("autosize"):
+    if relayout.get("xaxis.autorange"):
         return None
     return "unchanged"
 
@@ -576,6 +589,14 @@ def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
     "keep the whole-map range already on screen", not "calculate a new one".
     For those, ``preserve`` omits both axes so ``uirevision`` can do its job.
 
+    A framed figure also states its window in ``meta.viewport``, because the
+    axis ranges stop saying it the moment Plotly draws them: equal-scale axes
+    are fitted by widening one range, and Plotly writes the widened range back
+    into the layout. `assets/map-frame.js` reads the meta to hold the frame at
+    one scale across a canvas resize, which is what makes docking and closing
+    the evidence drawer independent of whether the figure or the resize landed
+    first.
+
     3-D contributes nothing: the viewport store does not drive a `Scatter3d`
     camera, so there is no axis to pin and none to release.
     """
@@ -583,7 +604,8 @@ def viewport_axes(vp, dims: str, *, preserve: bool = False) -> dict:
         return {}
     if vp:
         return {"xaxis": dict(range=[vp[0], vp[1]]),
-                "yaxis": dict(range=[vp[2], vp[3]])}
+                "yaxis": dict(range=[vp[2], vp[3]]),
+                "meta": {"viewport": [float(v) for v in vp]}}
     if preserve:
         return {}
     return {"xaxis": dict(autorange=True), "yaxis": dict(autorange=True)}

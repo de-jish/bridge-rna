@@ -272,6 +272,8 @@ def base_figure_layout(is_3d: bool = False) -> dict:
         # Keep a responsive container resize in the layout domain.  The 2-D
         # axes are scale-anchored below; Plotly's default range constraint
         # otherwise turns docking the neighborhood drawer into a hidden zoom.
+        # Only while unframed: Plotly drops the domain branch for a range
+        # zoomed in from its first one, so `assets/map-frame.js` holds frames.
         constrain="domain",
     )
     layout = dict(
