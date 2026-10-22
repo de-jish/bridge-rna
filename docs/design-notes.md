@@ -1815,3 +1815,26 @@ Do not widen the rail to make it go away.
 
 It boots `app.py` against the real `cache/`, so it needs the artifacts and the LFS objects, and it takes about three minutes.
 It exits non-zero if either frame ends up with a clipped panel, a figure touching its canvas edge, or a console error, so a layout change that breaks the images fails the capture rather than shipping a cut one.
+
+## Loading skeletons (2026-10-22)
+
+Joshua asked for the map's loading to be a skeleton.
+Measured on the real corpus at 1,440 px, a visit to `/map` passed through two states before the map.
+For about 0.3 s locally, and longer on the NASA server while the bundles download, Dash showed the word "Loading..." in the top-left corner of a blank page.
+Then, from about 0.8 s to 2.5 s, the shell appeared around an empty Plotly chart: a white canvas with default axes from -1 to 6, inside a view whose canvas is navy everywhere else.
+
+Both are now skeletons of the layout that replaces them.
+
+**Boot.** `app.INDEX_STRING` draws a static shell before `{%app_entry%}`: the black header with the brand, two tab placeholders and two count placeholders, the control rail, and the route's main area.
+A one-line inline script sets `data-boot-route` before first paint so `/map` draws its 268 px rail beside the navy canvas and its key, while `/` draws the 288 px rail, the results panel and the inspector at the same breakpoints as the real grid.
+CSS shows it only while Dash's own `._dash-loading` node exists (`body:has(._dash-loading)`), so React never has to remove it and it cannot outlive the app; Dash's text stays in the accessibility tree.
+Every placeholder was positioned from measurements of the live shell, so the swap is a fill-in rather than a jump.
+
+**First figure.** The graph starts on `placeholder_figure()`, the plot's own navy with hidden axes and `meta.placeholder`, so Plotly's white default never paints.
+`map_skeleton()` draws the two badges, the floating key (title, filter, ten rows) and the line "Drawing 942,563 samples" (the real count) over it, under the real badges and key.
+A clientside callback on the figure adds `is-done` once a figure without the placeholder marker arrives; the skeleton fades in 180 ms and stops taking pointer events.
+It is clientside so a 942,563-point figure is never posted back to the server to flip one class.
+Later rebuilds (a color-by change, a zoom step) keep the map on screen with the existing 600 ms delayed spinner, because by then there is a real map to look at.
+
+One slow sweep of light is the only motion, and it stops under `prefers-reduced-motion`.
+

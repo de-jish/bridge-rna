@@ -6,6 +6,14 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-22, evening (skeleton loading; table fit; vector separation answer)
+
+**Skeleton loading.** The map passed through Dash's bare "Loading..." text and then Plotly's default white axes (-1 to 6) before its figure. The page template now draws a skeleton of the shell while Dash boots (route-aware: navy canvas and key for `/map`, results and inspector panels for `/`), and the map's graph starts on a navy placeholder figure under a skeleton of its badges and key that a clientside callback hides when the real figure lands. Design notes: `docs/design-notes.md#loading-skeletons-2026-10-22`.
+
+**The cohort table glitch.** Reproduced in a cohort comparison: the Tissue category filter's search box drew its magnifier in a bordered block of its own beside a blue-ringed field, because the global focus ring landed on the inner input while the container drew its own border. The box and ring now live on the container. Two more defects found in the same table were fixed: headers wore their columns' cell fonts (mono Score and Series, italic Species), and a comparison ran past its frame at every laptop width (16 px at 1,440, 275 px at 1,181) with Title squeezed to nothing. A container query now hides Species, then Series, then Title, then Tissue category as the frame narrows; the thresholds are recomputed from the stylesheet by a test.
+
+**Vector separation (answered, nothing built).** PR #3's whitening and background removal were only ever scored on top-5 score gap over six single samples; normalized by the score spread, whitening's gap is smaller than the original's for eye and kidney, and 479 of 512 directions sat at the eigenvalue floor. Neither was tested for stability, purity or against a null. Cohort pooling remains the only method measured to separate results (leave-one-out top-5 0.158 to 0.747, against both nulls). Recommendation recorded for Joshua: pool for comparisons, gate any transform on `validate_cohorts.py` plus a tissue-purity null, and attack the 54x cross-corpus batch effect at its source by re-embedding OSDR under ARCHS4's precision.
+
 ## 2026-10-22, later (the matches are the neighborhood; table cleanup; tissue survey)
 
 Joshua found the map messy after Fit results: the neighborhood explorer read a separate fixed top-250 prefix, drawn as teal marks under k large white hit rings, so most matches wore two rings and the explorer and the table disagreed in number.

@@ -291,4 +291,5 @@ Each step ends green on pytest and is committed on its own.
 - 2026-10-21: built. Retrieval profile and tie rule; `results.py`, `result_plots.py` and the tissue fix built in parallel by subagents against the contracts above; the view, callbacks, styles and browser suite integrated and verified here.
 - 2026-10-22: Similarity view removed at Joshua's request after review; the plot switch is Score by rank, Series and Network.
 - 2026-10-22: Score by rank moved from a log rank axis over 1,000 ranks to a linear one over ten times k, with the score span in the caption.
+- 2026-10-22: the table fits its frame by hiding Species, Series, Title, then Tissue category with a container query (a comparison had scrolled sideways at every laptop width); headers no longer inherit cell fonts; a multi-select's search box draws one box around its icon and field.
 - 2026-10-22: "Merge identical profiles" and the Series Hide mode removed; duplicates carry a "Same data as" note. The map's neighborhood explorer is now the retrieved matches.
