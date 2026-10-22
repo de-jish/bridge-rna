@@ -16,6 +16,17 @@
  * the frame, a narrower one zooms out exactly as far as containing it requires.
  * So closing the drawer is not a zoom, and docking it cannot hide a result.
  *
+ * A framed figure arrives with `constrain: "range"` for the same reason: in
+ * domain mode a relayout to a held window resets Plotly's reference range, and
+ * the next wider canvas is letterboxed - the frame shown inside empty bands,
+ * its neighbours clipped at an invisible edge.
+ *
+ * Two moments need it. After a resize, the held window is put back with one
+ * relayout. When the server restates a frame already held, which every drawer
+ * toggle does, the figure is handed to `Plotly.react` with the held window in
+ * place of the stored one, so Plotly paints the frame once instead of
+ * painting its own fit first and having it taken back.
+ *
  * It changes no points, sampling or retrieval state, and it never writes
  * `viewport-store`: its relayout carries whole-range keys, which the server
  * reads as "unchanged", so the stored frame stays the one that was framed.
@@ -56,17 +67,28 @@
     frame = vp && size ? {viewport: vp, scale: fitScale(vp, size)} : null;
   }
 
-  function hold() {
-    const size = plotSize();
-    const axes = graph._fullLayout;
-    if (!frame || !size || !axes.xaxis || !axes.yaxis) return;
+  // The window that holds the frame on a canvas of `size`: centred on the
+  // stored window, at its scale, unless the canvas is now too small for that
+  // scale to show all of it.
+  function heldWindow(size) {
     const vp = frame.viewport;
     frame.scale = Math.max(frame.scale, fitScale(vp, size));
     const cx = (vp[0] + vp[1]) / 2, cy = (vp[2] + vp[3]) / 2;
     const hw = frame.scale * size.w / 2, hh = frame.scale * size.h / 2;
-    const want = [cx - hw, cx + hw, cy - hh, cy + hh];
+    return [cx - hw, cx + hw, cy - hh, cy + hh];
+  }
+
+  function hold() {
+    const size = plotSize();
+    const axes = graph._fullLayout;
+    if (!frame || !size || !axes.xaxis || !axes.yaxis) return;
+    const want = heldWindow(size);
     const shown = axes.xaxis.range.concat(axes.yaxis.range).map(Number);
-    if (same(shown, want)) return;
+    // Within a tenth of a pixel is the same picture: Plotly rounds the canvas,
+    // and chasing that would only repaint it.
+    if (shown.every(function (v, i) {
+      return Math.abs(v - want[i]) <= 0.1 * frame.scale;
+    })) return;
     window.Plotly.relayout(graph, {
       "xaxis.range": [want[0], want[1]],
       "yaxis.range": [want[2], want[3]],
@@ -78,6 +100,39 @@
     if (!vp) frame = null;
     else if (frame && same(frame.viewport, vp)) hold();
     else adopt(vp);
+  }
+
+  // When the server restates the frame already held - closing the drawer,
+  // switching arm or focus - its ranges are the stored window, which Plotly
+  // would fit to the canvas afresh and paint before `react` could put the held
+  // scale back. Handing it the held window instead paints the frame once. A
+  // new frame passes through untouched and is adopted after Plotly fits it.
+  function restated(figure) {
+    const layout = figure && figure.layout;
+    const meta = layout && layout.meta;
+    const vp = meta && Array.isArray(meta.viewport) ? meta.viewport.map(Number) : null;
+    // The canvas Plotly will lay this out in is the one it already has: a
+    // react does not re-measure the container, the debounced resize does.
+    const size = plotSize();
+    if (!frame || !vp || !size || !same(frame.viewport, vp)) return figure;
+    const want = heldWindow(size);
+    return Object.assign({}, figure, {layout: Object.assign({}, layout, {
+      xaxis: Object.assign({}, layout.xaxis, {range: [want[0], want[1]]}),
+      yaxis: Object.assign({}, layout.yaxis, {range: [want[2], want[3]]}),
+    })});
+  }
+
+  function wrapReact() {
+    const Plotly = window.Plotly;
+    if (!Plotly || !Plotly.react || Plotly.react.holdsMapFrame) return;
+    const react = Plotly.react;
+    const wrapped = function (gd, figure) {
+      const args = Array.prototype.slice.call(arguments);
+      if (gd === graph) args[1] = restated(figure);
+      return react.apply(this, args);
+    };
+    wrapped.holdsMapFrame = true;
+    Plotly.react = wrapped;
   }
 
   function relayout(event) {
@@ -107,6 +162,7 @@
     attached = false;
     frame = null;
     if (graph && graph.on) {
+      wrapReact();
       graph.on("plotly_react", react);
       graph.on("plotly_relayout", relayout);
       attached = true;
