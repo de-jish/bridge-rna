@@ -151,7 +151,11 @@ Splitting the column evenly was built first and lost both ways: at 1,000 px tall
 
 A segmented control picks one of three views. Each draws only the rows the filters keep.
 
-1. **Score by rank** (default). The top-1,000 score profile as a line on a log rank axis, with the retrieved k as points: filtered rows emphasized and filtered-out rows muted.
+1. **Score by rank** (default). The score profile as a line on a linear rank axis from rank 1 to ten times k (at least 50, at most 1,000), with the retrieved k as points: filtered rows emphasized and filtered-out rows muted.
+   The y axis is fitted to the data, so the caption states the score span it covers.
+   Until 2026-10-22 it was the whole top-1,000 profile on a log rank axis; Joshua asked whether that skewed it, and it did.
+   Over 12 real queries scores fall almost evenly with rank (r = -0.985 against rank, -0.94 against log rank), and only 32% of the drop from rank 1 to rank 1,000 happens by rank 100, so a log axis packed two thirds of the decline into its right third and drew a steady decline as a plateau and a cliff.
+   A linear axis over all 1,000 ranks would squeeze 5 matches into 0.5% of the width; ten times k keeps them a tenth of it while still showing what lies past the cut, and a real gap after a rank (OSD-426 drops 0.002 between ranks 12 and 13, 650 times a typical step) reads as a step.
    A comparison draws both cohorts' curves in their established cohort hues.
 2. **Series**. Rows per GSE among the filtered rows, for the top 20 series by count, ordered by best rank.
    A comparison splits each bar by retrieved-by.
@@ -289,3 +293,4 @@ Each step ends green on pytest and is committed on its own.
 - 2026-10-21: spec written from the interview and the measurements above.
 - 2026-10-21: built. Retrieval profile and tie rule; `results.py`, `result_plots.py` and the tissue fix built in parallel by subagents against the contracts above; the view, callbacks, styles and browser suite integrated and verified here.
 - 2026-10-22: Similarity view removed at Joshua's request after review; the plot switch is Score by rank, Series and Network.
+- 2026-10-22: Score by rank moved from a log rank axis over 1,000 ranks to a linear one over ten times k, with the score span in the caption.

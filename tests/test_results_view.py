@@ -148,6 +148,13 @@ def test_empty_results_invite_the_active_mode():
     assert "cohort" in fig.to_json() and caption == "" and legend == ""
 
 
+def test_the_score_caption_states_the_ranks_and_the_score_span_it_draws():
+    """The y axis is fitted to the data, so the caption says how wide it is."""
+    results = _results([_row("GSM1", 1, 0.9), _row("GSM2", 2, 0.8)])
+    _fig, caption, _legend = V.build_plot("rank", results, results["rows"], None)
+    assert caption.startswith("Cosine similarity at ranks 1 to 3, spanning 0.7000 to 0.9000.")
+
+
 def test_a_filter_that_keeps_nothing_says_so_in_the_plot():
     results = _results([_row("GSM1", 1, 0.99)])
     fig, _caption, _legend = V.build_plot("rank", results, [], None)

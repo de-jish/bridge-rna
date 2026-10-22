@@ -542,9 +542,9 @@ def build_plot(kind: str, results: dict | None, rows: list[dict],
         return fig, caption, legend
 
     k = int(results.get("k") or 0)
-    depth = len(results.get("profile_a") or [])
-    caption = (f"Cosine similarity by rank to depth {depth:,}. "
-               f"Points are the {k:,} retrieved matches"
+    depth, lo, hi = P.score_window(results)
+    caption = (f"Cosine similarity at ranks 1 to {depth:,}, spanning "
+               f"{lo:.4f} to {hi:.4f}. Points are the {k:,} retrieved matches"
                + ("; filtered-out matches are faded." if n < len(results["rows"]) else "."))
     return P.score_rank_figure(results, rows, selected_gsm), caption, ""
 

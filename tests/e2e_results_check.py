@@ -284,11 +284,12 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
 
     print("\n[plots]")
     layout = plot_layout(page)
-    c.ok(layout["xtype"] == "log", "score by rank is the default, on a log rank axis")
+    c.ok(layout["xtype"] == "linear", "score by rank is the default, on a linear rank axis")
     traces = plot_traces(page)
     c.ok(any(t["custom"] for t in traces), "its points are clickable")
     caption = page.locator("#plot-caption").inner_text()
-    c.ok("depth 1,000" in caption, f"caption states the depth: {caption!r}")
+    c.ok(bool(re.search(r"ranks 1 to 1,000, spanning 0\.\d{4} to 0\.\d{4}", caption)),
+         f"caption states the ranks and the score span: {caption!r}")
     switch = page.locator("#results-plot-kind label").all_inner_texts()
     c.ok([t.strip() for t in switch] == ["Score by rank", "Series", "Network"],
          f"the plot switch offers Score by rank, Series and Network only: {switch!r}")

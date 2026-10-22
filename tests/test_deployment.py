@@ -31,6 +31,19 @@ def test_package_is_allowlisted_and_integrity_checked(tmp_path):
         common.verify_bundle(dest)
 
 
+def test_every_app_module_and_asset_is_shipped():
+    """The results table (results.py, results_view.py, result_plots.py,
+    similarity.py, results-table.js) was built without being added here, so a
+    shipment would have failed to import. Every module the serving app can load
+    and every stylesheet or script Dash serves from assets/ must be listed."""
+    root=Path(__file__).resolve().parents[1]
+    listed=set(json.loads((root/'deploy/runtime-files.json').read_text()))
+    wanted={str(p.relative_to(root)) for pattern in
+            ('bridge_rna/*.py','manifold/*.py','assets/*.css','assets/*.js')
+            for p in root.glob(pattern)}
+    assert wanted-listed==set()
+
+
 @pytest.mark.parametrize('path',['../bridge-rna-deploy', '/home/ubuntu/bridge-rna-deploy',
                                  '.ship/incoming/abc/../../../../escape'])
 def test_sftp_rejects_boundary_escape_before_requests(path):

@@ -3,9 +3,9 @@
 Two views draw the rows the results table currently shows (see
 docs/retrieval-results.md, "Plots" and "Contracts"):
 
-- `score_rank_figure`: the top-1,000 score profile on a log rank axis, with the
-  retrieved k marked on it. It answers whether the top k stands apart from the
-  ranks below it or sits on a flat curve.
+- `score_rank_figure`: the score profile on a linear rank axis from rank 1 to
+  ten times the retrieved k, with k marked on it. It answers whether the top k
+  stands apart from the ranks just below it or sits on a steady decline.
 - `series_figure`: matches per GEO series among the filtered rows.
 
 The third view, the network, is `figures.build_network_figure`, unchanged.
@@ -60,7 +60,17 @@ _SURFACE = GRAPH_THEME["paper_bg"]
 
 _NO_SERIES = "No series recorded"
 _TITLE_MAX = 80
-_LOG_TICKS = (1, 2, 5)
+_TICK_STEPS = (1, 2, 5)
+
+#: Score by rank shows ranks 1 to `SCORE_DEPTH_FACTOR` times k, never fewer
+#: than `SCORE_DEPTH_MIN` and never more than the profile carries (1,000).
+#: Linear, because a log rank axis bent a steady decline into a plateau and a
+#: cliff: measured over 12 queries, scores fall nearly evenly with rank
+#: (r = -0.985 against rank), and a log axis packed ranks 100 to 1,000, two
+#: thirds of the drop, into its right third. Ten times k keeps the matches a
+#: tenth of the width while still showing what lies past the cut.
+SCORE_DEPTH_FACTOR = 10
+SCORE_DEPTH_MIN = 50
 
 # Figure heights in px. Each view needs a height its marks can be read at, so
 # the figure states it and the panel's container should follow it rather than
@@ -175,15 +185,47 @@ def _visible_gsms(visible: Iterable[dict[str, Any]] | None) -> set[str]:
 
 # ------------------------------------------------------------- score by rank
 
-def _log_ticks(n: int) -> tuple[list[int], list[str]]:
-    vals: list[int] = []
-    decade = 1
-    while decade <= n:
-        vals += [m * decade for m in _LOG_TICKS if m * decade <= n]
-        decade *= 10
-    if vals and n / vals[-1] >= 1.2:
-        vals.append(n)
+def _rank_ticks(n: int) -> tuple[list[int], list[str]]:
+    """Rank 1, then round steps up to `n`, about five to eight ticks in all."""
+    step = 1
+    magnitude = 1
+    while True:
+        candidates = [m * magnitude for m in _TICK_STEPS]
+        fit = [c for c in candidates if n / c <= 8]
+        if fit:
+            step = fit[0]
+            break
+        magnitude *= 10
+    vals = [1] + [v for v in range(step, n + 1, step) if v > 1]
     return vals, [f"{v:,}" for v in vals]
+
+
+def score_window(results: dict[str, Any] | None) -> tuple[int, float, float]:
+    """(depth, lowest score, highest score) that score by rank draws.
+
+    Depth is ten times k, at least 50, at most the longest profile, and never
+    short of a retrieved row's rank. The score range covers the profile to that
+    depth and every retrieved row, so the caption can state the span the
+    fitted y axis stretches to fill the plot.
+    """
+    results = results or {}
+    rows = results.get("rows") or []
+    arms = ["a", "b"] if results.get("comparison") else ["a"]
+    k = int(results.get("k") or 0)
+    longest = max([len(results.get(f"profile_{arm}") or []) for arm in arms] + [0])
+    ranks = [int(r[f"rank_{arm}"]) for arm in arms for r in rows
+             if r.get(f"rank_{arm}") is not None]
+    depth = max(SCORE_DEPTH_MIN, SCORE_DEPTH_FACTOR * k)
+    if longest:
+        depth = min(depth, longest)
+    depth = max([depth, k, 2] + ranks)
+    ys = [float(y) for arm in arms
+          for y in (results.get(f"profile_{arm}") or [])[:depth]]
+    ys += [float(r[f"score_{arm}"]) for arm in arms for r in rows
+           if r.get(f"score_{arm}") is not None]
+    if not ys:
+        return depth, 0.0, 0.0
+    return depth, min(ys), max(ys)
 
 
 def _score_hover(row: dict[str, Any], arm: str, results: dict[str, Any],
@@ -214,14 +256,15 @@ def score_rank_figure(results: dict[str, Any] | None,
                       visible: list[dict[str, Any]] | None,
                       selected_gsm: str | None = None,
                       revision: str | None = None) -> go.Figure:
-    """Score by rank: the top-1,000 profile with the retrieved k marked on it.
+    """Score by rank: the score profile with the retrieved k marked on it.
 
     Scores at the top of a 940,455-sample index are flat (rank 1 near 0.997,
     rank 1,000 near 0.963), so the y axis is fitted to the data rather than
-    starting at 0, and x is a log rank axis so the first ten ranks get as much
-    width as the next ninety. Rows the filters keep are drawn in the match hue;
-    retrieved rows they hide stay on the curve, muted, because hiding a row
-    from the table does not change where it ranked.
+    starting at 0, and the caption states the span it covers. x is a linear
+    rank axis to `score_window`'s depth, so equal widths are equal numbers of
+    ranks and a real gap after a rank reads as a step. Rows the filters keep are
+    drawn in the match hue; retrieved rows they hide stay on the curve, muted,
+    because hiding a row from the table does not change where it ranked.
     """
     rows = (results or {}).get("rows") or []
     if not results or not rows:
@@ -238,14 +281,12 @@ def score_rank_figure(results: dict[str, Any] | None,
         "b": {"color": GRAPH_THEME["cohort_b"], "symbol": "square", "label": label_b},
     }
 
-    profiles = {arm: [float(s) for s in (results.get(f"profile_{arm}") or [])]
+    depth, lo, hi = score_window(results)
+    profiles = {arm: [float(s) for s in (results.get(f"profile_{arm}") or [])][:depth]
                 for arm in arms}
     ranked = {arm: [r for r in rows
                     if r.get(f"rank_{arm}") is not None and r.get(f"score_{arm}") is not None]
               for arm in arms}
-    depth = max([len(p) for p in profiles.values()]
-                + [int(r[f"rank_{arm}"]) for arm in arms for r in ranked[arm]]
-                + [k, 2])
     max_k = max([len(ranked[arm]) for arm in arms] + [k])
     size = 9 if max_k <= 60 else 7 if max_k <= 250 else 5
     # A surface ring keeps neighbouring markers apart until they are dense
@@ -309,12 +350,10 @@ def score_rank_figure(results: dict[str, Any] | None,
                 hoverinfo="skip", showlegend=False, cliponaxis=False,
                 meta={"role": "selection", "arm": arm}))
 
-    ys = [y for p in profiles.values() for y in p] + [
-        float(r[f"score_{arm}"]) for arm in arms for r in ranked[arm]]
-    lo, hi = min(ys), max(ys)
     span = hi - lo
     pad = span * 0.06 if span > 0 else max(abs(hi) * 1e-4, 1e-6)
-    tickvals, ticktext = _log_ticks(depth)
+    tickvals, ticktext = _rank_ticks(depth)
+    x_pad = max(depth * 0.02, 0.5)
 
     reference = results.get("reference_count")
     x_title = (f"Rank among {int(reference):,} reference samples"
@@ -322,27 +361,25 @@ def score_rank_figure(results: dict[str, Any] | None,
     legend = comparison or any_muted
     layout = _base_layout(revision or _revision(results), SCORE_HEIGHT, legend=legend)
     layout.update(
-        xaxis=_axis(type="log", range=[math.log10(0.82), math.log10(depth * 1.18)],
+        xaxis=_axis(type="linear", range=[1 - x_pad, depth + x_pad],
                     tickmode="array", tickvals=tickvals, ticktext=ticktext,
                     title={"text": x_title, "font": _font(12), "standoff": 8}),
         yaxis=_axis(range=[lo - pad, hi + pad],
                     tickformat=f".{_decimals(span)}f", nticks=6,
                     title={"text": "Cosine similarity", "font": _font(12), "standoff": 8}),
-        # Box zoom on the curve; panning a log axis by drag is easy to lose.
+        # Box zoom on the curve, to read a step at the cut more closely.
         dragmode="zoom",
     )
     fig.update_layout(**layout)
 
     if k >= 1:
         # A rule at k, labelled with k, so the reader can see where the result
-        # list ends and how the curve continues past it. On a log axis Plotly 6
-        # places a shape by data value but an annotation by log10 of it; both
-        # were checked in a rendered figure.
+        # list ends and how the curve continues past it.
         at_edge = k >= depth / 1.25
         fig.add_shape(type="line", xref="x", yref="paper",
                       x0=k, x1=k, y0=0, y1=1,
                       line={"color": _RULE, "width": 1}, layer="below")
-        fig.add_annotation(x=math.log10(k), y=1, xref="x", yref="paper",
+        fig.add_annotation(x=k, y=1, xref="x", yref="paper",
                            text=f"Top {k:,}", showarrow=False,
                            xanchor="right" if at_edge else "left",
                            xshift=-5 if at_edge else 5, yanchor="top",

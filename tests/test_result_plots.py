@@ -7,7 +7,6 @@ so a test here fails on the same thing a reader would see go wrong.
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 
 import numpy as np
@@ -97,29 +96,49 @@ def test_the_view_caps_are_the_documented_ones():
 
 # ------------------------------------------------------------- score by rank
 
-def test_score_figure_draws_the_profile_on_a_log_rank_axis():
+def test_score_figure_draws_the_profile_on_a_linear_rank_axis_to_ten_times_k():
+    """Linear since 2026-10-22: a log axis bent a steady decline into a
+    plateau and a cliff. The window is ten times k, so k=30 shows rank 300."""
     results = _single()
     fig = RP.score_rank_figure(results, results["rows"])
     data = _json(fig)
     xaxis = data["layout"]["xaxis"]
-    assert xaxis["type"] == "log"
+    assert xaxis["type"] == "linear"
     lo, hi = xaxis["range"]
-    assert 10 ** lo < 1 and 10 ** hi > 1000, "the axis must show rank 1 to rank 1,000"
+    assert lo < 1 and 300 < hi < 310, "rank 1 to ten times k"
+    assert xaxis["tickvals"][0] == 1 and xaxis["tickvals"][-1] == 300
     assert "940,455" in xaxis["title"]["text"]
     assert data["layout"]["yaxis"]["title"]["text"] == "Cosine similarity"
 
     (line,) = _traces(fig, "profile")
     assert line["mode"] == "lines"
-    assert line["x"][0] == 1 and line["x"][-1] == 1000 and len(line["y"]) == 1000
+    assert line["x"][0] == 1 and line["x"][-1] == 300 and len(line["y"]) == 300
     assert line["hoverinfo"] == "skip"
     assert "customdata" not in line
+
+
+@pytest.mark.parametrize("k, depth", [(3, 50), (5, 50), (30, 300), (100, 1000),
+                                      (500, 1000), (1000, 1000)])
+def test_the_window_is_ten_times_k_between_50_and_the_profile(k, depth):
+    assert RP.score_window(_single(k=k))[0] == depth
+
+
+def test_the_window_never_cuts_off_a_retrieved_row_or_overruns_a_short_profile():
+    short = _single(k=5, profile=_profile(n=20))
+    assert RP.score_window(short)[0] == 20
+    comp = _comparison(k=10)
+    assert RP.score_window(comp)[0] == 100
+    depth, lo, hi = RP.score_window(comp)
+    assert hi == pytest.approx(max(comp["profile_a"][0], comp["profile_b"][0]))
+    assert lo == pytest.approx(min(comp["profile_a"][99], comp["profile_b"][99]))
+    assert RP.score_window(None) == (RP.SCORE_DEPTH_MIN, 0.0, 0.0)
 
 
 def test_score_axis_is_fitted_to_flat_scores_not_anchored_at_zero():
     results = _single()
     fig = RP.score_rank_figure(results, results["rows"])
     lo, hi = _json(fig)["layout"]["yaxis"]["range"]
-    assert 0.95 < lo < min(results["profile_a"])
+    assert 0.95 < lo < min(results["profile_a"][:300])
     assert max(results["profile_a"]) < hi < 1.0
     # The span of the axis is a few hundredths, not the 0..1 of a cosine.
     assert hi - lo < 0.05
@@ -174,12 +193,10 @@ def test_the_k_rule_is_drawn_at_k_and_labelled_with_k():
     results = _single(k=30)
     layout = _json(RP.score_rank_figure(results, results["rows"]))["layout"]
     (rule,) = layout["shapes"]
-    # A shape on a log axis is placed by data value in Plotly 6 (verified in a
-    # rendered figure); the annotation by log10 of it.
     assert rule["x0"] == rule["x1"] == 30
     (label,) = layout["annotations"]
     assert label["text"] == "Top 30"
-    assert label["x"] == pytest.approx(math.log10(30))
+    assert label["x"] == 30
 
 
 def test_the_selected_row_is_ringed():

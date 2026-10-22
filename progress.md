@@ -23,10 +23,13 @@ Comparisons are offered between arms only.
 Result: 204 cohorts across 70 studies (median 10, max 38) grouping 2,107 of 2,108 samples.
 The full `validate_cohorts.py` sweep passes all six checks: top-5 stability 0.747 against 0.158 for single samples, 4.7x; the size knee is still 5.
 
-Validation: 795 pytest tests, 186 cohort and 57 results browser checks, and both README images recaptured.
+Validation: 804 pytest tests, 206 main, 186 cohort and 57 results browser checks, and both README images recaptured.
 The other four browser suites were not rerun; nothing they exercise changed.
 
-**He asked whether the log rank axis skews the Score by rank plot.** It does, in a specific way; the answer and a recommendation went back to him, and nothing changed in code yet.
+**He asked whether the log rank axis skews the Score by rank plot.** It did: scores fall almost evenly with rank, and the log axis packed two thirds of the decline into its right third, drawing a plateau and a cliff that are not there.
+With his approval Score by rank is now a linear rank axis from 1 to ten times k (at least 50, at most 1,000), and the caption states the score span the fitted y axis covers.
+
+**The ship allowlist was missing the whole results table.** `deploy/runtime-files.json` did not list `results.py`, `results_view.py`, `result_plots.py`, `similarity.py` or `assets/results-table.js`, so a shipment of this branch would have failed to import. They are listed now, and `test_every_app_module_and_asset_is_shipped` fails if a module or asset is ever left off again.
 
 ## 2026-10-21 (the retrieval result is a ranked table, not a network)
 
