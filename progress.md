@@ -29,6 +29,10 @@ The other four browser suites were not rerun; nothing they exercise changed.
 **He asked whether the log rank axis skews the Score by rank plot.** It did: scores fall almost evenly with rank, and the log axis packed two thirds of the decline into its right third, drawing a plateau and a cliff that are not there.
 With his approval Score by rank is now a linear rank axis from 1 to ten times k (at least 50, at most 1,000), and the caption states the score span the fitted y axis covers.
 
+**Shipped to NASA as `20261022T070912Z-2a5536de`** from commit `3ae296a` (clean tree): transferred and read-back verified, not yet applied or confirmed running.
+75 files, no dependency changes, no server drift; apply removes `manifold/preflight.py`.
+The server's `cache/archs4_metadata.parquet` is never transferred, so it keeps the pre-2026-10-21 tissue labels until it is replaced or regenerated there.
+
 **The ship allowlist was missing the whole results table.** `deploy/runtime-files.json` did not list `results.py`, `results_view.py`, `result_plots.py`, `similarity.py` or `assets/results-table.js`, so a shipment of this branch would have failed to import. They are listed now, and `test_every_app_module_and_asset_is_shipped` fails if a module or asset is ever left off again.
 
 ## 2026-10-21 (the retrieval result is a ranked table, not a network)
