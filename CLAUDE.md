@@ -214,7 +214,8 @@ bridge_rna/results_view.py  the match table, filters, plot switch and their
 bridge_rna/result_plots.py  score by rank, series bars
 bridge_rna/similarity.py identical-profile groups
 bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, geo,
-                         figures, retrieval, panels, layout, callbacks)
+                         figures, network_labels, retrieval, panels, layout,
+                         callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable
 manifold/preflight.py    PRECOMPUTE_REQUIRED vs APP_REQUIRED, LFS pointer guard
 manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, archs4
@@ -562,5 +563,7 @@ Stacked, the plot takes `68vh` with a 420 px floor and the document scrolls, whi
 The retrieval network uses constant node sizes and a constant 3 px width for every edge, including study links and both comparison arms. Cosine similarity remains numerical metadata in hover and the inspector; no legend entry claims that width encodes it.
 
 **The matches are the neighborhood (2026-10-22).** The map's neighborhood explorer describes exactly the retrieved matches, and the matches are the only marks drawn for them: small open teal circles for A and larger open squares for B, with shared samples carrying both outlines. Until that date the explorer read a separate, fixed top-250 prefix of the same scan, drawn as teal marks under k large white hit rings, so at k=100 most matches wore two rings and the explorer described 150 samples the table did not list, and at k=1,000 only a quarter of the matches were explored. Joshua asked for one set. The retrieval view now stores only an availability marker (`neighborhoods.marker_payload`) and `manifold/callbacks._neighborhood_payload_for_arm` builds the explorer's rows from the stored hits, so the explorer, the map and the table count the same rows by construction; a legacy stored 250-row list is ignored. A match trace carries the explorer's click customdata, so clicking a match focuses it there. The explorer's A/B selector controls details and focus, while the map visibility checkboxes control which cohorts are drawn.
+
+**No edge may strike through a network label.** Labels sat centered over every node until 2026-10-21, which put the query's name and most accessions on their own edges. The query's name now sits on its left and each study's accession on its right, where no edge ever runs, and `bridge_rna/network_labels.place` chooses each hit's spot by scoring it in pixels against every edge, marker and label on each canvas size the view produces. Its pixel model reproduces Plotly's text offsets and autorange to within 1.5 px; **keep the axes on autorange**, because Plotly hit-tests only inside the plot area and an exact fit left the outermost markers half-clickable. Labels are DM Mono with a solid canvas-colored knockout, so where a crowded result leaves no clear spot a neighbor's edge passes behind the text. Design: [`docs/design-notes.md`](docs/design-notes.md#network-labels).
 
 The comparison network, by contrast, was missing a label it should have had: it named none of its hits, so the accessions existed only in a tooltip and the figure carried no identities on paper. They are drawn up to `COMPARISON_MAX_LABELS` (20) nodes and dropped above it, the same rule as the map's `RETRIEVAL_MAX_NUMERALS`.

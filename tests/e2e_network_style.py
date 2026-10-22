@@ -47,6 +47,56 @@ def state(page):
     }''')
 
 
+# Every edge that touches a label's text, measured per glyph: each character's
+# own origin on screen, widened by its measured ink extents. A text element's
+# bounding box would count empty side bearings and the ascent band as text.
+LABEL_TOUCHES = '''() => {
+  const g = document.querySelector('#results-plot .js-plotly-plot'), l = g._fullLayout;
+  const r = g.getBoundingClientRect();
+  const px = (x, y) => [r.x + l.xaxis._offset + l.xaxis.l2p(x), r.y + l.yaxis._offset + l.yaxis.l2p(y)];
+  const edges = g._fullData.filter(t => t.meta?.network_edge).map(t => ({ids: t.meta.network_edge,
+    a: px(t.x[0], t.y[0]), b: px(t.x[1], t.y[1]), w: t.line.width}));
+  const nodes = g._fullData.find(t => t.meta?.network_nodes);
+  const el = [...g.querySelectorAll('.scatterlayer .trace')].find(e => e.__data__?.[0]?.trace?.meta?.network_nodes);
+  const ctx = document.createElement('canvas').getContext('2d');
+  const meets = (e, q) => { const p = e.w / 2, [x0, y0] = e.a, dx = e.b[0] - x0, dy = e.b[1] - y0;
+    let t0 = 0, t1 = 1;
+    for (const [pp, qq] of [[-dx, x0 - (q.x0 - p)], [dx, q.x1 + p - x0], [-dy, y0 - (q.y0 - p)], [dy, q.y1 + p - y0]]) {
+      if (pp === 0) { if (qq < 0) return false; continue; }
+      const t = qq / pp;
+      if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; } }
+    return true; };
+  const out = [];
+  el.querySelectorAll('.textpoint').forEach((tp, i) => {
+    const t = tp.querySelector('text'); if (!t || !t.textContent.trim()) return;
+    const cs = getComputedStyle(t); ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const m = t.getScreenCTM(), glyphs = [];
+    for (let c = 0; c < t.getNumberOfChars(); c++) {
+      const ch = t.textContent[c]; if (!ch || !ch.trim()) continue;
+      const p = t.getStartPositionOfChar(c), mt = ctx.measureText(ch), o = new DOMPoint(p.x, p.y).matrixTransform(m);
+      glyphs.push({x0: o.x - mt.actualBoundingBoxLeft, x1: o.x + mt.actualBoundingBoxRight,
+                   y0: o.y - mt.actualBoundingBoxAscent, y1: o.y + mt.actualBoundingBoxDescent}); }
+    const [kind, id] = nodes.customdata[tp.__data__.i];
+    for (const e of edges) if (glyphs.some(gl => meets(e, gl)))
+      out.push({kind, label: id, edge: e.ids, own: e.ids.includes(id)});
+  });
+  return {touches: out, halo: [...el.querySelectorAll('.textpoint text')].every(t => /rgb\(255, 255, 255\) 3px 0px 0px/.test(getComputedStyle(t).textShadow))};
+}'''
+
+
+def labels_clear(page, size, everywhere):
+    # Below the desktop sizes a crowded network can leave a hit no clear spot;
+    # there a neighbor's edge passes behind the knockout instead of the text.
+    r = page.evaluate(LABEL_TOUCHES)
+    own = [t for t in r['touches'] if t['own']]
+    side = [t for t in r['touches'] if t['kind'] != 'gsm']
+    check(r['halo'], f'{size} every label carries the solid knockout')
+    check(not own, f'{size} no label sits on its own edges {own or ""}')
+    check(not side, f'{size} the query and study labels are clear of every edge {side or ""}')
+    if everywhere:
+        check(not r['touches'], f'{size} no edge touches any label {r["touches"] or ""}')
+
+
 def shot(page, name):
     page.screenshot(path=str(OUT / (name + '.png')))
 
@@ -167,6 +217,7 @@ with sync_playwright() as pw:
           and all(abs(c['y']-side['y'])<1 and abs(c['h']-side['h'])<1 for c in (work, insp)),
           'the three columns tile the window with no gap or overlap')
     check(all(e['color']=='rgb(133, 133, 137)' and e['width']==3 for e in state(page)), 'default edges are neutral and uniform')
+    labels_clear(page, '1440px', everywhere=True)
     shot(page, 'after-1440')
     gsm = point(page, 'gsm')
     page.mouse.move(gsm['x'],gsm['y'])
@@ -178,6 +229,12 @@ with sync_playwright() as pw:
     page.mouse.move(0,0)
     page.wait_for_function("id => document.querySelector('#details-panel').textContent.includes(id)", arg=gsm['id'], timeout=60000)
     settle(page)
+    page.wait_for_selector('#details-panel .detail-collapse > summary', timeout=60000)
+    gap = page.locator('#details-panel .detail-collapse > summary').first.evaluate('''s => {
+      const marker = s.getBoundingClientRect().left + parseFloat(getComputedStyle(s, '::before').width);
+      const range = document.createRange(); range.selectNodeContents(s);
+      return range.getBoundingClientRect().left - marker; }''')
+    check(gap >= 6, f'inspector disclosure keeps its marker apart from its title ({gap:.1f}px)')
     check(any(e['width']==4.5 for e in state(page)), 'inspection emphasis remains after mouse leaves')
     other=point(page,'gsm',1)
     page.mouse.move(other['x'],other['y'])
@@ -214,6 +271,7 @@ with sync_playwright() as pw:
         page.wait_for_timeout(700)
         check(page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'), f'{width}px retrieval has no horizontal overflow')
         check(page.locator('#results-plot').evaluate("e=>Math.abs(e.getBoundingClientRect().height-e.querySelector('.js-plotly-plot')._fullLayout.height)<3"),f'{width}px graph resizes correctly')
+        labels_clear(page, f'{width}px', everywhere=False)
         shot(page,f'after-{width}')
     page.set_viewport_size({'width':1440,'height':1000})
     page.locator('#see-on-map').click()
