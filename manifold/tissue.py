@@ -39,17 +39,47 @@ OTHER = "Other"
 _RULES: list[tuple[str, tuple[str, ...]]] = [
     # --- Haematopoietic. Tested first: "bone marrow" contains "bone", and
     # blood-cell names are specific enough to be unambiguous. ---
+    # An abbreviation lands where its expansion does. "BMDM" is a bone-marrow-
+    # derived macrophage and "BM-MSC" a bone-marrow mesenchymal stromal cell,
+    # and both expansions are claimed here by "bone marrow" before Blood /
+    # immune sees "macrophage". Measured: 2,059 spelled-out BMDM samples were
+    # here while 1,221 abbreviated ones read Other. LT-/ST-HSC and LSK
+    # (Lin-Sca1+Kit+) are haematopoietic stem and progenitor gates, but a bare
+    # "HSC" is not named: GEO uses it as often for the liver's hepatic stellate
+    # cells, and nothing in the string says which.
     ("Bone marrow", ("bone marrow", "marrow", "haematopoietic", "hematopoietic",
-                     "hspc", "cd34\\+")),
+                     "hspc", "cd34\\+", "\\bbmdms?\\b", "\\bbm-?mscs?\\b",
+                     "\\bbmscs?\\b", "\\b[ls]t-hscs?\\b", "\\blsks?\\b")),
+    # "cd4" and "cd8" are refused a following digit: as bare stems they fired
+    # inside CD44, CD45, CD43, CD48, CD49f and CD80-88, and so filed CD45-negative
+    # tumour cells, CD49f+ mammary basal cells and "CD45low retinal microglia"
+    # here. CD45 is the pan-leukocyte marker, so it is named in its own right,
+    # but only when it is positive (or a CD45RA/RB/RO T-cell isoform): CD45- is
+    # the gate that *excludes* immune cells, and CD45low/int is how microglia
+    # are sorted.
+    #
+    # The haematological-cancer abbreviations land where their expansions do:
+    # "acute myeloid leukemia" is claimed here by "myeloid", "diffuse large
+    # B-cell lymphoma" by "b-cell" and "T-cell acute lymphoblastic leukemia" by
+    # "t-cell", ahead of Tumor / cancer, as the leukaemia lines K562, HL-60 and
+    # THP-1 already are. AML12 is a mouse hepatocyte line, not a leukaemia, and
+    # is refused so the Liver rule can claim it; AML-MSCs are a patient's marrow
+    # stroma, not the leukaemia.
     ("Blood / immune", ("blood", "pbmc", "buffy coat", "serum", "plasma",
                         "leukocyte", "leucocyte", "lymphocyte", "monocyte",
                         "macrophage", "neutrophil", "granulocyte", "eosinophil",
-                        "basophil", "erythrocyte", "erythroid", "platelet",
-                        "megakaryocyte", "dendritic cell", "nk cell",
-                        "natural killer", "t cell", "t-cell", "b cell", "b-cell",
-                        "cd4", "cd8", "treg", "thymocyte", "myeloid", "lymphoid",
+                        "basophil", "erythrocyte", "erythroid", "~erythroblast",
+                        "platelet", "thrombocyte", "megakaryocyte",
+                        "dendritic cell", "(?<!non-)(?<!non )\\bimmune cell", "nk cell",
+                        "natural killer", "t cell", "t-cell", "b cell",
+                        "b-cell", "\\bcd4(?!\\d)", "\\bcd8(?!\\d)",
+                        "\\bcd45(?:\\.[12])?\\+",
+                        "\\bcd45 ?(?:pos|positive|hi|high|enriched)\\b",
+                        "\\bcd45r[abo]", "treg", "thymocyte", "myeloid", "lymphoid",
                         "lymphoblastoid", "\\blcl\\b", "gm12878", "gm18",
-                        "jurkat", "k562", "hl-60", "thp-1")),
+                        "jurkat", "k562", "hl-60", "thp-1",
+                        "\\baml\\b(?![- ]?(?:12|mscs?)\\b)", "\\bdlbcl\\b",
+                        "\\b[bt]-all\\b")),
     # "cortex" is not only a brain word - kidneys and adrenal glands have one
     # too, and GEO writes all three. These two rules run ahead of Brain / CNS so
     # the organ named in the string wins over the region word. Same
@@ -72,6 +102,17 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                      "astrocyte", "oligodendrocyte", "microglia", "olfactory bulb",
                      "prefrontal", "frontal lobe", "temporal lobe", "occipital",
                      "putamen", "cerebellar",
+                     # Regions the rule never named, each measured landing in
+                     # Other on the real corpus. "neocort" because \bcortex
+                     # cannot fire inside "neocortex"; "gyrus" rather than
+                     # "fusiform", which also names a bile-duct cyst; the raphe
+                     # only as a brainstem nucleus, since the perineum and the
+                     # palate have one too.
+                     "neocort", "isocort", "nucleus accumbens", "suprachiasmatic",
+                     "dentate", "gyrus", "gyri", "striatal", "cingulate",
+                     "habenul", "\\bpons\\b", "tegmental", "dorsal raphe",
+                     "median raphe", "raphe nucle", "globus pallidus",
+                     "locus coeruleus", "claustrum",
                      # The ventricles' CSF-secreting tissue, not the eye's
                      # choroid: 396 ARCHS4 samples were filed under Eye by the
                      # bare "choroid" stem before this was named here.
@@ -83,14 +124,20 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Nerve / spinal cord", ("spinal cord", "sciatic", "dorsal root", "drg",
                              "peripheral nerve", "schwann")),
     # --- Solid organs. ---
-    ("Liver", ("liver", "hepatic", "hepatocyte", "hepg2", "hepato")),
+    ("Liver", ("liver", "hepatic", "hepatocyte", "hepg2", "hepato",
+               "\\baml[- ]?12\\b")),
     ("Lung", ("lung", "pulmonary", "alveol", "bronch", "airway", "a549",
               "respiratory epithel")),
     ("Adrenal gland", ("adrenal",)),
     ("Kidney", ("kidney", "renal", "nephron", "podocyte", "glomerul", "hek293",
                 "hek 293")),
+    # "hiPSC-CM" is a stem-cell-derived cardiomyocyte, and the organ it was
+    # derived into wins, as "iPSC-derived cardiomyocytes" already did here. The
+    # CM is only read after a stem-cell prefix: a bare "CM" is as often a
+    # central-memory T cell or conditioned medium.
     ("Heart", ("heart", "cardiac", "cardiomyocyte", "myocardi", "ventricle",
-               "ventricular", "atrium", "atrial", "aortic valve")),
+               "ventricular", "atrium", "atrial", "aortic valve",
+               "(?:psc|ips|esc)s?[- ](?:derived )?cms?\\b")),
     # Smooth muscle is not skeletal muscle, and the bare "muscle" stem below
     # would otherwise claim it. Placed here rather than merged into the
     # Vasculature rule further down because first-match-wins ordering is what
@@ -106,7 +153,7 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                    "gut", "enteric", "caco-2", "crypt")),
     ("Stomach", ("stomach", "gastric", "antrum", "pylor")),
     ("Esophagus", ("esophag", "oesophag")),
-    ("Pancreas", ("pancrea", "islet", "beta cell", "acinar")),
+    ("Pancreas", ("pancrea", "islet", "beta cell", "acinar", "\\bpdac\\b")),
     ("Spleen", ("spleen", "splenic", "splenocyte")),
     ("Thymus", ("thymus", "thymic")),
     ("Lymph node", ("lymph node", "lymphatic", "tonsil", "peyer")),
@@ -118,8 +165,11 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Testis", ("testis", "testes", "testicular", "sperm", "spermato", "sertoli",
                 "leydig")),
     ("Ovary", ("ovary", "ovarian", "oocyte", "granulosa", "follicular fluid")),
+    # T HESC is a telomerase-immortalized endometrial stromal line, not a human
+    # ESC; named here, ahead of Embryo / stem cell, so the ESC plurals below
+    # cannot claim it.
     ("Uterus", ("uterus", "uterine", "endometri", "myometri", "fallopian",
-                "oviduct")),
+                "oviduct", "\\bt[- ]?hescs?\\b")),
     ("Placenta", ("placenta", "trophoblast", "chorion", "decidua", "amnion")),
     # Eye anatomy, measured against the real corpus: before "eyecup", "eyeball",
     # sclera, iris, conjunctiva, ciliary body, trabecular meshwork, limbus,
@@ -151,13 +201,18 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
              "\\brods\\b", "(?<!growth )\\bcones\\b")),
     ("Embryo / stem cell", ("embryo", "embryonic stem", "blastocyst", "ipsc",
                             "ips cell", "\\bips\\b", "induced pluripotent",
-                            "pluripotent", "\\besc\\b", "\\bes cell",
+                            "pluripotent", "\\b[hm]?escs?\\b", "\\bes cell",
                             "germ layer", "gastrul", "organoid", "stem cell",
                             "zygote", "morula", "pronucle", "oocyte",
                             "blastomere", "\\bicm\\b", "fetal", "foetal")),
     # --- Connective, vascular, other structural. ---
+    # White and brown adipose tissue by their abbreviations, with the depot
+    # prefixes GEO writes onto them: inguinal, epididymal, gonadal, perigonadal,
+    # visceral, subcutaneous, retroperitoneal, interscapular. Every "BAT" in the
+    # corpus is brown fat; none is the animal.
     ("Adipose", ("adipose", "adipocyte", "fat pad", "\\bfat\\b", "omental",
-                 "subcutaneous fat", "visceral fat", "3t3-l1")),
+                 "subcutaneous fat", "visceral fat", "3t3-l1",
+                 "\\b(?:[egiprsv]|sc|ing|pg|ps|vs)?wat\\b", "\\b(?:i|sc|f)?bat\\b")),
     ("Bone / cartilage", ("bone", "osteoblast", "osteoclast", "osteocyte",
                           "cartilage", "chondrocyte", "mandible", "femur",
                           "femoral bone", "calvaria", "vertebra", "skeletal tissue")),
@@ -166,6 +221,13 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                      "vasculature", "pericyte", "smooth muscle cell")),
     ("Bladder", ("bladder", "urothel", "urinary")),
     ("Salivary gland", ("salivary", "parotid", "submandibular gland")),
+    # Brain-region abbreviations, and "caudate", which is also a lobe of the
+    # liver. They are weaker evidence than a written-out organ, so they run
+    # after every organ rule: "NAC resistant breast cancer" (neoadjuvant
+    # chemotherapy) stays Breast and "caudate liver lobe" stays Liver, while a
+    # bare "NAc" or "PFC" with nothing else beside it is still placed.
+    ("Brain / CNS", ("\\bnac\\b", "\\bpfc\\b", "\\bscn\\b", "\\bvta\\b",
+                     "caudate")),
     # --- Last resorts. These are not tissues, but they name a large and
     # genuinely distinct slice of GEO, and burying them in "Other" would hide
     # real structure the map does show. Tumour morphemes are substring rules
@@ -173,8 +235,9 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # "hepatocarcinoma", "neuroblastoma" would all miss a word-anchored match. ---
     ("Tumor / cancer", ("tumor", "tumour", "~carcinoma", "~sarcoma", "~melanoma",
                         "~lymphoma", "~leukemia", "~leukaemia", "~myeloma",
-                        "~glioma", "~blastoma", "~cytoma", "cancer", "malignan",
-                        "metasta", "neoplas", "xenograft", "\\bpdx\\b")),
+                        "~glioma", "~blastoma", "~cytoma", "meningioma", "cancer",
+                        "malignan", "metasta", "neoplas", "xenograft",
+                        "\\bpdx\\b")),
     ("Reference RNA", ("universal human reference", "\\buhrr\\b", "\\bhbrr\\b",
                        "reference rna", "\\bermcc\\b", "spike-in control",
                        "\\bseqc\\b", "\\bmaqc\\b")),

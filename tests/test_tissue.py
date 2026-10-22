@@ -286,3 +286,198 @@ def test_retissue_rederives_only_the_tissue_column(tmp_path):
         {"from": "Other", "to": "Eye", "samples": 1}]
     # Naming a separate output reads the source and never rewrites it.
     assert pd.read_parquet(src)["tissue"].tolist() == ["Other", "Liver", "Unknown"]
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # "cd4" and "cd8" used to be bare stems and fired inside other CD numbers.
+    # Every string here was filed under Blood / immune by that alone.
+    ("CD45low retinal microglia", "Eye"),
+    ("CD45lowCD11b+Tom+Ly6C-Ly6G- retinal microglia", "Eye"),
+    ("CD45- cells", "Cultured cells"),
+    ("sorted CD45-negative cells", "Cultured cells"),
+    ("CD45 negative tumor cells", "Tumor / cancer"),
+    ("CD45-EpCAM+ lung epithelial cells", "Lung"),
+    ("CD31+/CD45- endothelial cell", "Vasculature"),
+    ("purified CD45- CD49f+ epidermal cells", "Skin"),
+    ("CD44+ crypt cells", "Intestine"),
+    ("cxcr4+met+cd44+ CSC", tissue.OTHER),
+    ("CD80+ cells", "Cultured cells"),
+    # ...while a real CD4 or CD8 is still a T cell, whatever follows it.
+    ("CD4+ T cells", "Blood / immune"),
+    ("CD8a", "Blood / immune"),
+    ("Cd4cre", "Blood / immune"),
+    ("CD4SP thymocytes", "Blood / immune"),
+    ("CD3+CD4+CD45RA-CCR7+ T cells", "Blood / immune"),
+    # CD45 is the pan-leukocyte marker, so a positive gate is immune...
+    ("CD45+ cells", "Blood / immune"),
+    ("CD45.2+ immune cells", "Blood / immune"),
+    ("CD45 positive immune cell", "Blood / immune"),
+    ("CD45hi cells", "Blood / immune"),
+    ("bladder CD45 enriched", "Blood / immune"),
+    ("CD45RA+ naive cells", "Blood / immune"),
+    # ...and naming the bucket outright is too, unless it is negated.
+    ("Immune cells (CD45)", "Blood / immune"),
+    ("Tumor infiltrating immune cells", "Blood / immune"),
+    ("Non-immune stromal cells", "Cultured cells"),
+    ("non immune cells", "Cultured cells"),
+    # Blood lineages the rule never named.
+    ("Thrombocytes", "Blood / immune"),
+    ("HC_thrombocytes", "Blood / immune"),
+    ("Erythroblasts", "Blood / immune"),
+    ("Proerythroblast", "Blood / immune"),
+    ("Polychromatic erythroblast", "Blood / immune"),
+])
+def test_blood_markers_name_immune_cells_and_nothing_else(raw, expected):
+    assert tissue.canonical_tissue(raw) == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # An abbreviation lands where its expansion does. Each pair is measured:
+    # the expansion was already in that bucket and the abbreviation read Other.
+    ("bone marrow-derived macrophages (BMDM)", "Bone marrow"),
+    ("BMDM", "Bone marrow"),
+    ("BMDMs", "Bone marrow"),
+    ("immortalized BMDM", "Bone marrow"),
+    ("Bone marrow stromal cells (BMSCs)", "Bone marrow"),
+    ("BM-MSC", "Bone marrow"),
+    ("BMSCs", "Bone marrow"),
+    ("LT-HSC", "Bone marrow"),
+    ("ST-HSC", "Bone marrow"),
+    ("LSK", "Bone marrow"),
+    ("acute myeloid leukemia (AML) cells", "Blood / immune"),
+    ("AML", "Blood / immune"),
+    ("AML patient blasts", "Blood / immune"),
+    ("AML cell line", "Blood / immune"),
+    ("OCI-AML3 (AML)", "Blood / immune"),
+    ("Diffuse large B-cell lymphoma (DLBCL)", "Blood / immune"),
+    ("DLBCL", "Blood / immune"),
+    ("GCB-DLBCL", "Blood / immune"),
+    ("T-ALL", "Blood / immune"),
+    ("B-ALL cell line", "Blood / immune"),
+    ("pancreatic ductal adenocarcinoma (PDAC)", "Pancreas"),
+    ("PDAC", "Pancreas"),
+    ("PDAC tumor organoids", "Pancreas"),
+    ("induced pluripotent stem cells-derived cardiomyocytes (iPSC-CMs)", "Heart"),
+    ("hiPSC-CM", "Heart"),
+    ("iPSC-CMs", "Heart"),
+    ("hiPS-CMs", "Heart"),
+    ("hiPSCs derived CM", "Heart"),
+    ("iPSC-derived CMs", "Heart"),
+    ("H7 hESC-CM", "Heart"),
+    ("hPSC_CM", "Heart"),
+    ("white adipose tissue (WAT)", "Adipose"),
+    ("WAT", "Adipose"),
+    ("iWAT", "Adipose"),
+    ("eWAT", "Adipose"),
+    ("epididymal WAT", "Adipose"),
+    ("scWAT", "Adipose"),
+    ("pgWAT", "Adipose"),
+    ("stromal-vascular fraction of iWAT", "Adipose"),
+    ("BAT", "Adipose"),
+    ("iBAT", "Adipose"),
+    ("interscapular BAT", "Adipose"),
+    ("28C fBAT", "Adipose"),
+    ("mouse embryonic stem cells (mESCs)", "Embryo / stem cell"),
+    ("mESC", "Embryo / stem cell"),
+    ("mESCs", "Embryo / stem cell"),
+    ("human ESCs", "Embryo / stem cell"),
+    ("hESC", "Embryo / stem cell"),
+    ("H9 hESCs", "Embryo / stem cell"),
+    ("ESCs", "Embryo / stem cell"),
+    ("ground_state_mESC", "Embryo / stem cell"),
+])
+def test_abbreviations_land_where_their_expansions_do(raw, expected):
+    assert tissue.canonical_tissue(raw) == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # AML12 is a mouse hepatocyte line, not a leukaemia.
+    ("AML12 cells", "Liver"),
+    ("AML-12 cells", "Liver"),
+    ("AML12 cell line", "Liver"),
+    # AML-MSCs are a patient's marrow stroma; the leukaemia is not the sample.
+    ("AML-MSCs", tissue.OTHER),
+    # T HESC is a telomerase-immortalized endometrial stromal line.
+    ("T HESC", "Uterus"),
+    ("T-HESC", "Uterus"),
+    ("T HESCs (ATCC CRL-4003)", "Uterus"),
+    ("THESC", "Uterus"),
+    # ...but "t" ending another word is not that prefix.
+    ("Triple-knockout hESCs clone2", "Embryo / stem cell"),
+    # A bare CM is as often a central-memory T cell as a cardiomyocyte.
+    ("Primary human CM CD4+ T cells", "Blood / immune"),
+    ("isolated adult CMs", tissue.OTHER),
+    # A bare HSC is as often a hepatic stellate cell, so it is not guessed at.
+    ("HSC", tissue.OTHER),
+    ("Hepatic stellate cells (HSCs)", "Liver"),
+    # An organ named in the string still wins over the abbreviation.
+    ("NAC resistant breast cancer tissue", "Breast / mammary"),
+    ("caudate liver lobe biopsy", "Liver"),
+    ("formalin-fixed paraffin embedded left lateral, caudate, and right medial "
+     "liver lobes", "Liver"),
+])
+def test_abbreviation_collisions_resolve_to_the_named_anatomy(raw, expected):
+    assert tissue.canonical_tissue(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    # Brain regions the rule never named, each measured landing in Other.
+    "nucleus accumbens",
+    "Nucleus Accumbens (Nac)",
+    "NAc",
+    "Lateral shell of the NAc",
+    "Suprachiasmatic nucleus",
+    "SCN",
+    "ct16_wt_scn",
+    "fusiform gyrus",
+    "medial temporal gyrus",
+    "Cingulate gyrus 25 (Cg25)",
+    "Neocortex",
+    "E11.5 neocortex",
+    "Embryonic neocortex",
+    "frontal isocortex",
+    "dentate gyrus",
+    "Ventral Dentate Gyrus",
+    "dentate granule cells",
+    "PFC",
+    "PFC CD11b+",
+    "Pons",
+    "Ventral tegmental area",
+    "VTA",
+    "SNpc/VTA",
+    "Caudate",
+    "Posterior caudate",
+    "Striatal tissue",
+    "habenula",
+    "Medial habenula tissue punch",
+    "Dorsal Raphe Nucleus",
+    "median raphe",
+    "raphe nuclei",
+    "precentral and postcentral gyri",
+    "Globus Pallidus",
+    "Locus coeruleus",
+    "Claustrum",
+])
+def test_named_brain_regions_map_to_brain(raw):
+    assert tissue.canonical_tissue(raw) == "Brain / CNS"
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # "gyrus", not "fusiform": a fusiform choledochal cyst is a bile duct.
+    ("fusiform choledochal cyst", tissue.OTHER),
+    # The raphe only as a brainstem nucleus: "raphe" is not "engraphed".
+    ("Engraphed murine leukemia", "Tumor / cancer"),
+    # "neocort" does not reach the adrenal cortex.
+    ("adrenal cortex", "Adrenal gland"),
+])
+def test_brain_region_terms_do_not_claim_what_is_not_brain(raw, expected):
+    assert tissue.canonical_tissue(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "Meningioma",
+    "meningioma, WHO I, Discovery",
+    "anaplastic meningioma",
+])
+def test_meningioma_is_a_tumour(raw):
+    assert tissue.canonical_tissue(raw) == "Tumor / cancer"
