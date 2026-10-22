@@ -1,14 +1,10 @@
-"""Pairwise structure among retrieved hits: identical profiles and clustering.
+"""Identical profiles among retrieved hits: one profile under two GSM accessions.
 
 Pure numpy. It opens no memmap and imports no Dash, so it is tested on small
 hand-built matrices; `retrieval.reference_vectors` supplies the real vectors.
-The serving app must not import scipy or sklearn (`test_app` pins that), which
-is why average linkage is written out here rather than borrowed.
 """
 
 from __future__ import annotations
-
-from typing import NamedTuple
 
 import numpy as np
 
@@ -64,94 +60,3 @@ def identical_groups(unit: np.ndarray,
     for i in range(n):
         groups.setdefault(find(i), []).append(i)
     return sorted((g for g in groups.values() if len(g) > 1), key=lambda g: g[0])
-
-
-class Merge(NamedTuple):
-    """One agglomeration step, in scipy's linkage convention.
-
-    `left` and `right` are cluster ids: below n a leaf position, at or above n
-    the cluster formed by merge `id - n`.
-    """
-
-    left: int
-    right: int
-    height: float
-    size: int
-
-
-def average_linkage(distance: np.ndarray) -> list[Merge]:
-    """UPGMA over a symmetric distance matrix: n - 1 merges, lowest first.
-
-    Ties break toward the lower pair of cluster ids, so the result is
-    deterministic. O(n^3), which is nothing at the 50 rows the similarity plot
-    draws.
-    """
-    d = np.array(distance, dtype=np.float64)
-    n = d.shape[0]
-    if n < 2:
-        return []
-    active = {i: (i, 1) for i in range(n)}  # slot -> (cluster id, size)
-    np.fill_diagonal(d, np.inf)
-    merges: list[Merge] = []
-    for step in range(n - 1):
-        slots = sorted(active)
-        sub = d[np.ix_(slots, slots)]
-        flat = int(np.argmin(sub))
-        a_pos, b_pos = divmod(flat, len(slots))
-        a, b = sorted((slots[a_pos], slots[b_pos]))
-        (ida, na), (idb, nb) = active[a], active[b]
-        height = float(max(d[a, b], 0.0))
-        left, right = sorted((ida, idb))
-        merges.append(Merge(left, right, height, na + nb))
-        # The merged cluster takes slot a; its distances are size-weighted means.
-        for s in slots:
-            if s in (a, b):
-                continue
-            merged = (d[a, s] * na + d[b, s] * nb) / (na + nb)
-            d[a, s] = d[s, a] = merged
-        d[b, :] = d[:, b] = np.inf
-        del active[b]
-        active[a] = (n + step, na + nb)
-    return merges
-
-
-def leaf_order(merges: list[Merge], n: int) -> list[int]:
-    """Leaf positions left to right, as a dendrogram of `merges` draws them."""
-    if n == 0:
-        return []
-    if not merges:
-        return list(range(n))
-    children = {n + i: (m.left, m.right) for i, m in enumerate(merges)}
-    order: list[int] = []
-    stack = [n + len(merges) - 1]
-    while stack:
-        node = stack.pop()
-        if node < n:
-            order.append(node)
-        else:
-            left, right = children[node]
-            stack.extend((right, left))
-    return order
-
-
-def dendrogram_segments(merges: list[Merge], n: int
-                        ) -> list[tuple[float, float, float, float]]:
-    """Line segments `(x0, y0, x1, y1)` for a dendrogram over `leaf_order`.
-
-    x is the leaf's position in that order (0 to n - 1); y is merge height.
-    Each merge contributes the two legs and the crossbar of one bracket.
-    """
-    order = leaf_order(merges, n)
-    x = {leaf: float(i) for i, leaf in enumerate(order)}
-    y = {leaf: 0.0 for leaf in range(n)}
-    segments: list[tuple[float, float, float, float]] = []
-    for i, m in enumerate(merges):
-        node = n + i
-        xl, xr = x[m.left], x[m.right]
-        yl, yr = y[m.left], y[m.right]
-        segments.append((xl, yl, xl, m.height))
-        segments.append((xr, yr, xr, m.height))
-        segments.append((xl, m.height, xr, m.height))
-        x[node] = (xl + xr) / 2.0
-        y[node] = m.height
-    return segments

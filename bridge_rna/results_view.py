@@ -22,7 +22,7 @@ from . import result_plots as P
 from . import results as R
 from .figures import _empty_network_figure, build_comparison_figure, build_network_figure
 from .similarity import identical_groups
-from .util import _format_count, _safe_str
+from .util import _safe_str
 
 # --- Layout ------------------------------------------------------------------
 
@@ -31,7 +31,6 @@ from .util import _format_count, _safe_str
 # should conclude is theirs.
 PLOT_KINDS = (
     {"value": "rank", "label": "Score by rank"},
-    {"value": "similarity", "label": "Similarity"},
     {"value": "series", "label": "Series"},
     {"value": "network", "label": "Network"},
 )
@@ -508,23 +507,6 @@ def build_plot(kind: str, results: dict | None, rows: list[dict],
     selected_gsm = node if kind_sel == "gsm" else None
     selected_gse = node if kind_sel == "gse" else None
     n = len(rows)
-
-    if kind == "similarity":
-        locatable = [r for r in rows if r.get("archs4_index") is not None]
-        take = locatable[:P.SIMILARITY_MAX_ROWS]
-        if len(take) < 2:
-            return (_empty_network_figure(
-                "Similarity needs at least two matches from the reference index."),
-                "", "")
-        from .retrieval import reference_vectors  # noqa: PLC0415
-
-        unit = reference_vectors([r["archs4_index"] for r in take])
-        caption = (f"Pairwise cosine among the first {len(take):,} of {n:,} matches "
-                   "in table order, clustered by average linkage."
-                   if n > len(take) else
-                   f"Pairwise cosine among {len(take):,} matches, clustered by "
-                   "average linkage.")
-        return P.similarity_figure(take, unit, selected_gsm), caption, ""
 
     if kind == "series":
         counts = P.series_counts(results, rows)

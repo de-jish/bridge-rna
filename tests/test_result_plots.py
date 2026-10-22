@@ -1,4 +1,4 @@
-"""The results panel's figures: score by rank, similarity, and series.
+"""The results panel's figures: score by rank and series.
 
 Every assertion is on the figure JSON, which is what Dash ships to the browser,
 so a test here fails on the same thing a reader would see go wrong.
@@ -14,7 +14,6 @@ import numpy as np
 import pytest
 
 from bridge_rna import result_plots as RP
-from bridge_rna import similarity as S
 from bridge_rna.figures import GRAPH_THEME
 
 REFERENCE = 940_455
@@ -79,33 +78,19 @@ def _is_empty_state(fig) -> bool:
 def _all_figures():
     single = _single()
     comp = _comparison()
-    unit = _unit_vectors(6)
-    rows6 = [_row(i, rank_a=i + 1) for i in range(6)]
     return [
         RP.score_rank_figure(single, single["rows"][:20], selected_gsm="GSM1003"),
         RP.score_rank_figure(comp, comp["rows"][2:], selected_gsm="GSM1005"),
         RP.score_rank_figure(None, None),
-        RP.similarity_figure(rows6, unit, selected_gsm="GSM1002"),
-        RP.similarity_figure(rows6[:1], unit[:1]),
         RP.series_figure(single, single["rows"], selected_gsm="GSM1001"),
         RP.series_figure(comp, comp["rows"], selected_gse="GSE2"),
         RP.series_figure(single, []),
     ]
 
 
-def _unit_vectors(n: int, seed: int = 11, identical: tuple[int, int] | None = (1, 4)) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    base = rng.normal(size=64)
-    v = base + rng.normal(size=(n, 64)) * 0.2
-    if identical:
-        v[identical[1]] = v[identical[0]] * 2.5  # same direction, other depth
-    return v / np.linalg.norm(v, axis=1, keepdims=True)
-
-
 # --------------------------------------------------------------- constants
 
 def test_the_view_caps_are_the_documented_ones():
-    assert RP.SIMILARITY_MAX_ROWS == 50
     assert RP.SERIES_MAX_BARS == 20
     assert RP.NETWORK_MAX_ROWS == 30
 
@@ -269,98 +254,6 @@ def test_a_filter_change_keeps_the_zoom_and_a_new_search_resets_it():
     assert _json(RP.score_rank_figure(results, [], revision="mine"))["layout"]["uirevision"] == "mine"
 
 
-# ---------------------------------------------------------------- similarity
-
-def test_similarity_orders_rows_by_average_linkage_and_mirrors_the_matrix():
-    rows = [_row(i, rank_a=i + 1) for i in range(8)]
-    unit = _unit_vectors(8, identical=(1, 6))
-    fig = RP.similarity_figure(rows, unit)
-    (heat,) = _traces(fig, "cosine")
-    cos = S.cosine_matrix(unit)
-    expected = S.leaf_order(S.average_linkage(1.0 - cos), 8)
-    order = [int(c[0][1][3:]) - 1000 for c in heat["customdata"]]
-    assert order == expected
-
-    z = np.array(heat["z"])
-    assert np.allclose(z, z.T)
-    assert np.allclose(np.diag(z), 1.0)
-    assert heat["zmax"] == 1.0
-    off = z[~np.eye(8, dtype=bool)]
-    assert heat["zmin"] == pytest.approx(off.min())
-    assert heat["colorbar"]["title"]["text"] == "Cosine"
-
-    # One profile under two accessions sits side by side and merges at 0.
-    pos = {g: i for i, g in enumerate(order)}
-    assert abs(pos[1] - pos[6]) == 1
-    (identical,) = _traces(fig, "identical")
-    assert identical["y"][:2] == pytest.approx([0.0, 0.0], abs=1e-12)
-
-
-def test_every_heatmap_cell_names_its_row_sample_and_both_ranks():
-    rows = [_row(i, rank_a=i + 1) for i in range(5)]
-    fig = RP.similarity_figure(rows, _unit_vectors(5, identical=None))
-    (heat,) = _traces(fig, "cosine")
-    data = _json(fig)
-    ticks = data["layout"]["yaxis2"]["ticktext"]
-    for i, cells in enumerate(heat["customdata"]):
-        assert len(cells) == 5
-        assert all(c == ["gsm", ticks[i]] for c in cells)
-    hover = heat["hovertext"][0][1]
-    assert hover.count("GSM") == 2 and "rank" in hover
-    value = heat["z"][0][1]
-    assert f"{value:.6f}" in hover
-    assert heat["hovertemplate"].endswith("<extra></extra>")
-
-
-def test_the_dendrogram_shares_the_heatmap_order_and_is_not_clickable():
-    rows = [_row(i, rank_a=i + 1) for i in range(6)]
-    unit = _unit_vectors(6)
-    fig = RP.similarity_figure(rows, unit)
-    (dendro,) = _traces(fig, "dendrogram")
-    assert dendro["hoverinfo"] == "skip" and "customdata" not in dendro
-    xs = [x for x in dendro["x"] if x is not None]
-    assert min(xs) >= 0 and max(xs) <= 5
-    layout = _json(fig)["layout"]
-    assert layout["xaxis2"]["range"] == [-0.5, 5.5]
-    assert layout["xaxis"].get("matches") == "x2" or layout["xaxis2"].get("matches") == "x"
-
-
-def test_the_selected_sample_is_marked_on_both_axes():
-    rows = [_row(i, rank_a=i + 1) for i in range(6)]
-    fig = RP.similarity_figure(rows, _unit_vectors(6), selected_gsm="GSM1003")
-    layout = _json(fig)["layout"]
-    assert "<b>GSM1003</b>" in layout["xaxis2"]["ticktext"]
-    assert "<b>GSM1003</b>" in layout["yaxis2"]["ticktext"]
-    assert len(layout["shapes"]) == 2
-    plain = _json(RP.similarity_figure(rows, _unit_vectors(6)))["layout"]
-    assert not plain.get("shapes")
-    assert not any("<b>" in t for t in plain["xaxis2"]["ticktext"])
-
-
-def test_similarity_needs_two_rows_and_matching_vectors():
-    rows = [_row(i, rank_a=i + 1) for i in range(3)]
-    unit = _unit_vectors(3, identical=None)
-    assert _is_empty_state(RP.similarity_figure(rows[:1], unit[:1]))
-    assert _is_empty_state(RP.similarity_figure([], np.zeros((0, 64))))
-    with pytest.raises(ValueError):
-        RP.similarity_figure(rows, unit[:2])
-
-
-def test_similarity_draws_at_most_the_documented_number_of_rows():
-    n = RP.SIMILARITY_MAX_ROWS + 5
-    rows = [_row(i, rank_a=i + 1) for i in range(n)]
-    fig = RP.similarity_figure(rows, _unit_vectors(n, identical=None))
-    (heat,) = _traces(fig, "cosine")
-    assert len(heat["z"]) == RP.SIMILARITY_MAX_ROWS
-
-
-def test_all_identical_profiles_do_not_break_the_scale():
-    rows = [_row(i, rank_a=i + 1) for i in range(3)]
-    unit = np.tile(_unit_vectors(1, identical=None), (3, 1))
-    (heat,) = _traces(RP.similarity_figure(rows, unit), "cosine")
-    assert heat["zmin"] < heat["zmax"] == 1.0
-
-
 # -------------------------------------------------------------------- series
 
 def test_series_counts_orders_by_count_then_best_rank():
@@ -475,8 +368,7 @@ def test_every_clickable_trace_names_a_gsm_or_gse_and_context_traces_are_inert()
             if "customdata" in t:
                 assert t.get("hoverinfo") != "skip"
                 cells = t["customdata"]
-                flat = [c for row in cells for c in row] if t["type"] == "heatmap" else cells
-                for kind, node in flat:
+                for kind, node in cells:
                     assert kind in ("gsm", "gse") and node
             else:
                 role = (t.get("meta") or {}).get("role")

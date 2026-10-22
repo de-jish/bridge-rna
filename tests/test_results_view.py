@@ -169,10 +169,10 @@ def test_network_view_is_capped_and_says_so():
     assert len(gsm_nodes) == P.NETWORK_MAX_ROWS
 
 
-def test_similarity_needs_locatable_rows():
-    results = _results([_row("GSM1", 1, 0.99), _row("GSM2", 2, 0.98)])
-    fig, _caption, _legend = V.build_plot("similarity", results, results["rows"], None)
-    assert "at least two matches" in fig.to_json()
+def test_the_plot_switch_offers_rank_series_and_network_only():
+    """Similarity was removed on 2026-10-22 at Joshua's request."""
+    assert [k["value"] for k in V.PLOT_KINDS] == ["rank", "series", "network"]
+    assert V.DEFAULT_PLOT_KIND == "rank"
 
 
 def test_hits_frame_takes_one_cohorts_rows_in_its_own_rank_order():

@@ -86,8 +86,8 @@ search callbacks ──► hits-store (shell, session, source of truth: map, ins
         ▼                ▼                      ▼                      ▼
   filter options    table + pager           results plot         CSV export
   (counts per       (filter, sort, page)    (score curve,        (filtered rows,
-   GSE/tissue/                              similarity,           provenance)
-   species)                                 studies, network)
+   GSE/tissue/                              series, network)      provenance)
+   species)
 ```
 
 `bridge_rna/results.py` is the only place that knows how a row is filtered, sorted, merged or paged.
@@ -108,7 +108,7 @@ The derivation drops the long free-text fields the table never shows, so at k=1,
   The hits are still the first k of that one ranked scan, which is exactly how the 250-deep evidence neighborhood is already taken.
 - Exact score ties are ordered by reference row index, with a stable sort.
   Identical profiles score exactly equal, so without this their relative order depended on sort internals.
-- `reference_vectors(indices)` reads normalized hit vectors from the memmap for the identical-profile check and the similarity plot.
+- `reference_vectors(indices)` reads normalized hit vectors from the memmap for the identical-profile check.
 
 No preprocessing, embedding, pooling or ranking arithmetic changes.
 
@@ -146,22 +146,25 @@ A new search resets the filters, because a series chosen for one query rarely ex
 
 ### Plots
 
-The plot sits below the table, not beside or split with it: the centre column scrolls, the table takes the column's height less 96 px so the plot switch stays in view as the cue to scroll, and each figure asks for the height it needs (the network grows with its node count, a 50-row heatmap is about 890 px).
+The plot sits below the table, not beside or split with it: the centre column scrolls, the table takes the column's height less 96 px so the plot switch stays in view as the cue to scroll, and each figure asks for the height it needs (the network grows with its node count, to about 860 px at 30 matches).
 Splitting the column evenly was built first and lost both ways: at 1,000 px tall a 50-row page showed four rows.
 
-A segmented control picks one of four views. Each draws only the rows the filters keep.
+A segmented control picks one of three views. Each draws only the rows the filters keep.
 
 1. **Score by rank** (default). The top-1,000 score profile as a line on a log rank axis, with the retrieved k as points: filtered rows emphasized and filtered-out rows muted.
    A comparison draws both cohorts' curves in their established cohort hues.
-2. **Similarity**. The first 50 filtered rows in table order, as a pairwise cosine heatmap ordered by average-linkage clustering, with the dendrogram above.
-   This is the "small clustering" the brief asked for, and identical profiles show up as zero-height merges.
-   Clustering is implemented in numpy in `bridge_rna/similarity.py`, because the serving app must not import scipy or sklearn.
-3. **Series**. Rows per GSE among the filtered rows, for the top 20 series by count, ordered by best rank.
+2. **Series**. Rows per GSE among the filtered rows, for the top 20 series by count, ordered by best rank.
    A comparison splits each bar by retrieved-by.
-4. **Network**. The existing figure, drawn from the first 30 filtered rows, because a network beyond that is unreadable.
+3. **Network**. The existing figure, drawn from the first 30 filtered rows, because a network beyond that is unreadable.
 
-Clicking any mark selects it: a point or heatmap cell selects that GSM, and a series bar opens the series in the inspector.
-Every figure uses the existing `[kind, node_id]` customdata convention, so one selection callback serves all four.
+Clicking any mark selects it: a point or network node selects that GSM, and a series bar opens the series in the inspector.
+Every figure uses the existing `[kind, node_id]` customdata convention, so one selection callback serves all three.
+
+A fourth view, **Similarity**, was built on 2026-10-21 and removed on 2026-10-22 at Joshua's request after he reviewed it.
+It drew the first 50 filtered rows as a pairwise cosine heatmap ordered by average-linkage clustering, with a dendrogram above.
+It did not earn its place: every match is already close to the query, so the matrix spans a narrow cosine band, and the clustering it showed was not something a reader acted on.
+Identical profiles, the one thing it made visible at a glance, are still marked on their table rows.
+Its average-linkage code went with it; `bridge_rna/similarity.py` now holds only the identical-profile grouping.
 
 A mini map of the hits was proposed and rejected.
 Its 2-D neighbourhood would overlap the true cosine top-20 by a median of 0 (CLAUDE.md), so it would show closeness that the ranking does not support.
@@ -264,10 +267,10 @@ Each step ends green on pytest and is committed on its own.
 
 1. Retrieval: score profile, stable tie order, `reference_vectors`, identical-profile groups. Pin that the top-k is unchanged.
 2. `bridge_rna/results.py`: row derivation, filters, merge, sort, page and CSV, with unit tests.
-3. `bridge_rna/similarity.py`: average-linkage ordering and dendrogram geometry, with unit tests.
+3. `bridge_rna/similarity.py`: average-linkage ordering and dendrogram geometry, with unit tests (removed with the Similarity view on 2026-10-22).
 4. Layout: the k slider (log scale plus a number box), the Matches panel, filters, table, pager, plot panel and download.
 5. Callbacks: the derivation, filter options, table, plot, selection, clientside inspector context, export and the AI cap. Remove the network as the result canvas.
-6. Figures: score curve, similarity heatmap with dendrogram, series bars. The network is reused.
+6. Figures: score curve, similarity heatmap with dendrogram (removed 2026-10-22), series bars. The network is reused.
 7. Styles in `assets/retrieve.css` on existing tokens, at the 1180 px and 680 px breakpoints.
 8. Tissue vocabulary: "eyecup" maps to Eye. This is its own commit.
 9. Browser suites updated and extended. Docs: CLAUDE.md, README and this file.

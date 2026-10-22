@@ -89,8 +89,8 @@ An uploaded file is **staged**, not merely written: `bridge_rna.callbacks._uploa
 
 Rebuilt on 2026-10-21 at Joshua's request, after an interview; spec, measurements and contracts in [`docs/retrieval-results.md`](docs/retrieval-results.md).
 The three-column network (query, GSM hits, GSE studies) is no longer the result: it hid rank, score, tissue, species and title behind hover and became thirty identical dots at k=30.
-The result is a table of matches with filters, a pager and CSV export, an inspector for the selected row, and one plot of the same rows chosen from Score by rank (the default), Similarity, Series and Network.
-The network survives as that fourth plot, capped at `result_plots.NETWORK_MAX_ROWS` (30).
+The result is a table of matches with filters, a pager and CSV export, an inspector for the selected row, and one plot of the same rows chosen from Score by rank (the default), Series and Network.
+The network survives as that third plot, capped at `result_plots.NETWORK_MAX_ROWS` (30).
 The Compare tab of the unmerged `feature/reviewed-comparisons` branch is not part of this; the cohort A/B comparison inside Cohort is, as one merged table with Rank A and Rank B.
 
 Seven things about it are load-bearing.
@@ -191,8 +191,8 @@ bridge_rna/results.py    rows, filters, identical-profile merge, sort, page, CSV
                          Pure stdlib: no Dash, no memmap
 bridge_rna/results_view.py  the match table, filters, plot switch and their
                          callbacks; derives results-store from hits-store
-bridge_rna/result_plots.py  score by rank, similarity heatmap, series bars
-bridge_rna/similarity.py identical-profile groups and numpy average linkage
+bridge_rna/result_plots.py  score by rank, series bars
+bridge_rna/similarity.py identical-profile groups
 bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, geo,
                          figures, retrieval, panels, layout, callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable

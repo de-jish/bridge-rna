@@ -13,7 +13,7 @@ Bridge RNA is one app with two pages.
 Select an OSDR sample or cohort, including flight and ground-control groups, or upload mouse counts to embed and search.
 Bridge RNA searches the 940,455-sample ARCHS4 index and lists up to 1,000 matches in a ranked table.
 Filter them by GEO series, tissue category, species, minimum score or text, merge profiles deposited under two accessions, and download exactly the rows you kept as a CSV that records how it was made.
-A plot of the same rows shows how fast similarity falls with rank, how the matches cluster, which series they come from, or the classic query-to-study network.
+A plot of the same rows shows how fast similarity falls with rank, which series the matches come from, or the classic query-to-study network.
 The inspector links to source records; optional AI interpretation is available under **AI summary**.
 
 ![The Bridge RNA retrieval view: a mouse eye sample flown on Rodent Research-1, its five nearest Earth neighbours listed by rank with score, GEO series, title, tissue category and species, the score-by-rank curve to depth 1,000 below them, and the top hit's full GEO record open in the inspector](docs/bridge-rna-interface.png)

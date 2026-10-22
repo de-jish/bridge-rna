@@ -289,12 +289,9 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     c.ok(any(t["custom"] for t in traces), "its points are clickable")
     caption = page.locator("#plot-caption").inner_text()
     c.ok("depth 1,000" in caption, f"caption states the depth: {caption!r}")
-    pick_plot(page, "Similarity")
-    traces = plot_traces(page)
-    c.ok(any(t["type"] == "heatmap" for t in traces), "Similarity draws a heatmap")
-    c.ok("first 50 of 1,000" in page.locator("#plot-caption").inner_text(),
-         "Similarity says it shows the first 50")
-    shot(page, "03-similarity")
+    switch = page.locator("#results-plot-kind label").all_inner_texts()
+    c.ok([t.strip() for t in switch] == ["Score by rank", "Series", "Network"],
+         f"the plot switch offers Score by rank, Series and Network only: {switch!r}")
     pick_plot(page, "Series")
     c.ok(any(t["type"] == "bar" for t in plot_traces(page)), "Series draws bars")
     c.ok(bool(re.search(r"Showing 20 of [\d,]+ series",

@@ -1132,8 +1132,7 @@ summary:focus-visible,
 /* The table is the main event and gets the column's height; the plot sits
    below it at the height its figure asks for, and the column scrolls. Split
    evenly, both lost: at 1,000 px a 50-row page showed four rows, and a
-   50-row similarity heatmap needs about 890 px to keep its labels legible.
-   The 96 px left over keeps the plot's switch in view as the cue to scroll. */
+   30-match network asks for about 860 px. The 96 px left over keeps the plot's switch in view as the cue to scroll. */
 .results-workspace {
   gap: var(--space-4);
   overflow-y: auto;

@@ -1,21 +1,19 @@
 """Plotly figures for the retrieval results panel.
 
-Three views draw the rows the results table currently shows (see
+Two views draw the rows the results table currently shows (see
 docs/retrieval-results.md, "Plots" and "Contracts"):
 
 - `score_rank_figure`: the top-1,000 score profile on a log rank axis, with the
   retrieved k marked on it. It answers whether the top k stands apart from the
   ranks below it or sits on a flat curve.
-- `similarity_figure`: pairwise cosine among up to 50 filtered matches, ordered
-  by average linkage, with the dendrogram above.
 - `series_figure`: matches per GEO series among the filtered rows.
 
-The fourth view, the network, is `figures.build_network_figure`, unchanged.
+The third view, the network, is `figures.build_network_figure`, unchanged.
 
 Every clickable mark carries `customdata` of `[kind, node_id]` with `kind`
 "gsm" or "gse", the network's convention, so one selection callback serves all
-four views. Context marks (the profile line, the k rule, selection rings, the
-dendrogram, total labels) set `hoverinfo="skip"` and carry no customdata:
+three views. Context marks (the profile line, the k rule, selection rings, total
+labels) set `hoverinfo="skip"` and carry no customdata:
 Plotly emits no click for a skipped trace, so they can never clear a selection.
 
 The panel is a light HDS surface, so these figures share the network's white
@@ -29,18 +27,9 @@ import html
 import math
 from typing import Any, Iterable
 
-import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 from .figures import GRAPH_THEME, _empty_network_figure
-from .similarity import (IDENTICAL_PROFILE_DISTANCE, average_linkage, cosine_matrix,
-                         dendrogram_segments, leaf_order)
-
-#: The similarity view clusters at most this many rows; the caller slices the
-#: filtered rows in table order. Fifty GSM labels is the most an axis can carry
-#: at a legible size, and O(n^3) linkage is still instant there.
-SIMILARITY_MAX_ROWS = 50
 
 #: The series view draws this many GEO series; `series_counts` returns them all
 #: so the panel can say how many were left out.
@@ -69,23 +58,6 @@ _SELECTED = GRAPH_THEME["text_primary"]  # carbon-90
 _RULE = "#58585b"                    # carbon-60
 _SURFACE = GRAPH_THEME["paper_bg"]
 
-# Sequential ramp for cosine: one hue, light to dark, ending on nasa-blue-shade.
-# Nine stops interpolated in OKLab from #e6eefa (L 0.947) to #0b3d91 (L 0.386),
-# so lightness falls in equal steps and Plotly's RGB interpolation between
-# neighbouring stops cannot bend the hue. The light end stays a visible tint so
-# the least similar pair never vanishes into the white gaps between cells.
-COSINE_SCALE = [
-    [0.000, "#e6eefa"],
-    [0.125, "#c9d7ee"],
-    [0.250, "#adc1e1"],
-    [0.375, "#91abd5"],
-    [0.500, "#7795c8"],
-    [0.625, "#5c7fba"],
-    [0.750, "#4269ad"],
-    [0.875, "#28549f"],
-    [1.000, "#0b3d91"],
-]
-
 _NO_SERIES = "No series recorded"
 _TITLE_MAX = 80
 _LOG_TICKS = (1, 2, 5)
@@ -95,7 +67,6 @@ _LOG_TICKS = (1, 2, 5)
 # clip it (a fixed container shorter than the figure hides the axis band).
 SCORE_HEIGHT = 360
 _SERIES_ROW_PX = 26
-_DENDRO_PX = 84
 
 
 # ---------------------------------------------------------------- shared style
@@ -376,150 +347,6 @@ def score_rank_figure(results: dict[str, Any] | None,
                            xanchor="right" if at_edge else "left",
                            xshift=-5 if at_edge else 5, yanchor="top",
                            font=_font(11, GRAPH_THEME["text_secondary"]))
-    return fig
-
-
-# ------------------------------------------------------------------ similarity
-
-def _rank_text(row: dict[str, Any]) -> str:
-    a, b = row.get("rank_a"), row.get("rank_b")
-    if b is None and a is not None:
-        return f"rank {int(a):,}"
-    parts = [f"rank {arm.upper()} {int(r):,}" for arm, r in (("a", a), ("b", b))
-             if r is not None]
-    return ", ".join(parts) or "no rank"
-
-
-def similarity_figure(rows: list[dict[str, Any]], unit_vectors: np.ndarray,
-                      selected_gsm: str | None = None,
-                      revision: str | None = None) -> go.Figure:
-    """Pairwise cosine among matches, clustered, with the dendrogram above.
-
-    Rows are reordered by average linkage on 1 - cosine
-    (`similarity.average_linkage`), so near profiles sit together and an
-    identical pair (one profile under two GSM accessions) is adjacent and
-    merges at height 0. The color scale runs from the least similar pair shown
-    to 1, because every match is already close to the query and a scale from 0
-    would paint the whole matrix one color.
-    """
-    rows = list(rows or [])[:SIMILARITY_MAX_ROWS]
-    unit = np.asarray(unit_vectors, dtype=np.float64)
-    if unit.ndim != 2:
-        unit = unit.reshape(len(rows), -1) if len(rows) else np.zeros((0, 0))
-    unit = unit[: len(rows)]
-    if len(rows) != unit.shape[0]:
-        raise ValueError(f"{len(rows)} rows but {unit.shape[0]} vectors")
-    n = len(rows)
-    if n < 2:
-        return _empty_network_figure(
-            "Similarity needs at least two filtered matches with a stored profile.")
-
-    cos = cosine_matrix(unit)
-    merges = average_linkage(1.0 - cos)
-    order = leaf_order(merges, n)
-    segments = dendrogram_segments(merges, n)
-    ordered = [rows[i] for i in order]
-    z = cos[np.ix_(order, order)]
-    gsms = [str(r.get("gsm")) for r in ordered]
-
-    off = z[~np.eye(n, dtype=bool)]
-    zmin = float(off.min())
-    if zmin >= 1.0:
-        zmin = 1.0 - 1e-6
-    span = 1.0 - zmin
-
-    cell = 14 if n > 30 else 18 if n > 15 else 26
-    heat_px = n * cell
-    gap_px = 6
-    top, bottom = 14, 84
-    height = top + _DENDRO_PX + gap_px + heat_px + bottom
-    plot_px = _DENDRO_PX + gap_px + heat_px
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        row_heights=[_DENDRO_PX / plot_px, heat_px / plot_px],
-                        vertical_spacing=gap_px / plot_px)
-
-    xs: list[float | None] = []
-    ys: list[float | None] = []
-    for x0, y0, x1, y1 in segments:
-        xs += [x0, x1, None]
-        ys += [y0, y1, None]
-    fig.add_trace(go.Scatter(
-        x=xs, y=ys, mode="lines", line={"color": _RULE, "width": 1.25},
-        hoverinfo="skip", showlegend=False, cliponaxis=False,
-        meta={"role": "dendrogram"}), row=1, col=1)
-
-    # A merge below the identical-profile distance is one profile under two
-    # accessions. At the dendrogram's scale its bracket is a flat line on the
-    # baseline, easy to miss, so its crossbar is redrawn heavier in ink.
-    ix: list[float | None] = []
-    iy: list[float | None] = []
-    for i, m in enumerate(merges):
-        if m.height < IDENTICAL_PROFILE_DISTANCE:
-            x0, y0, x1, y1 = segments[3 * i + 2]
-            ix += [x0, x1, None]
-            iy += [y0, y1, None]
-    if ix:
-        fig.add_trace(go.Scatter(
-            x=ix, y=iy, mode="lines", line={"color": _SELECTED, "width": 3},
-            hoverinfo="skip", showlegend=False, cliponaxis=False,
-            meta={"role": "identical"}), row=1, col=1)
-
-    pos = list(range(n))
-    hover = [[(f"<b>{z[i, j]:.6f}</b> cosine<br>"
-               f"{_esc(gsms[i])} ({_rank_text(ordered[i])})<br>"
-               f"{_esc(gsms[j])} ({_rank_text(ordered[j])})")
-              for j in range(n)] for i in range(n)]
-    decimals = _decimals(span, 4)
-    fig.add_trace(go.Heatmap(
-        x=pos, y=pos, z=z.tolist(), zmin=zmin, zmax=1.0,
-        colorscale=COSINE_SCALE, xgap=1, ygap=1,
-        customdata=[[["gsm", gsms[i]] for _ in range(n)] for i in range(n)],
-        hovertext=hover, hovertemplate="%{hovertext}<extra></extra>",
-        colorbar={"title": {"text": "Cosine", "side": "top", "font": _font(11)},
-                  "thickness": 10, "outlinewidth": 0, "ticks": "",
-                  "tickfont": _font(10, mono=True), "tickformat": f".{decimals}f",
-                  # Below the tick, so the 1.0 label clears the title above.
-                  "ticklabelposition": "outside bottom",
-                  "nticks": 5, "x": 1.0, "xanchor": "left", "xpad": 10,
-                  "len": heat_px / plot_px, "lenmode": "fraction",
-                  "y": 0.0, "yanchor": "bottom"},
-        meta={"role": "cosine"}), row=2, col=1)
-
-    selected = [i for i, g in enumerate(gsms) if selected_gsm and g == str(selected_gsm)]
-    ticktext = [f"<b>{_esc(g)}</b>" if i in selected else _esc(g)
-                for i, g in enumerate(gsms)]
-    label_size = 9 if n > 30 else 10 if n > 15 else 11
-    tickfont = _font(label_size, GRAPH_THEME["text_secondary"], mono=True)
-
-    layout = _base_layout(revision or "similarity:" + "|".join(sorted(gsms)), height,
-                          legend=False,
-                          margin={"l": 12, "r": 12, "t": top, "b": 12})
-    layout.update(dragmode="zoom")
-    fig.update_layout(**layout)
-    height_max = max((s[3] for s in segments), default=0.0) or 1e-6
-    fig.update_yaxes(row=1, col=1, **_axis(
-        range=[-0.06 * height_max, height_max * 1.08], nticks=3,
-        tickformat=f".{_decimals(height_max, 2)}f",
-        tickfont=_font(9, mono=True), fixedrange=True,
-        title={"text": "Distance", "font": _font(10), "standoff": 4}))
-    fig.update_xaxes(row=1, col=1, showgrid=False, zeroline=False, showline=False,
-                     showticklabels=False, ticks="")
-    fig.update_xaxes(row=2, col=1, range=[-0.5, n - 0.5], tickmode="array",
-                     tickvals=pos, ticktext=ticktext, tickangle=-90,
-                     tickfont=tickfont, showgrid=False, zeroline=False,
-                     showline=False, ticks="", automargin=True)
-    fig.update_yaxes(row=2, col=1, range=[n - 0.5, -0.5], tickmode="array",
-                     tickvals=pos, ticktext=ticktext, tickfont=tickfont,
-                     showgrid=False, zeroline=False, showline=False, ticks="",
-                     automargin=True)
-
-    for i in selected:
-        # Outline the selected sample's row and column, in the selection ink.
-        for x0, x1, y0, y1 in ((-0.5, n - 0.5, i - 0.5, i + 0.5),
-                               (i - 0.5, i + 0.5, -0.5, n - 0.5)):
-            fig.add_shape(type="rect", xref="x2", yref="y2", x0=x0, x1=x1,
-                          y0=y0, y1=y1, line={"color": _SELECTED, "width": 1.5},
-                          fillcolor="rgba(0,0,0,0)", layer="above")
     return fig
 
 

@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'deploy'))
 import common
 import ship
 import apply as apply_tool
-from sftp_client import SFTP, Packet, string, u32, ROOT
+from sftp_client import SFTP, Packet, u32, ROOT
 
 
 def test_package_is_allowlisted_and_integrity_checked(tmp_path):
