@@ -604,14 +604,14 @@ The OSDR overlay is always a white-ringed `diamond`, so the 2,108 spaceflight sa
 | `RETRIEVAL_QUERY_HALO_SIZE` | 46.0 | a single query point |
 | `RETRIEVAL_QUERY_HALO_SIZE_POOLED` | 32.0 | two or more members |
 | `RETRIEVAL_QUERY_HALO_ALPHA` | 0.50 | at k=1; `halo_rgba` divides by `sqrt(k)`, floored at 0.14 |
-| `RETRIEVAL_HIT_RING` | `#ffffff` | every hit ring, in both cohorts |
-| `RETRIEVAL_HIT_SIZE` / `_B` | 20.0 / 27.0 | B's square circumscribes A's circle |
-| `RETRIEVAL_HIT_SYMBOL` / `_B` | `circle-open` / `square-open` | both valid in `Scatter3d` |
-| `RETRIEVAL_HIT_LINE` | 2.2 | ring stroke width |
+| `MATCH_COLOR` | `#61ddd3` | every match, in both cohorts (white rings until 2026-10-22) |
+| `MATCH_SIZE` / `_B` | 7.0 / 10.0 | B's square circumscribes A's circle |
+| `MATCH_SYMBOL` / `_B` | `circle-open` / `square-open` | both valid in `Scatter3d` |
+| `MATCH_OPACITY` / `MATCH_LINE` | 0.9 / 1.6 | |
 | `RETRIEVAL_DIM_ARCHS4` / `_OSDR` | 0.35 / 0.30 | how far each corpus recedes behind a retrieval |
 | `RETRIEVAL_MAX_NUMERALS` | 25 | rank numerals stop here, and are off entirely in a comparison |
 
-**Which cohort a *member* belongs to is hue; which cohort retrieved a *hit* is ring shape.** Measured, against `PLOT_BG` and the eleven categorical hues:
+**Which cohort a *member* belongs to is hue; which cohort retrieved a *match* is mark shape.** Measured, against `PLOT_BG` and the eleven categorical hues:
 
 | candidate | worst contrast vs a categorical hue |
 | --- | --- |
@@ -620,7 +620,7 @@ The OSDR overlay is always a white-ringed `diamond`, so the 2,108 spaceflight sa
 | `#0bab9f` (network shared) | **1.07:1** vs `#c98500` |
 | `#ffffff` | **3.07:1** worst case, 16.9:1 vs `PLOT_BG` |
 
-So no hue can carry a hit ring, which is the same finding that made the ring white in the first place.
+So no per-cohort hue can carry a match, which is why matches were white rings until 2026-10-22 and are one shared teal (`#61ddd3`) since: against every tissue hue dimmed to `RETRIEVAL_DIM_ARCHS4` it measures 5.83:1 at worst, 10.28:1 against `PLOT_BG`.
 Hue is safe on a member because a member is a *filled* mark with a 2 px white outline: its findability comes from the outline, so the fill only has to separate A from B.
 `#ffc233` against `#0bab9f` is CIEDE2000 **43.4** normal, **31.7 / 45.0 / 48.0** under protanopia, deuteranopia and tritanopia, all far above the palette's 8.4 CVD bar; it is 10.5:1 on `PLOT_BG` and 17.0 dE from the nearest categorical hue.
 `ACCENT_WARM #d9791b` was rejected for the map: 0.3 dE from `CATEGORICAL[3]` under deuteranopia.
@@ -662,7 +662,7 @@ ARCHS4 has no curated tissue column at all; the signal is in GEO free text.
 Measured over `cache/archs4_metadata.parquet`: 90,449 distinct lowercased `source_name` values, and 433,961 samples carrying a `tissue:` key inside `characteristics` with 8,886 distinct lowercased values.
 `derive_tissue` reads eleven characteristics keys best-evidence-first (`tissue`, `organ`, `organ part`, `source tissue`, `tissue type`, `tissue region`, `anatomical site`, `body site`, `cell type`, `celltype`, `cell line`) and falls back to `source_name`; `cell type` is deliberately near the end because it often carries a cell-line name where `tissue` would have carried an organ.
 
-**852,341 of 940,455 ARCHS4 samples - 90.6% - land in a bucket other than `Other` or `Unknown`.**
+**871,816 of 940,455 ARCHS4 samples - 92.7% - land in a bucket other than `Other` or `Unknown`** (recounted 2026-10-22; 852,341 and 90.6% before the survey fixes).
 Top buckets over ARCHS4:
 
 | bucket | n | % of ARCHS4 |

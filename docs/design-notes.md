@@ -1641,6 +1641,14 @@ The embedder is a subprocess and takes a path, so an upload has to reach disk an
 
 ## The retrieval neighborhood explorer
 
+**Superseded on 2026-10-22: the explorer is now the retrieved matches, and the fixed 250-deep prefix is gone.**
+When this was built the reader could request only 3 to 30 hits, so a wider 250-deep evidence set added context.
+Once k could reach 1,000 the two sets stopped nesting: at k=100 the map drew 250 teal evidence marks under 100 large white hit rings, most matches wore two rings, and the explorer described 150 samples the table did not list; at k=1,000 it explored only a quarter of the matches.
+Joshua asked for one set, drawn as the small teal marks, and for the explorer and the retrieved count to agree.
+So the retrieval view stores only an availability marker, the map builds the explorer's rows from the stored hits, and the white hit rings are gone; matches are `theme.MATCH_*` open teal marks carrying the explorer's click data.
+Teal against every tissue hue at the retrieval dimming measures 5.83:1 at worst (10.28:1 against the plot background).
+The text below records the original design.
+
 A retrieval used to arrive on the map as the query and only the 3–30 hits the reader requested.
 That answered where the result landed, but not what biological and study context surrounded it.
 The explorer widens the evidence to the exact nearest **250 ARCHS4 samples in the original 512-dimensional embedding**, then makes that fixed set inspectable without pretending that nearby projected dots are equivalent evidence.

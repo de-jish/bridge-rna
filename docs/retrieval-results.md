@@ -104,8 +104,8 @@ The derivation drops the long free-text fields the table never shows, so at k=1,
 
 ### Retrieval changes (presentation support only)
 
-- `SCORE_PROFILE_DEPTH = 1000`. Every cached, cohort and upload scan runs to `max(k, 250, 1000)` and returns the top-1,000 scores as a plain float list alongside the hits.
-  The hits are still the first k of that one ranked scan, which is exactly how the 250-deep evidence neighborhood is already taken.
+- `SCORE_PROFILE_DEPTH = 1000`. Every cached, cohort and upload scan runs to `max(k, 1000)` and returns the top-1,000 scores as a plain float list alongside the hits.
+  The hits are the first k of that one ranked scan, and since 2026-10-22 they are also the map's neighborhood: there is no separate 250-deep prefix.
 - Exact score ties are ordered by reference row index, with a stable sort.
   Identical profiles score exactly equal, so without this their relative order depended on sort internals.
 - `reference_vectors(indices)` reads normalized hit vectors from the memmap for the identical-profile check.
@@ -133,12 +133,11 @@ Dash DataTable is deprecated and will be removed in Dash 5.0, and Dash AG Grid w
 
 They sit in the Matches panel, because they act on results, not on the query:
 
-- **Series**: a multi-select listing each GSE with its row count, plus an "Only these" or "Hide these" switch. This one control covers both "filter for a study" and "exclude a study".
+- **Series**: a multi-select listing each GSE with its row count; the table shows only the chosen series. A "Hide these" mode existed until 2026-10-22 and was removed at Joshua's request.
 - **Tissue category** and **Species**: multi-selects with counts.
 - **Minimum score**.
 - **Search**: case-insensitive substring over GSM, GSE, title and source name.
-- **Merge identical profiles**: off by default, so the duplication stays visible until the user chooses to collapse it. It sits beside Download rather than among the filters, because it changes how rows are shown, not which qualify.
-  The best-ranked accession is kept, and the summary says how many rows merging hid.
+- **Identical profiles** are never merged. Each copy keeps its own row and rank, and carries a plain note, "Same data as GSM...". A "Merge identical profiles" checkbox existed until 2026-10-22; Joshua found the term unclear and chose the note.
 - **Retrieved by** (comparison only): either, both, A only, B only.
 
 The count line always reads "N of M matches", and "Clear filters" is offered only while a filter is active.
@@ -228,12 +227,10 @@ For a comparison the rows are the union of both top-k lists, joined on GSM.
 
 ```python
 Filters = {
-  "series": [str],                 # GSE accessions; empty means no series filter
-  "series_mode": "only" | "hide",
+  "series": [str],                 # GSE accessions to show; empty means no series filter
   "tissue": [str], "species": [str],  # empty means all
   "min_score": float | None,       # a row passes if its best present score >= this
   "text": str,                     # case-insensitive substring of gsm, gse, title, source_name
-  "merge_identical": bool,
   "retrieved_by": "either" | "both" | "a" | "b",  # "a" means A and not B
 }
 Sort = {"column": "rank_a" | "score_a" | "rank_b" | "score_b" | "gsm" | "gse"
@@ -294,3 +291,4 @@ Each step ends green on pytest and is committed on its own.
 - 2026-10-21: built. Retrieval profile and tie rule; `results.py`, `result_plots.py` and the tissue fix built in parallel by subagents against the contracts above; the view, callbacks, styles and browser suite integrated and verified here.
 - 2026-10-22: Similarity view removed at Joshua's request after review; the plot switch is Score by rank, Series and Network.
 - 2026-10-22: Score by rank moved from a log rank axis over 1,000 ranks to a linear one over ten times k, with the score span in the caption.
+- 2026-10-22: "Merge identical profiles" and the Series Hide mode removed; duplicates carry a "Same data as" note. The map's neighborhood explorer is now the retrieved matches.
