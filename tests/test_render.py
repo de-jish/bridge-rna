@@ -45,71 +45,112 @@ _NEIGHBORHOOD = {
 
 
 @pytest.mark.parametrize("is_3d", [False, True])
-def test_evidence_neighborhood_is_one_uniform_open_trace_with_optional_focus(
-        is_3d):
-    """Evidence is rank metadata, not a rank ramp or projected boundary.
+def test_explorer_focus_is_one_amber_outline_around_the_focused_matches(is_3d):
+    """The explorer draws no marks of its own: the matches are its rows.
 
-    A scalar marker style and markers-only mode prevent color/size gradients,
-    connecting lines, and hull-like geometry.  The customdata row
-    is also the click/hover contract consumed by the explorer.
+    All it adds is a larger amber outline around the focused matches. It
+    carries no metadata, because the match underneath already does, and it
+    must enclose every match mark, including the comparison square's diagonal.
     """
     from manifold import render, theme
 
     coords = np.random.default_rng(11).normal(
         size=(50, 3 if is_3d else 2)).astype(np.float32)
-    base, focus = render._neighborhood_traces(coords, is_3d, _NEIGHBORHOOD)
-
-    expected_type = "scatter3d" if is_3d else "scattergl"
-    assert base.type == expected_type
-    assert base.name == "512-D evidence neighbor"
-    assert base.marker.symbol == "circle-open"
-    assert base.marker.size == theme.NEIGHBORHOOD_SIZE * (0.5 if is_3d else 1)
-    assert isinstance(base.marker.color, str)
-    assert "lines" not in (base.mode or "")
-    assert list(base.customdata[0]) == [
-        "neighborhood", 1, "GSM1", "GSE1", .99, "Eye", "mouse", "a", ""]
-    assert len(base.customdata) == 3
+    focus = render._neighborhood_focus_trace(coords, is_3d, _NEIGHBORHOOD)
 
     assert focus is not None
-    assert focus.name == "focused evidence neighbor"
+    assert focus.type == ("scatter3d" if is_3d else "scattergl")
+    assert focus.name == "focused match"
     assert len(focus.x) == 1
-    assert focus.customdata is None, "only the capped evidence trace carries metadata"
-    hit_rings = [
+    assert focus.marker.symbol == "circle-open"
+    assert focus.marker.color == theme.NEIGHBORHOOD_FOCUS_COLOR
+    assert focus.marker.size == theme.NEIGHBORHOOD_FOCUS_SIZE * (0.5 if is_3d else 1)
+    assert focus.customdata is None, "only the match underneath carries metadata"
+    assert focus.hoverinfo == "skip"
+    matches = [
         trace for trace in render._retrieval_traces(coords, is_3d, _COMPARISON)
-        if trace.name == "retrieved hit"
+        if trace.name == "retrieved match"
     ]
     required_diameter = max(
         trace.marker.size * (np.sqrt(2) if "square" in trace.marker.symbol else 1)
-        for trace in hit_rings
+        for trace in matches
     )
     assert focus.marker.size > required_diameter, (
-        "the focus circle must enclose every requested-hit ring, including "
-        "the comparison square's diagonal")
+        "the focus circle must enclose every match mark, including the "
+        "comparison square's diagonal")
+
+    assert render._neighborhood_focus_trace(
+        coords, is_3d, {**_NEIGHBORHOOD, "focus_points": []}) is None
 
 
-def test_evidence_neighborhood_omits_stale_indices_without_changing_counts():
-    """A stale map index cannot take down the figure or rewrite evidence totals."""
+def test_explorer_focus_omits_stale_and_malformed_indices():
+    """A stale map index cannot take down the figure or draw a phantom focus."""
     from manifold import render
 
-    overlay = {
-        **_NEIGHBORHOOD,
-        "points": [1, 999999],
-        "rows": [_NEIGHBORHOOD["rows"][0], _NEIGHBORHOOD["rows"][1]],
-        "focus_points": [999999],
-        "returned": 3,
-        "locatable": 2,
-    }
-    base, focus = render._neighborhood_traces(
-        np.zeros((5, 2), dtype=np.float32), False, overlay)
+    coords = np.zeros((5, 2), dtype=np.float32)
+    assert render._neighborhood_focus_trace(
+        coords, False, {**_NEIGHBORHOOD, "focus_points": [999999]}) is None
+    assert render._neighborhood_focus_trace(
+        coords, False, {**_NEIGHBORHOOD, "focus_points": [True, -1]}) is None
 
-    assert len(base.x) == 1
-    assert list(base.customdata[0])[2] == "GSM1"
-    assert focus is None
-    assert overlay["returned"] == 3 and overlay["locatable"] == 2
+    focus = render._neighborhood_focus_trace(
+        coords, False, {**_NEIGHBORHOOD, "focus_points": [1, 999999]})
+    assert len(focus.x) == 1
 
 
-def test_evidence_sits_behind_requested_hits_and_focus_sits_above_them(corpus):
-    """The wider context must not replace or cover the requested-hit rings."""
+def test_a_match_carries_the_explorers_click_contract(corpus):
+    """A match is the explorer's row on the map, so clicking it must focus that
+    sample in the explorer: its customdata is the explorer's convention, and
+    its hover names the sample, its study, its rank facts and its biology.
+
+    Built through `_retrieval_overlay`, the path the map takes, so the rank is
+    the match's place among every retrieved match, located or not.
+    """
+    from manifold import callbacks, render, theme
+
+    overlay = callbacks._retrieval_overlay({
+        "sample_id": "UPLOAD|counts.csv::S1",
+        "hits": [
+            {"gsm": "GSM1", "gse": "GSE1", "tissue": "Eye", "species": "mouse",
+             "score": 0.997, "archs4_index": 1},
+            {"gsm": "GSM2", "gse": "GSE1", "tissue": "Eye", "species": "mouse",
+             "score": 0.995, "archs4_index": 2},
+            {"gsm": "GSM-UNLOCATED", "gse": "GSE9", "score": 0.994,
+             "archs4_index": None},
+            {"gsm": "GSM3", "gse": "GSE2", "tissue": "Brain",
+             "species": "human", "score": 0.993, "archs4_index": 3},
+        ]})
+    coords = np.random.default_rng(12).normal(size=(50, 2)).astype(np.float32)
+    match = next(t for t in render._retrieval_traces(coords, False, overlay)
+                 if t.name == "retrieved match")
+
+    rows = [list(row) for row in match.customdata]
+    assert [row[:8] for row in rows] == [
+        ["neighborhood", 1, "GSM1", "GSE1", 0.997, "Eye", "mouse", "a"],
+        ["neighborhood", 2, "GSM2", "GSE1", 0.995, "Eye", "mouse", "a"],
+        ["neighborhood", 4, "GSM3", "GSE2", 0.993, "Brain", "human", "a"],
+    ]
+    assert rows[0][8].startswith("512-d rank 1")
+    for field in ("customdata[2]", "customdata[3]", "customdata[8]",
+                  "customdata[5]", "customdata[6]"):
+        assert field in match.hovertemplate
+    assert match.marker.color == theme.MATCH_COLOR
+    assert callbacks.next_neighborhood_focus(
+        "manifold-graph", {"points": [{"customdata": rows[1]}]}
+    ) == {"kind": "sample", "value": "GSM2"}
+
+    # A flat payload written before hit_rows existed still draws, ranked by
+    # position, with the explorer's convention intact.
+    flat = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+                if t.name == "retrieved match")
+    assert [row[0] for row in flat.customdata] == ["neighborhood"] * 3
+    assert [row[1] for row in flat.customdata] == [1, 2, 3]
+
+
+def test_the_matches_are_the_only_evidence_layer_and_focus_sits_above_them(
+        corpus):
+    """One mark per match: no separate evidence trace beneath the matches,
+    exactly one match trace for one cohort, and the focus on top of it."""
     from manifold import render
 
     neighborhood = {
@@ -124,13 +165,14 @@ def test_evidence_sits_behind_requested_hits_and_focus_sits_above_them(corpus):
         "pca", "2d", "species", ["archs4"], 1000, None,
         retrieval=_RETRIEVAL, neighborhood=neighborhood)
     names = [trace.name for trace in fig.data]
-    evidence_at = names.index("512-D evidence neighbor")
-    focus_at = names.index("focused evidence neighbor")
-    hit_positions = [i for i, name in enumerate(names) if name == "retrieved hit"]
+    focus_at = names.index("focused match")
+    match_positions = [i for i, name in enumerate(names)
+                       if name == "retrieved match"]
 
-    assert hit_positions
-    assert evidence_at < min(hit_positions)
-    assert focus_at > max(hit_positions)
+    assert "512-D evidence neighbor" not in names
+    assert "retrieved hit" not in names
+    assert len(match_positions) == 1
+    assert focus_at > max(match_positions)
     assert not any("Evidence neighborhood" in b or "Showing" in b for b in badges)
 
 
@@ -168,17 +210,21 @@ def test_the_overlay_never_emits_a_line_trace(is_3d):
         assert "lines" not in (t.mode or ""), f"{t.name} draws lines"
 
 
-def test_every_hit_ring_is_identical():
+def test_every_match_mark_is_identical():
     """No size, opacity, or colour ramp across rank: the top hits differ by
     about 0.0016 cosine (the top-5 span for the OSD-100 query; 0.004 is the
     top-20 span), and any ramp asserts a difference that is not there."""
-    from manifold import render
+    from manifold import render, theme
 
     coords = np.random.default_rng(2).normal(size=(50, 2)).astype(np.float32)
-    hits = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
-                if t.name == "retrieved hit")
-    assert np.isscalar(hits.marker.size) or isinstance(hits.marker.size, (int, float))
-    assert isinstance(hits.marker.color, str), "a per-point colour array is a ramp"
+    match = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
+                 if t.name == "retrieved match")
+    assert np.isscalar(match.marker.size) or isinstance(match.marker.size, (int, float))
+    assert isinstance(match.marker.color, str), "a per-point colour array is a ramp"
+    assert np.isscalar(match.marker.opacity), "a per-point opacity is a ramp"
+    assert match.marker.color == theme.MATCH_COLOR
+    assert match.marker.symbol == theme.MATCH_SYMBOL
+    assert match.marker.size == theme.MATCH_SIZE
 
 
 def test_the_overlay_ignores_out_of_range_points():
@@ -189,8 +235,8 @@ def test_the_overlay_ignores_out_of_range_points():
     traces = render._retrieval_traces(
         coords, False,
         {**_RETRIEVAL, "hit_points": [1, 999999], "query_point": 42})
-    hits = next((t for t in traces if t.name == "retrieved hit"), None)
-    assert hits is not None and len(hits.x) == 1
+    matches = next((t for t in traces if t.name == "retrieved match"), None)
+    assert matches is not None and len(matches.x) == 1
     assert not any(t.name == "query" for t in traces), "an out-of-range query was drawn"
 
 
@@ -702,22 +748,26 @@ def _coords(n=50, is_3d=False, seed=7):
 @pytest.mark.parametrize("is_3d", [False, True])
 def test_a_comparison_draws_both_cohorts_in_both_dimensionalities(is_3d):
     """3-D is the case that broke the single-cohort overlay with a 500, because
-    Scatter3d rejects an unknown symbol outright. Both hit symbols used here are
-    deliberately in its vocabulary, so the encoding is identical in 2-D and 3-D
-    rather than needing a fallback that would mean something different."""
-    from manifold import render
+    Scatter3d rejects an unknown symbol outright. Both match symbols used here
+    are deliberately in its vocabulary, so the encoding is identical in 2-D and
+    3-D rather than needing a fallback that would mean something different."""
+    from manifold import render, theme
 
     traces = render._retrieval_traces(_coords(is_3d=is_3d), is_3d, _COMPARISON)
     expected = "scatter3d" if is_3d else "scatter"
     assert all(t.type == expected for t in traces)
     assert len([t for t in traces if t.name == "query"]) == 2
-    assert len([t for t in traces if t.name == "retrieved hit"]) == 2
+    matches = [t for t in traces if t.name == "retrieved match"]
+    assert len(matches) == 2, "exactly one match trace per cohort"
+    scale = 0.5 if is_3d else 1.0
+    assert [t.marker.size for t in matches] == [theme.MATCH_SIZE * scale,
+                                                theme.MATCH_SIZE_B * scale]
 
 
 def test_the_two_cohorts_members_differ_by_hue_and_not_by_symbol():
     """Hue is safe on a member because a member is a filled mark with a white
     outline: its findability comes from the outline, so the fill only has to
-    separate A from B. Symbol is already spent telling a member from a hit."""
+    separate A from B. Symbol is already spent telling a member from a match."""
     from manifold import render, theme
 
     traces = render._retrieval_traces(_coords(), False, _COMPARISON)
@@ -727,30 +777,33 @@ def test_the_two_cohorts_members_differ_by_hue_and_not_by_symbol():
     assert len({t.marker.symbol for t in members}) == 1, "symbol must not differ"
 
 
-def test_the_two_cohorts_hits_differ_by_symbol_and_are_both_white():
-    """No hue clears 3:1 against the worst categorical tissue bucket - the
-    comparison network's own three measure 1.00 to 1.07 - which is the same
-    measurement that made the ring white in the first place. A two-cohort map
-    can afford a lost hit even less, because a lost hit is also a lost group."""
+def test_the_two_cohorts_matches_differ_by_symbol_and_share_one_teal():
+    """Shape, never hue, says which cohort retrieved a match. Every match is
+    the one teal (theme.MATCH_COLOR, measured at 5.83:1 or better against every
+    dimmed tissue bucket), so a two-cohort map loses no match to a hue that
+    happens to sit near a tissue color."""
     from manifold import render, theme
 
     traces = render._retrieval_traces(_coords(), False, _COMPARISON)
-    hits = [t for t in traces if t.name == "retrieved hit"]
-    assert {t.marker.color for t in hits} == {theme.RETRIEVAL_HIT_RING}
-    assert [t.marker.symbol for t in hits] == [theme.RETRIEVAL_HIT_SYMBOL,
-                                               theme.RETRIEVAL_HIT_SYMBOL_B]
+    matches = [t for t in traces if t.name == "retrieved match"]
+    assert {t.marker.color for t in matches} == {theme.MATCH_COLOR}
+    assert {t.marker.line.color for t in matches} == {theme.MATCH_COLOR}
+    assert [t.marker.symbol for t in matches] == [theme.MATCH_SYMBOL,
+                                                  theme.MATCH_SYMBOL_B]
+    assert all(t.marker.symbol.endswith("-open") for t in matches), (
+        "an open mark leaves the tissue color of the point underneath visible")
 
 
 def test_a_hit_both_cohorts_retrieved_carries_both_marks():
     """The shared set is emergent, never computed: a shared hit is in both hit
-    lists, so it receives both traces and draws as a ring inside a square. That
+    lists, so it receives both traces and draws as a circle inside a square. That
     is why the shared count on the map cannot drift from the one the status
     banner quotes - it is not calculated twice."""
     from manifold import render
 
     coords = _coords()
     traces = render._retrieval_traces(coords, False, _COMPARISON)
-    a, b = [t for t in traces if t.name == "retrieved hit"]
+    a, b = [t for t in traces if t.name == "retrieved match"]
     drawn_a = {(round(float(x), 6), round(float(y), 6)) for x, y in zip(a.x, a.y)}
     drawn_b = {(round(float(x), 6), round(float(y), 6)) for x, y in zip(b.x, b.y)}
     shared = {(round(float(coords[i][0]), 6), round(float(coords[i][1]), 6))
@@ -758,22 +811,21 @@ def test_a_hit_both_cohorts_retrieved_carries_both_marks():
     assert shared <= drawn_a and shared <= drawn_b, (
         "a shared hit must receive both cohorts' marks")
     assert b.marker.size > a.marker.size, (
-        "B's square must circumscribe A's ring, or one hides the other")
+        "B's square must circumscribe A's circle, or one hides the other")
 
 
-def test_the_square_is_drawn_after_the_ring_it_surrounds():
-    """Trace order is back to front. A 27 px square emitted first would sit
-    under the 20 px ring; emitted last it frames it."""
+def test_the_square_is_drawn_after_the_circle_it_surrounds():
+    """Trace order is back to front. B's larger square emitted first would sit
+    under A's circle; emitted last it frames it."""
     from manifold import render, theme
 
     traces = render._retrieval_traces(_coords(), False, _COMPARISON)
-    order = [t.marker.symbol for t in traces if t.name == "retrieved hit"]
-    assert order.index(theme.RETRIEVAL_HIT_SYMBOL_B) > \
-        order.index(theme.RETRIEVAL_HIT_SYMBOL)
+    order = [t.marker.symbol for t in traces if t.name == "retrieved match"]
+    assert order.index(theme.MATCH_SYMBOL_B) > order.index(theme.MATCH_SYMBOL)
     names = [t.name for t in traces]
-    assert names.index("query") > names.index("retrieved hit"), (
+    assert names.index("query") > names.index("retrieved match"), (
         "members are the thing being asked about and go on top")
-    assert names.index("query halo") < names.index("retrieved hit")
+    assert names.index("query halo") < names.index("retrieved match")
 
 
 def test_rank_numerals_are_dropped_only_when_two_cohorts_are_drawn():
@@ -784,27 +836,31 @@ def test_rank_numerals_are_dropped_only_when_two_cohorts_are_drawn():
 
     coords = _coords()
     both = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
-            if t.name == "retrieved hit"]
+            if t.name == "retrieved match"]
     assert all("text" not in (t.mode or "") for t in both)
 
     alone = [t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
-             if t.name == "retrieved hit"]
+             if t.name == "retrieved match"]
     assert all("text" in (t.mode or "") for t in alone)
     assert list(alone[0].text) == ["1", "2", "3"]
 
 
-def test_a_hits_hover_names_the_cohort_that_retrieved_it_only_when_ambiguous():
+def test_a_matchs_hover_names_the_cohort_that_retrieved_it_only_when_ambiguous():
+    """The rank facts live in customdata[8], the slot the hover prints."""
     from manifold import render
 
     coords = _coords()
     a, b = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
-            if t.name == "retrieved hit"]
-    assert all("Space Flight" in row[1] for row in a.customdata)
-    assert all("Ground Control" in row[1] for row in b.customdata)
+            if t.name == "retrieved match"]
+    assert all("Space Flight" in row[8] for row in a.customdata)
+    assert all("Ground Control" in row[8] for row in b.customdata)
+    # A shared match names both cohorts, whichever trace wins the hover.
+    shared = [row[8] for row in a.customdata if row[2] in ("GSM2", "GSM3")]
+    assert shared and all("Ground Control" in facts for facts in shared)
 
     alone = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
-                 if t.name == "retrieved hit")
-    assert all(row[1].startswith("512-d rank") for row in alone.customdata), (
+                 if t.name == "retrieved match")
+    assert all(row[8].startswith("512-d rank") for row in alone.customdata), (
         "one cohort has nothing to disambiguate against")
 
 
@@ -886,13 +942,13 @@ def test_the_hover_says_pooled_member_only_when_something_was_pooled():
 
     coords = _coords()
     alone = next(t for t in render._retrieval_traces(coords, False, _RETRIEVAL)
-                 if t.name == "retrieved hit")
-    assert all("map rank" in row[1] for row in alone.customdata)
-    assert not any("pooled member" in row[1] for row in alone.customdata)
+                 if t.name == "retrieved match")
+    assert all("map rank" in row[8] for row in alone.customdata)
+    assert not any("pooled member" in row[8] for row in alone.customdata)
 
     pooled = [t for t in render._retrieval_traces(coords, False, _COMPARISON)
-              if t.name == "retrieved hit"]
-    assert all("map rank" in row[1] for t in pooled for row in t.customdata)
+              if t.name == "retrieved match"]
+    assert all("map rank" in row[8] for t in pooled for row in t.customdata)
 
 
 def test_the_comparison_network_names_its_hits_until_they_would_collide():

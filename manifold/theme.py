@@ -157,26 +157,33 @@ RETRIEVAL_QUERY_B_RGB = "255, 194, 51"
 # receives both traces, so it draws as a ring inscribed in a square. That means
 # the shared set on the map is emergent rather than computed, and cannot drift
 # from the `shared` list the status banner quotes.
-RETRIEVAL_HIT_SYMBOL = "circle-open"
-RETRIEVAL_HIT_SYMBOL_B = "square-open"
-RETRIEVAL_HIT_SIZE_B = 27.0
-
-# Hits are an **open white ring**, and both halves of that matter.
+# A match is a **small open teal mark**: a circle for cohort A, a slightly
+# larger square for cohort B. Until 2026-10-22 it was a large open white ring
+# (20 px, 27 px for B) and the neighborhood explorer drew its own separate
+# 250-deep set of these teal marks underneath, so most matches wore two rings
+# and the two counts disagreed. Joshua asked for one mark, the teal one, and
+# for the explorer to be the matches.
 #
-# White because the obvious choice, the retrieval network's own blue #2b7fff,
-# measures **1.03:1** against CATEGORICAL[0] (#3987e5, Blood / immune) - the
-# largest bucket on the map at 155,757 points. A hit landing anywhere in 16.6%
-# of the corpus would have been invisible. White is 3.64:1 against that bucket
-# and 16.9:1 against the plot background.
+# Teal rather than white is measured, not only preferred: while a retrieval is
+# drawn the corpus is dimmed (RETRIEVAL_DIM_ARCHS4), and against every dimmed
+# categorical bucket #61ddd3 clears 5.83:1 at worst, 10.28:1 against the plot
+# background. Undimmed it falls to 1.87:1 against the amber bucket, which is
+# why the dimming is not optional while matches are shown.
 #
-# Open because it leaves the ARCHS4 point underneath showing its own tissue
-# color. One glyph then carries two independent measurements at once: that
-# the sample was retrieved (512-d cosine, from the model) and what GEO's free
-# text calls it (40 keyword rules, which know nothing about any embedding).
-# Whether those two agree is visible in a single mark, for no extra ink.
-RETRIEVAL_HIT_RING = "#ffffff"
-RETRIEVAL_HIT_SIZE = 20.0
-RETRIEVAL_HIT_LINE = 2.2
+# Open, so the ARCHS4 point underneath still shows its own tissue color, and
+# one glyph carries both measurements: that the sample was retrieved and what
+# GEO's free text calls it. B is larger so a match both cohorts retrieved
+# draws as a circle inside a square: the shared set stays emergent rather than
+# computed, and cannot drift from the `shared` list the status banner quotes.
+MATCH_COLOR = "#61ddd3"
+MATCH_SYMBOL = "circle-open"
+MATCH_SYMBOL_B = "square-open"
+MATCH_SIZE = 7.0
+MATCH_SIZE_B = 10.0
+MATCH_OPACITY = 0.9
+MATCH_LINE = 1.6
+# Rank numerals over the first matches stay white: text, not a mark.
+MATCH_NUMERAL = "#ffffff"
 
 # Sizes above are pixels, not data units, so a halo never reads as a radius in
 # map space and does not swell on zoom.
@@ -189,7 +196,7 @@ RETRIEVAL_HIT_LINE = 2.2
 RETRIEVAL_DIM_ARCHS4 = 0.35
 # OSDR recedes as far as ARCHS4 while a retrieval is shown. Keeping it brighter
 # was tried and looked wrong: 2,108 white-ringed diamonds at 0.40 are far more
-# prominent than the handful of white rings marking the actual hits, so the
+# prominent than the handful of marks on the actual matches, so the
 # thing the user came to see loses to the thing they did not ask about. The
 # query is drawn separately as a star, so the OSDR corpus receding does not
 # take the query with it.
@@ -200,18 +207,10 @@ RETRIEVAL_DIM_OSDR = 0.30
 RETRIEVAL_MAX_NUMERALS = 25
 
 
-# --- The exact 512-D evidence neighborhood ---------------------------------
-# Every evidence neighbor uses the same open teal mark. Rank belongs in hover,
-# not in a visual ramp: the projection does not preserve the cosine distances
-# that produced the ordering. A selected study or sample receives a larger
-# amber outline around the same point without replacing any requested-hit ring.
-# 42 px is the smallest clear step above the 27 px comparison-B square's
-# 38.2 px diagonal. Both marks halve together in 3-D, so the focus continues
-# to enclose the square there rather than shrinking inside its corners.
-NEIGHBORHOOD_COLOR = "#61ddd3"
-NEIGHBORHOOD_SIZE = 7.0
-NEIGHBORHOOD_SIZE_B = 10.0
-NEIGHBORHOOD_OPACITY = 0.78
+# --- The neighborhood explorer's focus ---------------------------------------
+# A study or sample selected in the explorer gets a larger amber outline around
+# its matches, without replacing them. 42 px stays well clear of a 10 px match
+# square; both halve together in 3-D.
 NEIGHBORHOOD_FOCUS_COLOR = "#d9791b"
 NEIGHBORHOOD_FOCUS_SIZE = 42.0
 NEIGHBORHOOD_FOCUS_LINE = 2.0
@@ -219,8 +218,8 @@ NEIGHBORHOOD_FOCUS_LINE = 2.0
 
 # --- A found sample ----------------------------------------------------------
 #
-# What the find box marks. It is white for the reason the hit ring is white and
-# by the same measurement: no hue clears 3:1 against the worst categorical
+# What the find box marks. It is white for the reason matches were white rings
+# until 2026-10-22, and by the same measurement: no hue clears 3:1 against the worst categorical
 # tissue bucket on this background, so a found sample carrying a hue of its own
 # would be invisible wherever it happened to land. Shape is the free channel,
 # and an X collides with nothing already drawn - the corpus is circles and

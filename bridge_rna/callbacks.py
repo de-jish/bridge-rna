@@ -37,8 +37,8 @@ from .layout import (
     samples_df,
 )
 from .neighborhoods import (
-    build_payload,
     evidence_unavailable_reason,
+    marker_payload,
     unavailable_payload,
 )
 from .panels import (
@@ -64,9 +64,14 @@ from .util import _format_count, _last_nonempty_line, _safe_str
 
 def _evidence_payload(frame: pd.DataFrame | None, label: str = "", *,
                       mode: str = "") -> dict:
+    """Whether the map can explore this retrieval's matches, and their label.
+
+    `frame` is None for a path that cannot locate its matches on the map. The
+    rows themselves are the stored hits; see `neighborhoods`.
+    """
     if frame is None:
         return unavailable_payload(evidence_unavailable_reason(mode))
-    return build_payload(frame, label=label)
+    return marker_payload(label)
 
 
 def _retrieval_phrase(mode: str) -> str:

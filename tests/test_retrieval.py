@@ -442,7 +442,9 @@ def test_cohort_results_match_the_legacy_pooled_row(corpus, size, topk):
     old_idx, old_score = retrieval._topk_cosine_matrix(vecs, old_queries, k=250)
     old_ranked = retrieval._annotate_from_cache(old_idx[0], old_score[0])
     old_ranked["archs4_index"] = old_idx[0].astype(int)
-    expected_hits, expected_evidence = retrieval.split_ranked_hits(old_ranked, topk, 250)
+    # Since 2026-10-22 the evidence prefix is the matches themselves.
+    expected_hits, expected_evidence = retrieval.split_ranked_hits(old_ranked, topk)
+    pd.testing.assert_frame_equal(expected_evidence, expected_hits)
 
     hits, evidence, returned_rows, _profile = (
         retrieval.run_cohort_retrieval_with_neighborhood(keys, topk=topk))

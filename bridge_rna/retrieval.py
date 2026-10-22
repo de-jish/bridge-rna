@@ -51,7 +51,6 @@ from .config import (
     UPLOAD_EMBED_SCRIPT_PATH,
 )
 from .geo import _enrich_hits_from_ncbi_eutils
-from .neighborhoods import NEIGHBORHOOD_DEPTH
 from .preflight import preflight_retrieval_requirements
 from .util import (
     RetrievalError,
@@ -807,7 +806,7 @@ def run_uploaded_retrieval_with_neighborhood(
     sample_column: str | None,
     topk: int,
     *,
-    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
+    neighborhood_depth: int | None = None,
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
 ) -> UploadRetrieval:
@@ -833,7 +832,7 @@ def run_cohort_retrieval_with_neighborhood(
     sample_ids: Sequence[str],
     topk: int,
     *,
-    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
+    neighborhood_depth: int | None = None,
 ) -> CohortRetrieval:
     """Pool a cohort and return requested hits plus one evidence prefix.
 
@@ -933,9 +932,9 @@ def search_hits(
 
 # --- What one scan returns ----------------------------------------------------
 
-# How deep the score-by-rank curve reaches. The scan already runs to the
-# 250-deep evidence neighborhood, and the memmap pass dominates its cost at any
-# k, so reaching 1,000 is measured at the same 0.4-0.5 s. It is also the most a
+# How deep the score-by-rank curve reaches. The memmap pass dominates a scan's
+# cost at any k, so reaching 1,000 is measured at the same 0.4-0.5 s as the
+# 250-deep scan this replaced. It is also the most a
 # user can ask for, which means a request for 1,000 matches costs nothing extra.
 SCORE_PROFILE_DEPTH = 1000
 MAX_MATCHES = SCORE_PROFILE_DEPTH
@@ -963,8 +962,8 @@ class UploadRetrieval(NamedTuple):
     profile: list[float]
 
 
-def _scan_depth(topk: int, neighborhood_depth: int) -> int:
-    return max(int(topk), int(neighborhood_depth), SCORE_PROFILE_DEPTH)
+def _scan_depth(topk: int, neighborhood_depth: int | None = None) -> int:
+    return max(int(topk), int(neighborhood_depth or topk), SCORE_PROFILE_DEPTH)
 
 
 def _ordered(ranked: pd.DataFrame) -> pd.DataFrame:
@@ -1015,13 +1014,18 @@ def reference_vectors(indices: Sequence[int]) -> np.ndarray:
 def split_ranked_hits(
     ranked: pd.DataFrame,
     requested_k: int,
-    neighborhood_depth: int,
+    neighborhood_depth: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split one ranked scan into the requested prefix and evidence prefix."""
+    """Split one ranked scan into the requested prefix and evidence prefix.
+
+    The evidence prefix defaults to the requested prefix: since 2026-10-22 the
+    map's neighborhood explorer is the retrieved matches, no more and no fewer.
+    """
     ordered = _ordered(ranked)
     requested = ordered.head(max(1, int(requested_k))).copy().reset_index(drop=True)
+    depth = requested_k if neighborhood_depth is None else neighborhood_depth
     neighborhood = (
-        ordered.head(max(1, int(neighborhood_depth))).copy().reset_index(drop=True)
+        ordered.head(max(1, int(depth))).copy().reset_index(drop=True)
     )
     return requested, neighborhood
 
@@ -1031,7 +1035,7 @@ def search_hits_with_neighborhood(
     sample_id: str,
     topk: int,
     *,
-    neighborhood_depth: int = NEIGHBORHOOD_DEPTH,
+    neighborhood_depth: int | None = None,
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
 ) -> SampleRetrieval:

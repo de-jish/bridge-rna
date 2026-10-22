@@ -1,4 +1,14 @@
-"""Pure data structures for a retrieved ARCHS4 neighborhood."""
+"""Pure data structures for a retrieved ARCHS4 neighborhood.
+
+The neighborhood **is** the retrieved matches. Until 2026-10-22 it was a
+separate, fixed top-250 prefix of the same scan, stored beside the hits: with
+k free to reach 1,000 the map drew two overlapping sets of rings that disagreed
+in number (250 teal circles, k white rings) and the explorer described 250
+samples while the table listed k. Joshua asked for one set. The retrieval view
+now stores only an availability marker, and the map builds this payload from
+the stored hits, so the explorer, the map marks and the table count the same
+rows by construction.
+"""
 
 from __future__ import annotations
 
@@ -12,14 +22,13 @@ import pandas as pd
 
 from .util import _safe_str
 
-NEIGHBORHOOD_DEPTH = 250
 ROW_TEXT_FIELDS = (
     "gsm", "gse", "title", "source_name", "characteristics",
     "tissue", "species",
 )
 STALE_EVIDENCE_REASON = (
-    "This saved retrieval predates evidence neighborhoods. Run this supported "
-    "retrieval again to build its exact top-250 cosine neighborhood in 512-D."
+    "This saved retrieval predates the neighborhood explorer. Run this "
+    "retrieval again to explore its matches."
 )
 UNSUPPORTED_EVIDENCE_MODES = frozenset(("demo", "precomputed"))
 
@@ -52,14 +61,15 @@ def _text(value: Any) -> str:
         return _safe_str(value)
 
 
-def build_payload(frame: pd.DataFrame | None, *, label: str = "",
-                  depth_requested: int = NEIGHBORHOOD_DEPTH) -> dict:
-    """Serialize ranked retrieval rows into a small JSON-safe payload."""
-    if depth_requested != NEIGHBORHOOD_DEPTH:
-        raise ValueError(f"Neighborhood depth is fixed at {NEIGHBORHOOD_DEPTH}.")
+def build_payload(frame: pd.DataFrame | None, *, label: str = "") -> dict:
+    """Serialize ranked retrieval rows, every one of them, into a JSON-safe payload.
+
+    Rank is the row's position, so `frame` must be in rank order, which stored
+    hits are.
+    """
     rows = []
     source = frame if frame is not None else pd.DataFrame()
-    source = source.iloc[:NEIGHBORHOOD_DEPTH].reset_index(drop=True)
+    source = source.reset_index(drop=True)
     for rank, (_, raw) in enumerate(source.iterrows(), 1):
         row = {field: _text(raw.get(field)) for field in ROW_TEXT_FIELDS}
         score = pd.to_numeric(raw.get("score"), errors="coerce")
@@ -73,7 +83,7 @@ def build_payload(frame: pd.DataFrame | None, *, label: str = "",
         "available": True,
         "reason": "",
         "label": _safe_str(label),
-        "depth_requested": int(depth_requested),
+        "depth_requested": len(rows),
         "depth_returned": len(rows),
         "metric": "cosine",
         "space": "embedding-512d",
@@ -81,11 +91,21 @@ def build_payload(frame: pd.DataFrame | None, *, label: str = "",
     }
 
 
+def marker_payload(label: str = "") -> dict:
+    """What the retrieval view stores: the matches can be explored, and as what.
+
+    No rows. The map builds them from the stored hits with `build_payload`, so
+    the hits-store carries each match once rather than twice.
+    """
+    return {"available": True, "reason": "", "label": _safe_str(label),
+            "from_hits": True}
+
+
 def unavailable_payload(reason: str) -> dict:
     """Return the stable empty state when retrieval results are unavailable."""
     return {
         "available": False, "reason": _safe_str(reason), "label": "",
-        "depth_requested": NEIGHBORHOOD_DEPTH, "depth_returned": 0,
+        "depth_requested": 0, "depth_returned": 0,
         "metric": "cosine", "space": "embedding-512d", "hits": [],
     }
 
@@ -95,8 +115,9 @@ def evidence_unavailable_reason(mode: str = "") -> str:
     normalized = _safe_str(mode).lower()
     if normalized in UNSUPPORTED_EVIDENCE_MODES:
         return (
-            f"The {normalized} mode cannot provide an exact top-250 cosine "
-            "neighborhood in 512-D. Rerunning that same mode will not add it. "
+            f"The {normalized} mode cannot place its matches on the map, so "
+            "there is nothing to explore. Rerunning that same mode will not "
+            "add it. "
             "Use a cached OSDR sample, uploaded counts, or cohort retrieval "
             "instead."
         )

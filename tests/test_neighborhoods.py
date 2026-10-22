@@ -28,8 +28,7 @@ def _frame() -> pd.DataFrame:
 
 def test_payload_is_ranked_json_safe_and_explicit_about_depth():
     payload = N.build_payload(_frame(), label="OSD-100 · eye")
-    assert payload["depth_requested"] == 250
-    assert payload["depth_returned"] == 4
+    assert payload["depth_requested"] == payload["depth_returned"] == 4
     assert payload["metric"] == "cosine"
     assert payload["space"] == "embedding-512d"
     assert [r["rank"] for r in payload["hits"]] == [1, 2, 3, 4]
@@ -48,17 +47,25 @@ def test_payload_treats_pandas_nullable_text_as_missing_metadata():
     assert N.summarize(payload)["tissue"] == {"covered": 0, "items": []}
 
 
-def test_payload_caps_hits_at_the_fixed_evidence_neighborhood_depth():
-    frame = pd.DataFrame({"gsm": [f"GSM{i}" for i in range(251)]})
+def test_payload_keeps_every_match_however_many_were_retrieved():
+    """The explorer is the matches: 1,000 retrieved means 1,000 explored. It was
+    a fixed 250-deep prefix until 2026-10-22, which at k=1,000 explored a
+    quarter of the matches and at k=100 described 150 samples that were not."""
+    frame = pd.DataFrame({"gsm": [f"GSM{i}" for i in range(1000)]})
 
     payload = N.build_payload(frame)
 
-    assert payload["depth_requested"] == N.NEIGHBORHOOD_DEPTH
-    assert payload["depth_returned"] == N.NEIGHBORHOOD_DEPTH
-    assert payload["hits"][-1]["gsm"] == "GSM249"
-    assert payload["hits"][-1]["rank"] == N.NEIGHBORHOOD_DEPTH
-    with pytest.raises(ValueError, match="fixed at 250"):
-        N.build_payload(frame, depth_requested=10)
+    assert payload["depth_requested"] == payload["depth_returned"] == 1000
+    assert payload["hits"][-1]["gsm"] == "GSM999"
+    assert payload["hits"][-1]["rank"] == 1000
+    assert not hasattr(N, "NEIGHBORHOOD_DEPTH")
+
+
+def test_the_stored_marker_carries_no_rows():
+    """The retrieval view stores a marker; the rows are the stored hits."""
+    marker = N.marker_payload("OSD-100 · eye")
+    assert marker == {"available": True, "reason": "", "label": "OSD-100 · eye",
+                      "from_hits": True}
 
 
 def test_payload_replaces_non_finite_scores_with_none():

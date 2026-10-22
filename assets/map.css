@@ -519,31 +519,28 @@
 }
 .bm-key-glyph.is-diamond .bm-key-glyph-fill { inset: 1.5px; border-radius: 1px; }
 
-/* Hit rings: open, white, and distinguished only by shape - the same split the
-   plot uses, for the same reason. B's square is the larger of the two so that a
-   hit both cohorts retrieved composites into a ring inside a square, which is
-   exactly what .is-hit-both draws. */
-.bm-key-glyph.is-hit-a,
-.bm-key-glyph.is-hit-b,
-.bm-key-glyph.is-hit-both { border: 2px solid #ffffff; }
-.bm-key-glyph.is-hit-a {
-  width: 12px; height: 12px; margin: 1px; border-radius: 50%;
+/* Matches: open teal marks distinguished only by shape, the same split the
+   plot uses. The hue is not written here: the key sets --glyph-color inline
+   from theme.MATCH_COLOR, so plot and key cannot drift apart. B's square is the
+   larger, so a match both cohorts retrieved composites into a circle inside a
+   square, which is exactly what .is-match-both draws. */
+.bm-key-glyph.is-match,
+.bm-key-glyph.is-match-b,
+.bm-key-glyph.is-match-both { border: 2px solid var(--glyph-color); }
+.bm-key-glyph.is-match {
+  width: 10px; height: 10px; margin: 2px; border-radius: 50%;
 }
-.bm-key-glyph.is-hit-b { width: 12px; height: 12px; margin: 1px; }
-/* The doubled mark is the one glyph that cannot be drawn to the plot's own
-   proportions. There, a 2.2 px stroke on a 27 px square is 8% of the mark, and
-   the 20 px circle inside it leaves a 3.5 px gap; scaled into a 14 px box that
-   gap is under a pixel, and the two strokes merge into a filled white square
-   with a hole - which is what the first attempt rendered. So the box grows to
-   17 px and the inner circle is inset further than faithfulness would put it:
-   the gap has to survive at 1x, because "a ring inside a square" is the whole
-   content of this row. */
-.bm-key-glyph.is-hit-both {
+.bm-key-glyph.is-match-b { width: 12px; height: 12px; margin: 1px; }
+/* The doubled mark cannot be drawn to the plot's own proportions at key size:
+   scaled into a 14 px box the gap between square and circle is under a pixel
+   and the two strokes merge. So the box grows to 17 px and the inner circle is
+   inset further, because "a circle inside a square" is this row's content. */
+.bm-key-glyph.is-match-both {
   width: 17px; height: 17px; margin: -1.5px;
 }
-.bm-key-glyph.is-hit-both::after {
+.bm-key-glyph.is-match-both::after {
   content: ""; position: absolute; inset: 4px;
-  border: 2px solid #ffffff; border-radius: 50%;
+  border: 2px solid var(--glyph-color); border-radius: 50%;
 }
 
 /* A found sample: an X, white for the same measured reason the hit rings are

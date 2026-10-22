@@ -477,18 +477,17 @@ def control_rail() -> html.Aside:
 # Every mark the map can draw is decoded here, in one panel, beside the marks.
 # Before this the map explained exactly one of its four encodings: the floating
 # legend keyed hue for the corpus, and everything else - that a diamond is an
-# OSDR sample, that a white ring is a retrieved hit, that a round ring and a
-# square ring are two different cohorts, that a ring inside a square is a hit
-# both of them found - was either prose on a rail 800 px from the glyph it
+# OSDR sample, that a ring is a retrieved match, that a round mark and a
+# square mark are two different cohorts, that a circle inside a square is a
+# match both of them found - was either prose on a rail 800 px from the glyph it
 # described, or nothing at all. A viewer who did not already know the scheme
 # could only decode the picture by hovering it one point at a time.
 #
 # The hues below are read from `theme`, never mirrored into the stylesheet, so
 # a change to RETRIEVAL_QUERY moves the plot and the key together. The
 # stylesheet owns the *shapes*, because a shape has no Python constant to drift
-# from - and the white it draws the hit rings in is the same white for the same
-# measured reason (theme.RETRIEVAL_HIT_RING: no hue clears 3:1 against the worst
-# categorical bucket on the navy canvas).
+# from. The match marks take their teal from `theme.MATCH_COLOR` through a CSS
+# variable set inline, so the stylesheet draws the shape and never the hue.
 
 #: What the corpus glyph shapes mean. Neutral-filled, because these marks take
 #: their color from the color-by and the shape is the whole message.
@@ -502,14 +501,11 @@ def _key_glyph(kind: str, color: str | None = None):
     `kind` selects the shape from the stylesheet; `color` is the fill for the
     shapes that have one, applied inline so it can come straight from `theme`.
     """
-    if kind in ("neighborhood", "neighborhood-b"):
-        # A distinct open dot, with its hue sourced from the same theme token
-        # as Plotly rather than mirrored into the stylesheet.
-        return html.Span(
-            className=f"bm-key-glyph is-{kind}",
-            style={"border": f"2px solid {color}",
-                   "borderRadius": "0" if kind == "neighborhood-b" else "50%",
-                   "boxSizing": "border-box"})
+    if kind in ("match", "match-b", "match-both"):
+        # An open mark whose hue comes from the same theme token as Plotly,
+        # through a CSS variable, so the stylesheet owns only the shape.
+        return html.Span(className=f"bm-key-glyph is-{kind}",
+                         style={"--glyph-color": color or theme.MATCH_COLOR})
     fill = ([html.Span(className="bm-key-glyph-fill",
                        style={"background": color})] if color else [])
     return html.Span(className=f"bm-key-glyph is-{kind}", children=fill)
@@ -541,7 +537,7 @@ def _member_shape(dims: str) -> str:
 
 
 def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
-                           dims: str, neighborhood: dict | None = None) -> list:
+                           dims: str) -> list:
     """The retrieval section of the key: every overlay mark, decoded.
 
     `overlay` is the **full** payload, including an arm the user has unticked,
@@ -564,24 +560,8 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     two rows and no headings, because with one query on screen there is nothing
     for a name or a group to distinguish it from.
     """
-    evidence = (neighborhood or {}).get("cohorts", [neighborhood or {}])
-    comparing = len((overlay or {}).get("cohorts", [])) > 1 or len(evidence) > 1
-    evidence_rows = []
-    for cohort in evidence:
-        count = int(cohort.get("locatable") or 0)
-        if count:
-            role = cohort.get("role", "a")
-            label = (f"{role.upper()} · {cohort.get('label') or 'cohort'}"
-                     if comparing else "512-D evidence neighbor")
-            evidence_rows.append(_key_row(
-                "neighborhood-b" if role == "b" else "neighborhood",
-                label, count, theme.NEIGHBORHOOD_COLOR))
-    if comparing and evidence_rows:
-        evidence_rows.insert(0, html.Div("512-D evidence neighbors", className="bm-key-head"))
     if not overlay or not overlay.get("cohorts"):
-        rows = evidence_rows
-        return ([html.Div(className="bm-key bm-key--retrieval", children=rows)]
-                if rows else [])
+        return []
 
     cohorts = overlay["cohorts"]
     shape = _member_shape(dims)
@@ -605,14 +585,13 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
                 shape, "pooled member" if n_members > 1 else "the query sample",
                 "hidden" if hidden else n_members, theme.RETRIEVAL_QUERY,
                 hidden=hidden))
-        rows.extend(evidence_rows)
-        rows.append(_key_row("hit-a", "retrieved hit",
+        rows.append(_key_row("match", "retrieved match",
                              "hidden" if hidden else len(c["hit_points"]),
-                             hidden=hidden))
+                             theme.MATCH_COLOR, hidden=hidden))
         return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
 
     hues = {"a": theme.RETRIEVAL_QUERY, "b": theme.RETRIEVAL_QUERY_B}
-    hit_shapes = {"a": "hit-a", "b": "hit-b"}
+    match_shapes = {"a": "match", "b": "match-b"}
 
     def arm(c, kind, count, color=None):
         hidden = c["role"] not in roles
@@ -622,17 +601,17 @@ def retrieval_key_children(overlay: dict | None, roles: tuple[str, ...],
     rows = [html.Div("Pooled members", className="bm-key-head")]
     rows += [arm(c, shape, len(c["query_points"]), hues[c["role"]])
              for c in cohorts]
-    rows.extend(evidence_rows)
-    rows.append(html.Div("Retrieved hits", className="bm-key-head"))
-    rows += [arm(c, hit_shapes[c["role"]], len(c["hit_points"]))
+    rows.append(html.Div("Retrieved matches", className="bm-key-head"))
+    rows += [arm(c, match_shapes[c["role"]], len(c["hit_points"]), theme.MATCH_COLOR)
              for c in cohorts]
 
     if all(c["role"] in roles for c in cohorts):
-        # Last row of the hits group, where it belongs: it is not a third
-        # cohort, it is one point wearing both cohorts' rings. Drawn only when
+        # Last row of the matches group, where it belongs: it is not a third
+        # cohort, it is one point wearing both cohorts' marks. Drawn only when
         # both arms are, because with one hidden the doubled mark cannot exist.
-        rows.append(_key_row("hit-both", "retrieved by both",
-                             len(overlay.get("shared_points") or [])))
+        rows.append(_key_row("match-both", "retrieved by both",
+                             len(overlay.get("shared_points") or []),
+                             theme.MATCH_COLOR))
     return [html.Div(className="bm-key bm-key--retrieval", children=rows)]
 
 
@@ -741,8 +720,7 @@ def found_key_children(found: dict | None) -> list:
     the same row in both views and says so with one class.
 
     White comes from the stylesheet rather than from `theme` through an inline
-    style, which is the hit rings' arrangement and for the hit rings' reason:
-    white here is the shape channel's ink, not a hue identifying anything, so
+    style, because white here is the shape channel's ink, not a hue identifying anything, so
     there is no per-cohort value that could drift out of step with the plot.
     """
     points = (found or {}).get("points") or []
@@ -1040,7 +1018,7 @@ def neighborhood_samples_children(rows: list[dict],
 def neighborhood_unavailable_children(reason: str) -> list:
     """Render a stale/legacy result without pretending evidence exists."""
     return _neighborhood_empty(
-        reason or "This retrieval has no evidence neighborhood available.")
+        reason or "This retrieval has no matches to explore.")
 
 
 def build_view() -> html.Div:

@@ -216,7 +216,9 @@ def test_app_builds(app):
     assert app.title == "Bridge RNA"
 
 
-def test_evidence_payload_is_json_safe_and_uses_the_fixed_depth():
+def test_evidence_payload_is_a_json_safe_marker_without_rows():
+    """The retrieval view stores whether the matches can be explored and their
+    label; the map builds the rows from the stored hits (since 2026-10-22)."""
     import numpy as np
     import pandas as pd
 
@@ -225,15 +227,11 @@ def test_evidence_payload_is_json_safe_and_uses_the_fixed_depth():
     frame = pd.DataFrame([
         {"gsm": "GSM1", "score": np.float32(0.9),
          "archs4_index": np.int64(7)},
-        {"gsm": "GSM2", "score": np.float32(0.8),
-         "archs4_index": np.int64(8)},
     ])
     payload = retrieval_callbacks._evidence_payload(frame, label="Cohort A")
 
-    assert payload["depth_requested"] == 250
-    assert payload["depth_returned"] == 2
-    assert [row["rank"] for row in payload["hits"]] == [1, 2]
-    assert all(type(row["rank"]) is int for row in payload["hits"])
+    assert payload == {"available": True, "reason": "", "label": "Cohort A",
+                       "from_hits": True}
     assert json.loads(json.dumps(payload)) == payload
 
 
@@ -243,10 +241,9 @@ def test_missing_supported_evidence_payload_requires_rerunning_the_retrieval():
     payload = retrieval_callbacks._evidence_payload(None, label="ignored")
 
     assert payload["available"] is False
-    assert payload["depth_requested"] == 250
     assert payload["depth_returned"] == 0
-    assert "saved retrieval predates evidence neighborhoods" in payload["reason"]
-    assert "Run this supported retrieval again" in payload["reason"]
+    assert "saved retrieval predates the neighborhood explorer" in payload["reason"]
+    assert "Run this retrieval again" in payload["reason"]
 
 
 @pytest.mark.parametrize("mode", ["demo", "precomputed"])
@@ -257,7 +254,7 @@ def test_fresh_unsupported_evidence_payload_does_not_invite_the_same_rerun(mode)
         None, label="ignored", mode=mode)
 
     assert payload["available"] is False
-    assert f"{mode} mode cannot provide" in payload["reason"]
+    assert f"{mode} mode cannot place its matches" in payload["reason"]
     assert "Rerunning that same mode will not add it" in payload["reason"]
     assert "cached OSDR sample, uploaded counts, or cohort retrieval" \
         in payload["reason"]
@@ -292,10 +289,16 @@ def _retrieval_frame(prefix, count, start=0):
     ])
 
 
-def test_cached_sample_callback_carries_its_evidence_neighborhood(
+def test_cached_sample_callback_marks_its_matches_explorable(
     app, monkeypatch
 ):
+    """The stored neighborhood is a marker; the map explores the stored hits.
+
+    The scan's wider evidence frame is ignored: since 2026-10-22 the explorer
+    is the retrieved matches, so its rows are exactly `payload["hits"]`.
+    """
     from bridge_rna import callbacks as retrieval_callbacks
+    from manifold import callbacks as map_callbacks
 
     hits = _retrieval_frame("GSM-A-", 2)
     neighborhood = _retrieval_frame("GSM-A-", 4)
@@ -312,11 +315,13 @@ def test_cached_sample_callback_carries_its_evidence_neighborhood(
 
     assert len(payload["hits"]) == 2
     assert payload["score_profile"] == [0.9, 0.8]
-    assert payload["neighborhood"]["available"] is True
-    assert payload["neighborhood"]["label"] == query["sample_name"]
-    assert [row["gsm"] for row in payload["neighborhood"]["hits"]] == [
-        "GSM-A-0", "GSM-A-1", "GSM-A-2", "GSM-A-3"
-    ]
+    assert payload["neighborhood"] == {
+        "available": True, "reason": "", "label": query["sample_name"],
+        "from_hits": True,
+    }
+    explored = map_callbacks._neighborhood_payload_for_arm(payload, "a")
+    assert [row["gsm"] for row in explored["hits"]] == ["GSM-A-0", "GSM-A-1"]
+    assert explored["label"] == query["sample_name"]
 
 
 def test_mounting_the_view_never_clears_the_sessions_results(app):
@@ -351,15 +356,16 @@ def test_demo_sample_callback_keeps_hits_and_marks_evidence_unavailable(
 
     assert [row["gsm"] for row in payload["hits"]] == ["GSM-D-0", "GSM-D-1"]
     assert payload["neighborhood"]["available"] is False
-    assert "demo mode cannot provide" in payload["neighborhood"]["reason"]
+    assert "demo mode cannot place its matches" in payload["neighborhood"]["reason"]
     assert "Rerunning that same mode will not add it" \
         in payload["neighborhood"]["reason"]
 
 
-def test_upload_callback_carries_evidence_and_its_score_profile(
+def test_upload_callback_marks_its_matches_explorable_and_keeps_its_profile(
     app, monkeypatch
 ):
     from bridge_rna import callbacks as retrieval_callbacks
+    from manifold import callbacks as map_callbacks
 
     hits = _retrieval_frame("GSM-U-", 2)
     neighborhood = _retrieval_frame("GSM-U-", 4)
@@ -382,16 +388,21 @@ def test_upload_callback_carries_evidence_and_its_score_profile(
     assert len(payload["hits"]) == 2
     assert payload["score_profile"] == [0.9, 0.8]
     assert payload["neighborhood"]["label"] == "Sample A"
-    assert payload["neighborhood"]["depth_returned"] == 4
+    assert payload["neighborhood"]["from_hits"] is True
+    assert "hits" not in payload["neighborhood"]
+    explored = map_callbacks._neighborhood_payload_for_arm(payload, "a")
+    assert explored["depth_returned"] == 2
+    assert [row["gsm"] for row in explored["hits"]] == ["GSM-U-0", "GSM-U-1"]
 
 
-def test_comparison_callback_keeps_independent_evidence_for_both_arms(
+def test_comparison_callback_keeps_independent_matches_for_both_arms(
     app, monkeypatch
 ):
     import numpy as np
 
     from bridge_rna import callbacks as retrieval_callbacks
     from bridge_rna import cohorts as C
+    from manifold import callbacks as map_callbacks
 
     facets = ("study", "organ", "spaceflight")
     cohort_a = C.Cohort(
@@ -439,10 +450,14 @@ def test_comparison_callback_keeps_independent_evidence_for_both_arms(
     assert payload["comparison"]["score_profile_b"] == [0.7, 0.6]
     assert payload["neighborhood"]["label"] == cohort_a.label
     assert payload["comparison"]["neighborhood_b"]["label"] == cohort_b.label
-    assert payload["neighborhood"]["depth_returned"] == 4
-    assert payload["comparison"]["neighborhood_b"]["depth_returned"] == 5
-    assert payload["neighborhood"]["hits"][0]["gsm"] == "GSM-A-0"
-    assert payload["comparison"]["neighborhood_b"]["hits"][0]["gsm"] == "GSM-B-0"
+    assert payload["neighborhood"]["from_hits"] is True
+    assert payload["comparison"]["neighborhood_b"]["from_hits"] is True
+    explored_a = map_callbacks._neighborhood_payload_for_arm(payload, "a")
+    explored_b = map_callbacks._neighborhood_payload_for_arm(payload, "b")
+    assert [row["gsm"] for row in explored_a["hits"]] == ["GSM-A-0", "GSM-A-1"]
+    assert [row["gsm"] for row in explored_b["hits"]] == ["GSM-B-0", "GSM-B-1"]
+    assert explored_a["label"] == cohort_a.label
+    assert explored_b["label"] == cohort_b.label
 
 
 def test_every_callback_target_exists_in_some_view(app, mounted_ids):
@@ -716,11 +731,10 @@ def test_unassigned_study_button_focuses_rows_with_blank_gse():
     )) if type(c).__name__ == "Button")
 
     focus = callbacks.next_neighborhood_focus(button.id, 1)
-    payload = {"neighborhood": {
-        "available": True, "label": "A", "depth_returned": 1,
-        "hits": [{"rank": 1, "gsm": "GSM1", "gse": "",
-                  "score": 0.99, "archs4_index": 4}],
-    }}
+    payload = {
+        "hits": [{"gsm": "GSM1", "gse": "", "score": 0.99, "archs4_index": 4}],
+        "neighborhood": {"available": True, "label": "A", "from_hits": True},
+    }
     overlay = callbacks._neighborhood_overlay(payload, "a", focus)
 
     assert "No GSE recorded" in _text(button)
@@ -821,8 +835,8 @@ def test_drawer_distinguishes_stale_supported_from_fresh_unsupported_results():
         {"mode": "cached", "hits": [{"gsm": "GSM1"}]},
         "a", "overview", "", None)
     unsupported_reason = (
-        "The demo mode cannot provide an exact top-250 cosine neighborhood in "
-        "512-D. Rerunning that same mode will not add it. Use a cached OSDR "
+        "The demo mode cannot place its matches on the map, so there is nothing "
+        "to explore. Rerunning that same mode will not add it. Use a cached OSDR "
         "sample, uploaded counts, or cohort retrieval instead."
     )
     unsupported = callbacks.neighborhood_drawer_state(
@@ -832,9 +846,9 @@ def test_drawer_distinguishes_stale_supported_from_fresh_unsupported_results():
 
     stale_text = _text(stale["body"])
     unsupported_text = _text(unsupported["body"])
-    assert "saved retrieval predates evidence neighborhoods" in stale_text
-    assert "Run this supported retrieval again" in stale_text
-    assert "demo mode cannot provide" in unsupported_text
+    assert "saved retrieval predates the neighborhood explorer" in stale_text
+    assert "Run this retrieval again" in stale_text
+    assert "demo mode cannot place its matches" in unsupported_text
     assert "Rerunning that same mode will not add it" in unsupported_text
     assert stale_text != unsupported_text
 
@@ -956,17 +970,17 @@ def test_map_neighborhood_click_reveals_samples_without_clearing_controls():
 
 
 def test_selected_sample_detail_ignores_filter_but_list_keeps_filter():
-    payload = {"neighborhood": {
-        "available": True, "label": "A", "depth_returned": 2,
+    payload = {
         "hits": [
-            {"rank": 1, "gsm": "GSM1", "gse": "GSE1",
+            {"gsm": "GSM1", "gse": "GSE1",
              "title": "Retina sample", "tissue": "Eye",
              "species": "mouse", "score": 0.99, "archs4_index": 1},
-            {"rank": 2, "gsm": "GSM2", "gse": "GSE2",
+            {"gsm": "GSM2", "gse": "GSE2",
              "title": "Brain sample", "tissue": "Brain",
              "species": "mouse", "score": 0.98, "archs4_index": 2},
         ],
-    }}
+        "neighborhood": {"available": True, "label": "A", "from_hits": True},
+    }
 
     state = callbacks.neighborhood_drawer_state(
         payload, "a", "samples", "GSM1",
@@ -982,14 +996,14 @@ def test_selected_sample_detail_ignores_filter_but_list_keeps_filter():
 
 
 def test_selected_sample_detail_survives_an_empty_filtered_list():
-    payload = {"neighborhood": {
-        "available": True, "label": "A", "depth_returned": 1,
+    payload = {
         "hits": [
-            {"rank": 1, "gsm": "GSM2", "gse": "GSE2",
+            {"gsm": "GSM2", "gse": "GSE2",
              "title": "Brain sample", "tissue": "Brain",
              "species": "mouse", "score": 0.98, "archs4_index": 2},
         ],
-    }}
+        "neighborhood": {"available": True, "label": "A", "from_hits": True},
+    }
 
     state = callbacks.neighborhood_drawer_state(
         payload, "a", "samples", "no matches",
@@ -1993,9 +2007,27 @@ def _neighborhood_payload(label="A", offset=0):
     }
 
 
+def _explorable(label="A", offset=0):
+    """One arm as the retrieval view now stores it: hits plus a marker.
+
+    Returns `(hits, marker)`; the explorer's rows are built from the hits.
+    """
+    return (_neighborhood_payload(label, offset)["hits"],
+            {"available": True, "reason": "", "label": label,
+             "from_hits": True})
+
+
+def _explorable_payload(label_a="A", label_b=None, offset_b=10):
+    hits_a, marker_a = _explorable(label_a)
+    payload = {"hits": hits_a, "neighborhood": marker_a}
+    if label_b is not None:
+        hits_b, marker_b = _explorable(label_b, offset_b)
+        payload["comparison"] = {"hits_b": hits_b, "neighborhood_b": marker_b}
+    return payload
+
+
 def test_neighborhood_overlay_selects_an_arm_and_focus_points():
-    payload = {"neighborhood": _neighborhood_payload("A"),
-               "comparison": {"neighborhood_b": _neighborhood_payload("B", 10)}}
+    payload = _explorable_payload("A", "B")
     overlay = callbacks._neighborhood_overlay(
         payload, "a", {"kind": "study", "value": "GSE1"})
     assert overlay["label"] == "A"
@@ -2009,17 +2041,59 @@ def test_neighborhood_overlay_selects_an_arm_and_focus_points():
     assert sample["focus_points"] == [2]
 
 
-def test_neighborhood_overlay_omits_non_integer_map_indices():
-    neighborhood = _neighborhood_payload()
-    neighborhood["hits"][0]["archs4_index"] = "1"
-    neighborhood["hits"][1]["archs4_index"] = 2.0
+def test_neighborhood_overlay_omits_malformed_map_indices():
+    """A boolean, a fractional or a non-numeric index is not a coordinate.
 
-    overlay = callbacks._neighborhood_overlay(
-        {"neighborhood": neighborhood}, "a", None)
+    The explorer's rows are rebuilt from the stored hits by
+    `neighborhoods.build_payload`, whose `_index` refuses all three, so none of
+    them is drawn or focused. The row is still returned, so the count of
+    matches never silently changes.
+    """
+    payload = _explorable_payload()
+    payload["hits"][0]["archs4_index"] = True
+    payload["hits"][1]["archs4_index"] = 1.5
+    payload["hits"][2]["archs4_index"] = "not an index"
+
+    overlay = callbacks._neighborhood_overlay(payload, "a", None)
 
     assert overlay["points"] == []
     assert overlay["rows"] == []
     assert overlay["returned"] == 3 and overlay["locatable"] == 0
+
+
+def test_the_explorer_rows_are_exactly_the_stored_hits_not_a_legacy_list():
+    """A session saved while the neighborhood was a separate 250-deep list
+    still stores those 250 rows. They are ignored: the explorer reads each
+    arm's own hits, so it lists exactly what the table and the map marks do.
+    """
+    def hit(prefix, i, start):
+        return {"gsm": f"{prefix}{i}", "gse": f"GSE{i}", "score": 0.9 - i / 1e4,
+                "archs4_index": start + i}
+
+    legacy = {
+        "available": True, "label": "", "depth_requested": 250,
+        "depth_returned": 250, "metric": "cosine", "space": "embedding-512d",
+        "hits": [{"rank": i + 1, **hit("GSM-LEGACY-", i, 500)}
+                 for i in range(250)],
+    }
+    hits_a = [hit("GSM-A-", i, 0) for i in (3, 1, 7)]
+    hits_b = [hit("GSM-B-", i, 100) for i in (2, 9)]
+    payload = {
+        "hits": hits_a,
+        "neighborhood": {**legacy, "label": "Flight"},
+        "comparison": {"hits_b": hits_b,
+                       "neighborhood_b": {**legacy, "label": "Ground"}},
+    }
+
+    for arm, hits, label in (("a", hits_a, "Flight"), ("b", hits_b, "Ground")):
+        explored = callbacks._neighborhood_payload_for_arm(payload, arm)
+        assert explored["label"] == label
+        assert explored["depth_returned"] == len(hits)
+        assert len(explored["hits"]) == len(hits)
+        assert [row["gsm"] for row in explored["hits"]] == \
+            [hit["gsm"] for hit in hits]
+        assert [row["rank"] for row in explored["hits"]] == \
+            list(range(1, len(hits) + 1))
 
 
 def test_unavailable_neighborhood_draws_nothing():
@@ -2030,7 +2104,7 @@ def test_unavailable_neighborhood_draws_nothing():
 # --- The key on the plot -----------------------------------------------------
 #
 # The map draws four encodings at once - corpus tissue hue, member fill hue,
-# hit ring shape, and corpus glyph shape - and until this key existed it
+# match mark shape, and corpus glyph shape - and until this key existed it
 # explained exactly one of them. These pin the structure, not the wording.
 
 
@@ -2059,13 +2133,13 @@ def _key_shapes(children) -> list[str]:
 def test_a_plain_search_gets_a_two_row_key_and_no_headings(corpus):
     """The single-query state must not pay for the comparison. With one query
     on screen there is nothing for a name or a group heading to distinguish it
-    from, so the key is the query mark, the hit mark, and nothing else."""
+    from, so the key is the query mark, the match mark, and nothing else."""
     key = str(data.osdr_metadata()["sample_key"].iloc[0])
     overlay = callbacks._retrieval_overlay(
         {"sample_id": key, "hits": [{"gsm": "GSM1", "score": 0.9,
                                      "archs4_index": 0}]})
     children = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
-    assert _key_shapes(children) == ["star", "hit-a"]
+    assert _key_shapes(children) == ["star", "match"]
     assert "bm-key bm-key--retrieval" in _classes(children)
     assert "bm-key-head" not in _classes(children)
     assert "the query sample" in _text(children)
@@ -2073,63 +2147,58 @@ def test_a_plain_search_gets_a_two_row_key_and_no_headings(corpus):
         "one sample is not a pool; the phrase is earned by k >= 2")
 
 
-def test_drawn_evidence_neighborhood_adds_its_open_dot_to_the_key(corpus):
+def test_the_match_row_wears_the_teal_open_mark_and_no_evidence_row(corpus):
+    """The matches are the neighborhood, so the key has one row for them, in
+    the teal the plot draws them in, and no separate evidence row."""
     key = str(data.osdr_metadata()["sample_key"].iloc[0])
     retrieval = callbacks._retrieval_overlay(
         {"sample_id": key, "hits": [{"gsm": "GSM1", "score": 0.9,
                                       "archs4_index": 0}]})
-    neighborhood = callbacks._neighborhood_overlay(
-        {"neighborhood": _neighborhood_payload()}, "a", None)
 
-    children = layout.retrieval_key_children(
-        retrieval, ("a",), "2d", neighborhood=neighborhood)
+    children = layout.retrieval_key_children(retrieval, ("a",), "2d")
 
-    assert _key_shapes(children) == ["star", "neighborhood", "hit-a"]
-    assert "512-D evidence neighbor" in _text(children)
-    neighborhood_glyph = next(
+    assert _key_shapes(children) == ["star", "match"]
+    assert "retrieved match" in _text(children)
+    assert "512-D evidence neighbor" not in _text(children)
+    match_glyph = next(
         c for child in children for c in _walk(child)
-        if getattr(c, "className", "") == "bm-key-glyph is-neighborhood")
-    assert theme.NEIGHBORHOOD_COLOR in str(neighborhood_glyph.style)
-
-    without_marks = layout.retrieval_key_children(
-        retrieval, ("a",), "2d",
-        neighborhood={**neighborhood, "points": [], "locatable": 0})
-    assert "neighborhood" not in _key_shapes(without_marks)
+        if getattr(c, "className", "") == "bm-key-glyph is-match")
+    assert match_glyph.style == {"--glyph-color": theme.MATCH_COLOR}
 
 
-def test_evidence_key_counts_only_indices_the_current_map_can_draw(corpus):
-    payload = _neighborhood_payload()
-    payload["hits"][1]["archs4_index"] = corpus["n_archs4"] + 10
-    neighborhood = callbacks._neighborhood_overlay(
-        {"neighborhood": payload}, "a", None)
+def test_match_key_counts_only_indices_the_current_map_can_draw(corpus):
+    retrieval = callbacks._retrieval_overlay(
+        {"sample_id": "UPLOAD|counts.csv::S1",
+         "hits": [{"gsm": "GSM1", "score": 0.9, "archs4_index": 1},
+                  {"gsm": "GSM2", "score": 0.8,
+                   "archs4_index": corpus["n_archs4"] + 10}]})
 
-    children = layout.retrieval_key_children(
-        None, ("a",), "2d", neighborhood=neighborhood)
+    children = layout.retrieval_key_children(retrieval, ("a",), "2d")
     row = next(
         c for child in children for c in _walk(child)
         if getattr(c, "className", "") == "bm-key-row")
 
-    assert neighborhood["locatable"] == 1
-    assert _text(row).strip() == "512-D evidence neighbor 1"
+    assert retrieval["cohorts"][0]["hit_points"] == [1]
+    assert _text(row).strip() == "retrieved match 1"
 
 
-def test_all_stale_evidence_indices_draw_no_key(corpus):
-    payload = _neighborhood_payload()
-    payload["hits"][0]["archs4_index"] = corpus["n_archs4"] + 10
-    payload["hits"][1]["archs4_index"] = corpus["n_archs4"] + 11
-    neighborhood = callbacks._neighborhood_overlay(
-        {"neighborhood": payload}, "a", None)
+def test_all_stale_match_indices_draw_no_key(corpus):
+    """An uploaded query has no member mark, so with every match out of range
+    there is nothing on the map for a key row to name."""
+    payload = {"sample_id": "UPLOAD|counts.csv::S1",
+               "hits": [{"gsm": "GSM1", "score": 0.9,
+                         "archs4_index": corpus["n_archs4"] + 10},
+                        {"gsm": "GSM2", "score": 0.8,
+                         "archs4_index": corpus["n_archs4"] + 11}]}
+    retrieval = callbacks._retrieval_overlay(payload)
 
-    children = layout.retrieval_key_children(
-        None, ("a",), "2d", neighborhood=neighborhood)
-
-    assert neighborhood["locatable"] == 0
-    assert children == []
+    assert retrieval is None
+    assert layout.retrieval_key_children(retrieval, ("a",), "2d") == []
 
 
 def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):
     """The encoding has two factors and they do not share a channel: hue names
-    the cohort on a member, ring shape names it on a hit. Listing each cohort's
+    the cohort on a member, mark shape names it on a match. Listing each cohort's
     marks together buries that. Listing the two member rows adjacent and the two
     hit rows adjacent shows it - one pair differs only in hue, the next only in
     shape - so the layout is the explanation and no sentence has to assert it.
@@ -2138,8 +2207,8 @@ def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):
     overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
     children = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
 
-    assert _key_shapes(children) == ["star", "star", "hit-a", "hit-b",
-                                     "hit-both"]
+    assert _key_shapes(children) == ["star", "star", "match", "match-b",
+                                     "match-both"]
     # The rule that separates this key from the colour list below it hangs off
     # this modifier. It was missing here once - the comparison branch returns
     # from a different indent level than the single-query branch, so an edit
@@ -2147,7 +2216,15 @@ def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):
     # against "Color · Tissue" with nothing between them.
     assert "bm-key bm-key--retrieval" in _classes(children)
     text = _text(children)
-    assert "Pooled members" in text and "Retrieved hits" in text
+    assert "Pooled members" in text and "Retrieved matches" in text
+    # Shape, not hue, carries the cohort on a match: every match glyph is the
+    # one teal the plot draws, read from theme rather than the stylesheet.
+    match_glyphs = [c for child in children for c in _walk(child)
+                    if str(getattr(c, "className", "")).startswith(
+                        "bm-key-glyph is-match")]
+    assert len(match_glyphs) == 3
+    assert all(g.style == {"--glyph-color": theme.MATCH_COLOR}
+               for g in match_glyphs)
     # Each cohort is named in both of its rows, so neither channel has to be
     # carried across a heading by memory.
     for label in ("Liver · Space Flight", "Liver · Ground Control"):
@@ -2155,7 +2232,7 @@ def test_a_comparison_key_is_grouped_by_role_not_by_cohort(two_cohorts):
 
 
 def test_the_doubled_mark_is_rowed_only_when_both_arms_are_drawn(two_cohorts):
-    """A hit retrieved by both is one point wearing both cohorts' rings, so it
+    """A match retrieved by both is one point wearing both cohorts' marks, so it
     cannot exist with an arm hidden. It is also not a third cohort, which is why
     it is the last row of the hits group rather than a group of its own."""
     a, b = two_cohorts
@@ -2163,11 +2240,11 @@ def test_the_doubled_mark_is_rowed_only_when_both_arms_are_drawn(two_cohorts):
 
     both = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
     assert "retrieved by both" in _text(both)
-    assert _key_shapes(both)[-1] == "hit-both"
+    assert _key_shapes(both)[-1] == "match-both"
 
     one = layout.retrieval_key_children(overlay, ("a",), "2d")
     assert "retrieved by both" not in _text(one)
-    assert "hit-both" not in _key_shapes(one)
+    assert "match-both" not in _key_shapes(one)
 
 
 def test_the_single_query_key_obeys_the_tick_too(corpus):
@@ -2200,7 +2277,7 @@ def test_a_hidden_arm_keeps_both_its_rows_receded(two_cohorts):
     overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
     children = layout.retrieval_key_children(overlay, ("a",), "2d")
 
-    assert _key_shapes(children) == ["star", "star", "hit-a", "hit-b"]
+    assert _key_shapes(children) == ["star", "star", "match", "match-b"]
     assert _classes(children).count("bm-key-row is-hidden") == 2
     assert _text(children).count("hidden") == 2
 
@@ -2213,7 +2290,7 @@ def test_the_key_follows_the_three_dimensional_symbol_substitution(two_cohorts):
     a, b = two_cohorts
     overlay = callbacks._retrieval_overlay(_comparison_payload(a, b))
     assert _key_shapes(layout.retrieval_key_children(overlay, ("a", "b"), "3d")) \
-        == ["diamond", "diamond", "hit-a", "hit-b", "hit-both"]
+        == ["diamond", "diamond", "match", "match-b", "match-both"]
 
 
 def test_an_uploaded_query_gets_no_member_row(corpus):
@@ -2224,7 +2301,7 @@ def test_an_uploaded_query_gets_no_member_row(corpus):
         {"sample_id": "UPLOAD|counts.csv::S1",
          "hits": [{"gsm": "GSM1", "score": 0.9, "archs4_index": 0}]})
     children = layout.retrieval_key_children(overlay, ("a", "b"), "2d")
-    assert _key_shapes(children) == ["hit-a"]
+    assert _key_shapes(children) == ["match"]
 
 
 def test_a_shared_hit_keeps_its_identity_across_both_arms(two_cohorts):
@@ -2275,7 +2352,7 @@ def test_the_key_glyph_shapes_all_have_a_stylesheet_rule():
     _stylesheet` cannot catch these: the class is built by string interpolation
     from the shape name, so it never appears in a className literal."""
     css = _all_css()
-    shapes = ["star", "diamond", "hit-a", "hit-b", "hit-both",
+    shapes = ["star", "diamond", "match", "match-b", "match-both",
               "found", "corpus-archs4", "corpus-osdr"]
     missing = [s for s in shapes if f".bm-key-glyph.is-{s}" not in css]
     assert not missing, f"key glyph shapes with no CSS rule: {missing}"
@@ -2383,7 +2460,7 @@ def test_the_map_key_reads_its_hues_from_the_theme(two_cohorts):
             f"{value} is mirrored into map.css again; the key reads theme")
 
 
-def test_the_second_cohorts_hit_symbol_is_valid_in_three_dimensions():
+def test_both_cohorts_match_symbols_are_valid_in_three_dimensions():
     """Scatter3d rejects an unknown symbol outright rather than degrading - the
     failure that took the whole figure callback down with a 500 the first time
     3-D was opened with a retrieval showing."""
@@ -2391,7 +2468,7 @@ def test_the_second_cohorts_hit_symbol_is_valid_in_three_dimensions():
 
     # Constructing the trace is the check: Scatter3d validates the symbol at
     # construction and raises ValueError on one it does not know.
-    for symbol in (theme.RETRIEVAL_HIT_SYMBOL, theme.RETRIEVAL_HIT_SYMBOL_B):
+    for symbol in (theme.MATCH_SYMBOL, theme.MATCH_SYMBOL_B):
         go.Scatter3d(x=[0], y=[0], z=[0], mode="markers",
                      marker=dict(symbol=symbol))
 

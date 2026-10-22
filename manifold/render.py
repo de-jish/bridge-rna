@@ -325,68 +325,27 @@ def _osdr_customdata(codes: np.ndarray, legend: list[dict]) -> list[list]:
             for k, c in zip(keys, codes.tolist())]
 
 
-def _neighborhood_traces(coords, is_3d, neighborhood, facts=None):
-    """Draw the exact 512-D evidence prefix and an optional map focus.
+def _neighborhood_focus_trace(coords, is_3d, neighborhood):
+    """The explorer's focus: a large open outline around the focused matches.
 
-    Rank is available in hover but never changes the mark. In particular this
-    uses uniform open circles for A and larger open squares for B, so shared
-    samples retain both outlines at their original coordinates.
+    The matches themselves are drawn by `_retrieval_traces`; this only rings
+    the ones the explorer has focused (one sample, or one study's samples).
     """
     Scatter = go.Scatter3d if is_3d else go.Scattergl
     scale = 0.5 if is_3d else 1.0
     n = len(coords)
-
-    def valid(point):
-        return (isinstance(point, (int, np.integer))
-                and not isinstance(point, (bool, np.bool_))
-                and 0 <= int(point) < n)
-
-    located = [(int(point), row) for point, row in zip(
-        neighborhood.get("points") or [], neighborhood.get("rows") or [])
-               if valid(point)]
-    points = [point for point, _row in located]
-    customdata = [[
-        "neighborhood",
-        row.get("rank"),
-        str(row.get("gsm") or ""),
-        str(row.get("gse") or ""),
-        row.get("score"),
-        str(row.get("tissue") or ""),
-        str(row.get("species") or ""),
-        neighborhood.get("role", "a"),
-        "<br>".join((facts or {}).get(point, [])),
-    ] for point, row in located]
-
-    def xyz(indices):
-        arr = np.asarray(indices, dtype=int)
-        result = {"x": coords[arr, 0], "y": coords[arr, 1]}
-        if is_3d:
-            result["z"] = coords[arr, 2]
-        return result
-
-    second = neighborhood.get("role") == "b"
-    base = Scatter(
-        **xyz(points), mode="markers", name="512-D evidence neighbor",
-        marker=dict(size=(theme.NEIGHBORHOOD_SIZE_B if second
-                          else theme.NEIGHBORHOOD_SIZE) * scale,
-                    color=theme.NEIGHBORHOOD_COLOR,
-                    opacity=theme.NEIGHBORHOOD_OPACITY,
-                    symbol="square-open" if second else "circle-open"),
-        customdata=customdata,
-        hovertemplate=("<b>%{customdata[2]}</b> · %{customdata[3]}<br>"
-                       + ("%{customdata[8]}<br>" if facts else
-                          "512-d rank %{customdata[1]:,} · cosine %{customdata[4]:.4f}<br>")
-                       +
-                       "%{customdata[5]} · %{customdata[6]}<extra></extra>"),
-        showlegend=False,
-    )
-
     focus_points = [int(point) for point in neighborhood.get("focus_points") or []
-                    if valid(point)]
+                    if isinstance(point, (int, np.integer))
+                    and not isinstance(point, (bool, np.bool_))
+                    and 0 <= int(point) < n]
     if not focus_points:
-        return base, None
-    focus = Scatter(
-        **xyz(focus_points), mode="markers", name="focused evidence neighbor",
+        return None
+    arr = np.asarray(focus_points, dtype=int)
+    xyz = {"x": coords[arr, 0], "y": coords[arr, 1]}
+    if is_3d:
+        xyz["z"] = coords[arr, 2]
+    return Scatter(
+        **xyz, mode="markers", name="focused match",
         marker=dict(size=theme.NEIGHBORHOOD_FOCUS_SIZE * scale,
                     color=theme.NEIGHBORHOOD_FOCUS_COLOR,
                     opacity=1.0, symbol="circle-open",
@@ -394,36 +353,33 @@ def _neighborhood_traces(coords, is_3d, neighborhood, facts=None):
                               color=theme.NEIGHBORHOOD_FOCUS_COLOR)),
         hoverinfo="skip", showlegend=False,
     )
-    return base, focus
 
 
 def _retrieval_traces(coords, is_3d, retrieval) -> list:
-    """The query and its hits, drawn where they actually sit in the space.
+    """The query, its members and its matches, at their positions on the map.
 
     `retrieval` is the payload the retrieval view stores: a `query_point` index
     into the global point order and a list of `hit_points`, which are ARCHS4
     memmap rows and therefore already point indices - ARCHS4 occupies rows
     0..n_archs4-1. No lookup, no join.
 
-    **No lines are drawn between the query and its hits, deliberately.**
+    **No lines are drawn between the query and its matches, deliberately.**
     Connecting them would be the obvious and the most striking choice, and it
     would assert something false. The retrieval ranks by cosine distance in
     512 dimensions; this map is a 2-D projection that does not preserve those
     distances, so a drawn edge would invite reading its length as similarity
-    when a rank-1 hit can easily land further away on screen than a rank-5 one.
-    Where the hits fall is worth seeing precisely because it is *not* the
-    ranking - it is what the projection did with it.
+    when a rank-1 match can easily land further away on screen than a rank-5
+    one. Where the matches fall is worth seeing precisely because it is *not*
+    the ranking - it is what the projection did with it.
 
     **Two cohorts can be drawn at once**, when a comparison was run. Which
     cohort a *member* belongs to is carried by fill hue; which cohort retrieved
-    a *hit* is carried by ring shape, never by hue. That split is measured, not
-    stylistic: no hue clears 3:1 against the worst categorical tissue bucket
-    (the comparison network's own three measure 1.00 to 1.07), which is the
-    same finding that made the ring white in the first place, while a member is
-    a filled mark whose white outline already guarantees its contrast. A hit
-    retrieved by both cohorts receives both traces and therefore draws as a
-    ring inscribed in a square, so the shared set is emergent rather than
-    computed and cannot disagree with the number the status banner quotes.
+    a *match* is carried by mark shape, a teal open circle for A and a larger
+    teal open square for B, never by hue. A match retrieved by both cohorts
+    receives both traces and therefore draws as a circle inside a square, so
+    the shared set is emergent rather than computed and cannot disagree with
+    the number the status banner quotes. The matches are also the neighborhood
+    explorer's rows, so each carries the explorer's click convention.
 
     Every mark this function draws is keyed on screen by
     `manifold/layout.retrieval_key_children`, which reads the same theme
@@ -439,6 +395,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                     "hit_points": retrieval.get("hit_points") or [],
                     "hit_labels": retrieval.get("hit_labels") or [],
                     "hit_scores": retrieval.get("hit_scores") or [],
+                    "hit_rows": retrieval.get("hit_rows") or [],
                     "query_points": (retrieval.get("query_points")
                                      or ([retrieval["query_point"]]
                                          if retrieval.get("query_point") is not None
@@ -476,9 +433,9 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     def _style(role):
         if role == "b":
             return (theme.RETRIEVAL_QUERY_B, theme.RETRIEVAL_QUERY_B_RGB,
-                    theme.RETRIEVAL_HIT_SYMBOL_B, theme.RETRIEVAL_HIT_SIZE_B)
+                    theme.MATCH_SYMBOL_B, theme.MATCH_SIZE_B)
         return (theme.RETRIEVAL_QUERY, theme.RETRIEVAL_QUERY_RGB,
-                theme.RETRIEVAL_HIT_SYMBOL, theme.RETRIEVAL_HIT_SIZE)
+                theme.MATCH_SYMBOL, theme.MATCH_SIZE)
 
     prepared = []
     for cohort in cohorts:
@@ -505,7 +462,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                         line=dict(width=1.5, color=rgba)),
             hoverinfo="skip", showlegend=False))
 
-    # --- Layer 2: hit rings, larger symbol last so it cannot occlude ---------
+    # --- Layer 2: the matches, larger symbol last so it cannot occlude -------
     #
     # A pre-pass, because a hit both cohorts retrieved has to name both of them
     # in one tooltip. Two traces sit at the identical coordinate and Plotly
@@ -550,9 +507,22 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
         if not hits:
             continue
         labels = cohort.get("hit_labels") or []
-        rows = [[str(labels[i]) if i < len(labels) else "",
-                 "<br>".join(facts.get(point, []))]
-                for i, point in enumerate(hits)]
+        scores = cohort.get("hit_scores") or []
+        hit_rows = cohort.get("hit_rows") or []
+        role = cohort.get("role", "a")
+        # The neighborhood explorer's click convention, so clicking a match
+        # focuses it there: [kind, rank, gsm, gse, score, tissue, species,
+        # role, facts].
+        rows = []
+        for i, point in enumerate(hits):
+            row = hit_rows[i] if i < len(hit_rows) else {}
+            rows.append(["neighborhood", row.get("rank", i + 1),
+                         str(labels[i]) if i < len(labels) else "",
+                         str(row.get("gse") or ""),
+                         float(scores[i]) if i < len(scores) else None,
+                         str(row.get("tissue") or ""),
+                         str(row.get("species") or ""), role,
+                         "<br>".join(facts.get(point, []))])
         # Numerals are dropped in a comparison: two competing rank sets over the
         # same few hundred pixels is illegible.
         marker_mode = "markers" if comparing else "markers+text"
@@ -560,17 +530,17 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                     [str(i + 1) if i < theme.RETRIEVAL_MAX_NUMERALS else ""
                      for i in range(len(hits))])
         traces.append(Scatter(
-            **_xyz(hits), mode=marker_mode, name="retrieved hit",
+            **_xyz(hits), mode=marker_mode, name="retrieved match",
             text=numerals, textposition="top center",
-            textfont=dict(size=9, color=theme.RETRIEVAL_HIT_RING,
+            textfont=dict(size=9, color=theme.MATCH_NUMERAL,
                           family="JetBrains Mono, SF Mono, monospace"),
             marker=dict(size=size * scale, symbol=symbol,
-                        color=theme.RETRIEVAL_HIT_RING,
-                        line=dict(width=theme.RETRIEVAL_HIT_LINE,
-                                  color=theme.RETRIEVAL_HIT_RING)),
+                        color=theme.MATCH_COLOR, opacity=theme.MATCH_OPACITY,
+                        line=dict(width=theme.MATCH_LINE, color=theme.MATCH_COLOR)),
             customdata=rows,
-            hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[1]}"
-                           "<extra></extra>"),
+            hovertemplate=("<b>%{customdata[2]}</b> · %{customdata[3]}<br>"
+                           "%{customdata[8]}<br>"
+                           "%{customdata[5]} · %{customdata[6]}<extra></extra>"),
             showlegend=False, **text_extras))
 
     # --- Layer 3: the members themselves, on top ----------------------------
@@ -779,35 +749,23 @@ def build_figure(method, dims, color_by, layers, budget, viewport,
     # whole-corpus tallies the color plan ranked with.
     legend_data["items"] = _legend_with_drawn_counts(legend, drawn)
 
-    # --- Layer 3: exact evidence, behind requested hits ---------------------
-    neighborhood_focus = []
-    if neighborhood:
-        cohorts = neighborhood.get("cohorts", [neighborhood])
-        facts = {}
-        for cohort in cohorts:
-            for point, row in zip(cohort["points"], cohort["rows"]):
-                score = row.get("score")
-                score_text = f"{float(score):.4f}" if score is not None else "unavailable"
-                label = str(cohort.get("label") or "Query")
-                role = str(cohort.get("role", "a")).upper()
-                facts.setdefault(point, []).append(
-                    f"{role} · {label} · 512-d rank {row.get('rank')} · cosine {score_text}")
-        for cohort in cohorts:
-            evidence, focus = _neighborhood_traces(coords, is_3d, cohort, facts)
-            if len(evidence.x):
-                fig.add_trace(evidence)
-            if focus is not None:
-                neighborhood_focus.append(focus)
-
-    # --- Layer 4: the retrieval, on top of its wider evidence --------------
+    # --- Layer 3: the retrieval: query, members and its matches ------------
+    #
+    # The matches are the neighborhood. Until 2026-10-22 a separate 250-deep
+    # evidence layer was drawn here under the k white hit rings, so most
+    # matches wore two rings and the two counts disagreed; the explorer now
+    # reads the matches themselves and adds only its focus outline.
     if showing_retrieval:
         for trace in _retrieval_traces(coords, is_3d, retrieval):
             fig.add_trace(trace)
 
-    # Focus is a larger open outline added after every requested-hit trace so
-    # it surrounds rather than replaces the white ring at the same coordinate.
-    for focus in neighborhood_focus:
-        fig.add_trace(focus)
+    # Focus is a larger open outline added after the matches so it surrounds
+    # rather than replaces the match at the same coordinate.
+    if neighborhood:
+        for cohort in neighborhood.get("cohorts", [neighborhood]):
+            focus = _neighborhood_focus_trace(coords, is_3d, cohort)
+            if focus is not None:
+                fig.add_trace(focus)
 
     # --- Layer 5: a found identifier, above everything ----------------------
     #

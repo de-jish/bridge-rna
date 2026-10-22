@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from dash import ALL, Input, Output, State, ctx, html, no_update
 
 from bridge_rna import neighborhoods
@@ -28,17 +29,23 @@ def _locate_hits(hits: list, n_archs4: int):
     the row *is* the point. A hit that predates that column is not drawn at all
     rather than drawn in the wrong place.
     """
-    points, labels, scores = [], [], []
-    for hit in hits or []:
-        idx = hit.get("archs4_index")
+    points, labels, scores, rows = [], [], [], []
+    for rank, hit in enumerate(hits or [], 1):
+        # The explorer's own parser, so a malformed index (a bool, 1.5, text)
+        # is neither drawn nor explored, and the two can never disagree.
+        idx = neighborhoods._index(hit.get("archs4_index"))
         if idx is None:
             continue
-        idx = int(idx)
         if 0 <= idx < n_archs4:
             points.append(idx)
             labels.append(str(hit.get("gsm") or ""))
             scores.append(float(hit.get("score") or 0.0))
-    return points, labels, scores
+            # What a match's hover and click need beyond its accession. Rank is
+            # its place among all retrieved matches, located or not.
+            rows.append({"rank": rank, "gse": str(hit.get("gse") or ""),
+                         "tissue": str(hit.get("tissue") or ""),
+                         "species": str(hit.get("species") or "")})
+    return points, labels, scores, rows
 
 
 def _locate_members(keys: list, n_archs4: int) -> list[int]:
@@ -99,7 +106,7 @@ def _retrieval_overlay(hits_payload: dict | None,
     for role, hits, keys, label in sources:
         if role not in roles:
             continue
-        points, labels, scores = _locate_hits(hits, n_archs4)
+        points, labels, scores, rows = _locate_hits(hits, n_archs4)
         members = _locate_members(keys, n_archs4)
         if not points and not members:
             continue
@@ -108,7 +115,8 @@ def _retrieval_overlay(hits_payload: dict | None,
                         # sample there is none, and its sample key is the name.
                         "label": label or (str(keys[0]) if keys else ""),
                         "hit_points": points, "hit_labels": labels,
-                        "hit_scores": scores, "query_points": members})
+                        "hit_scores": scores, "hit_rows": rows,
+                        "query_points": members})
 
     if not cohorts:
         return None
@@ -146,12 +154,27 @@ def _retrieval_overlay(hits_payload: dict | None,
 
 def _neighborhood_payload_for_arm(hits_payload: dict | None,
                                   arm: str) -> dict | None:
-    """Return the stored evidence payload for one comparison arm."""
+    """The explorer's payload for one arm, built from that arm's stored matches.
+
+    The stored `neighborhood` says only whether the matches can be explored and
+    under what name. The rows are always the hits, so the explorer, the marks on
+    the map and the results table count the same samples: a session saved while
+    the neighborhood was a separate 250-deep list still stores those 250 rows,
+    and they are ignored rather than shown beside k matches again.
+    """
     if not hits_payload:
         return None
     if arm == ROLE_B:
-        return (hits_payload.get("comparison") or {}).get("neighborhood_b")
-    return hits_payload.get("neighborhood")
+        comparison = hits_payload.get("comparison") or {}
+        stored, hits = comparison.get("neighborhood_b"), comparison.get("hits_b")
+    else:
+        stored, hits = hits_payload.get("neighborhood"), hits_payload.get("hits")
+    if not isinstance(stored, dict):
+        return None
+    if not stored.get("available"):
+        return stored
+    return neighborhoods.build_payload(pd.DataFrame(list(hits or [])),
+                                       label=str(stored.get("label") or ""))
 
 
 def next_neighborhood_open_state(trigger: str | None, previous: dict | None,
@@ -187,7 +210,7 @@ def _neighborhood_arm_label(hits_payload: dict | None, arm: str) -> str:
     else:
         neighborhood = payload.get("neighborhood") or {}
         query = payload.get("query") or {}
-        fallback = "Evidence neighborhood"
+        fallback = "Retrieved matches"
     return (str(neighborhood.get("label") or "")
             or str(query.get("cohort_label") or query.get("sample_name") or "")
             or fallback)
@@ -705,8 +728,7 @@ def register(app):
         # ticked, so an unticked cohort can keep its row, receded. `retrieval`
         # above is the drawn subset and is what the figure gets.
         key = layout.retrieval_key_children(
-            _retrieval_overlay(hits_payload), roles, dims,
-            neighborhood=neighborhood)
+            _retrieval_overlay(hits_payload), roles, dims)
         corpus = layout.corpus_key_children(layers)
         found_key = layout.found_key_children(found)
 
