@@ -37,7 +37,6 @@
   "manifold/find.py",
   "manifold/layout.py",
   "manifold/paths.py",
-  "manifold/preflight.py",
   "manifold/render.py",
   "manifold/sampling.py",
   "manifold/theme.py",

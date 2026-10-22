@@ -31,17 +31,61 @@ def test_package_is_allowlisted_and_integrity_checked(tmp_path):
         common.verify_bundle(dest)
 
 
-def test_every_app_module_and_asset_is_shipped():
-    """The results table (results.py, results_view.py, result_plots.py,
-    similarity.py, results-table.js) was built without being added here, so a
-    shipment would have failed to import. Every module the serving app can load
-    and every stylesheet or script Dash serves from assets/ must be listed."""
+def _modules_the_app_loads(root):
+    """Every repository .py the serving app can import or run, from app.py and
+    wsgi.py: static imports, imports inside functions, and the scripts it runs
+    as subprocesses by file name (the upload embed and the demo fallback)."""
+    import ast
+    mods={'.'.join(p.relative_to(root).with_suffix('').parts):p
+          for pattern in ('*.py','bridge_rna/*.py','manifold/*.py','precompute/*.py')
+          for p in root.glob(pattern)}
+    def deps(path):
+        found=set()
+        package='.'.join(path.relative_to(root).with_suffix('').parts[:-1])
+        text=path.read_text()
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node,ast.Import):
+                found|={a.name for a in node.names}
+            elif isinstance(node,ast.ImportFrom):
+                base=node.module or ''
+                if node.level:
+                    parts=package.split('.') if package else []
+                    parts=parts[:len(parts)-node.level+1]
+                    base='.'.join(parts+([base] if base else []))
+                found.add(base)
+                found|={f'{base}.{a.name}' for a in node.names}
+        strings={n.value.strip() for n in ast.walk(ast.parse(text))
+                 if isinstance(n,ast.Constant) and isinstance(n.value,str)}
+        found|={m for m,p in mods.items()
+                if p.name in strings or str(p.relative_to(root)) in strings}
+        return found&set(mods)
+    seen=set();stack=['app','wsgi']
+    while stack:
+        name=stack.pop()
+        if name not in seen:
+            seen.add(name);stack.extend(deps(mods[name]))
+    return {str(mods[m].relative_to(root)) for m in seen}
+
+
+def test_the_payload_is_exactly_what_the_app_needs():
+    """Bare bones, in both directions.
+
+    Missing: the results table (results.py, results_view.py, result_plots.py,
+    similarity.py, results-table.js) was built without being listed, so a
+    shipment would have failed to import. Extra: manifold/preflight.py guards
+    the offline precompute and was shipped although the app never loads it.
+    Every module the app loads is listed, no listed Python file is one it does
+    not load (apart from the apply helpers in deploy/ and package markers), and
+    every stylesheet and script Dash serves from assets/ is listed."""
     root=Path(__file__).resolve().parents[1]
     listed=set(json.loads((root/'deploy/runtime-files.json').read_text()))
-    wanted={str(p.relative_to(root)) for pattern in
-            ('bridge_rna/*.py','manifold/*.py','assets/*.css','assets/*.js')
+    needed=_modules_the_app_loads(root)
+    assets={str(p.relative_to(root)) for pattern in ('assets/*.css','assets/*.js')
             for p in root.glob(pattern)}
-    assert wanted-listed==set()
+    assert (needed|assets)-listed==set(), 'the app loads files that are not shipped'
+    shipped_python={n for n in listed if n.endswith('.py')
+                    and not n.startswith('deploy/') and not n.endswith('__init__.py')}
+    assert shipped_python-needed==set(), 'shipped Python the app never loads'
 
 
 @pytest.mark.parametrize('path',['../bridge-rna-deploy', '/home/ubuntu/bridge-rna-deploy',

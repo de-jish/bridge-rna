@@ -120,6 +120,17 @@ application modules, runtime CSS/JS assets, `prompts/ai_summary_prompt.txt`, thr
 small gene reference tables, dependency definitions and the minimal user-run
 helpers. `wsgi.py` captures `ship.json` once per worker to expose its identity.
 
+The payload is the minimum the web app needs, and a test holds it there in both
+directions. `tests/test_deployment.py::test_the_payload_is_exactly_what_the_app_needs`
+walks every import and subprocess script reachable from `app.py` and `wsgi.py`:
+each must be listed, and no listed Python file may be one the app never loads,
+apart from the apply helpers under `deploy/` and package markers. Every
+stylesheet and script under `assets/` must be listed, because Dash serves them
+all. On 2026-10-22 this caught the results table missing from the list (a
+shipment would have failed to import) and `manifold/preflight.py` shipped though
+only the offline precompute uses it. A shipment is 76 files, about 4.4 MB, of
+which 3.3 MB are the three gene reference tables uploads need.
+
 The NASA theme also ships the locally vendored HDS 0.10.0 fonts, their licenses,
 the NASA SVG, and the shared font/token/control styles. Nested assets are permitted
 by exact filename in `deploy/common.py`; arbitrary nested files remain excluded.
