@@ -81,8 +81,29 @@ RESULTS_READY_JS = """() => {
 MAP_RETRIEVAL_READY_JS = """() => {
   const gd = document.querySelector('#manifold-graph .js-plotly-plot');
   return !!(gd && gd._fullData &&
-            gd._fullData.some(t => t.name === 'retrieved hit'));
+            gd._fullData.some(t => t.name === 'retrieved match'));
 }"""
+
+
+# The matches the map can place: hits-store rows that carry an ARCHS4 index.
+# The map draws exactly these, once, as the `retrieved match` trace, and the
+# explorer lists every stored match (located or not) under Samples.
+STORED_MATCHES_JS = """() => {
+  let payload = null;
+  try { payload = JSON.parse(sessionStorage.getItem('hits-store') || 'null'); }
+  catch (e) { payload = null; }
+  const hits = (payload && payload.hits) || [];
+  return {stored: hits.length,
+          located: hits.filter(h => h.archs4_index !== null
+                                    && h.archs4_index !== undefined).length};
+}"""
+
+
+# Trace names the 2026-10-22 rework retired. The explorer used to draw a
+# separate fixed 250-deep `512-D evidence neighbor` layer under k white
+# `retrieved hit` rings; the matches are now drawn once.
+LEGACY_TRACE_NAMES = ("512-D evidence neighbor", "retrieved hit",
+                      "focused evidence neighbor")
 
 
 STABLE_MAP_X_RANGE_JS = """() => {
@@ -101,10 +122,13 @@ STABLE_MAP_X_RANGE_JS = """() => {
 }"""
 
 
-EVIDENCE_ABSENT_JS = """() => {
+# Closing the explorer removes only its focus outline: the matches are the
+# retrieval itself and stay drawn.
+FOCUS_ABSENT_JS = """() => {
   const gd = document.querySelector('#manifold-graph .js-plotly-plot');
   return !!(gd && gd._fullData && !gd._fullData.some(t =>
-    ['512-D evidence neighbor', 'focused evidence neighbor'].includes(t.name)));
+    t.name === 'focused match')
+    && gd._fullData.some(t => t.name === 'retrieved match'));
 }"""
 
 
@@ -175,19 +199,25 @@ def _map_x_range(page) -> list[float]:
 
 
 def _wait_for_evidence(page, trace_type: str | None = None) -> dict:
-    """Wait for one complete source trace and Plotly's decoded render."""
+    """Wait for the one complete match trace and Plotly's decoded render.
+
+    The explorer has no layer of its own any more: it reads the retrieved
+    matches, so "the evidence is drawn" means the single `retrieved match`
+    trace holds every match the map can place, of the expected trace type.
+    """
+    expected = page.evaluate(STORED_MATCHES_JS)["located"]
     page.wait_for_function(
-        """expectedType => {
+        """({expectedType, expected}) => {
           const gd = document.querySelector('#manifold-graph .js-plotly-plot');
           const raw = (gd && gd.data || []).filter(
-            t => t.name === '512-D evidence neighbor');
+            t => t.name === 'retrieved match');
           const full = (gd && gd._fullData || []).filter(
-            t => t.name === '512-D evidence neighbor');
-          return raw.length === 1 && full.length === 1
-            && full[0].x && full[0].x.length === 250
+            t => t.name === 'retrieved match');
+          return expected > 0 && raw.length === 1 && full.length === 1
+            && full[0].x && full[0].x.length === expected
             && (!expectedType || full[0].type === expectedType);
         }""",
-        arg=trace_type, timeout=90_000)
+        arg={"expectedType": trace_type, "expected": expected}, timeout=90_000)
     return _trace_state(page)
 
 
@@ -204,24 +234,128 @@ def _tab_until(page, predicate_js: str, *, reverse: bool = False,
 
 def _trace_state(page) -> dict:
     """Read the semantic overlays Plotly is actually rendering."""
-    return page.evaluate("""() => {
+    return page.evaluate("""legacyNames => {
       const gd = document.querySelector('#manifold-graph .js-plotly-plot');
       const data = (gd && gd.data) || [];
       const full = (gd && gd._fullData) || [];
-      const evidence = full.filter(t => t.name === '512-D evidence neighbor');
-      const focus = full.filter(t => t.name === 'focused evidence neighbor');
-      const requested = full.filter(t => t.name === 'retrieved hit');
+      const matches = full.filter(t => t.name === 'retrieved match');
+      const focus = full.filter(t => t.name === 'focused match');
       return {
-        evidenceTraces: data.filter(
-          t => t.name === '512-D evidence neighbor').length,
-        evidenceMarks: evidence.reduce((n, t) => n + ((t.x && t.x.length) || 0), 0),
-        evidenceTypes: evidence.map(t => t.type),
+        matchTraces: data.filter(t => t.name === 'retrieved match').length,
+        matchMarks: matches.reduce((n, t) => n + ((t.x && t.x.length) || 0), 0),
+        matchTypes: matches.map(t => t.type),
+        matchColours: matches.map(t => t.marker && t.marker.color),
+        matchKinds: [...new Set(matches.flatMap(
+          t => (t.customdata || []).map(row => row && row[0])))],
         focusTraces: focus.length,
         focusMarks: focus.reduce((n, t) => n + ((t.x && t.x.length) || 0), 0),
-        requestedTraces: requested.length,
-        requestedColours: requested.map(t => t.marker && t.marker.color),
+        legacyTraces: full.filter(t => legacyNames.includes(t.name)).length,
       };
-    }""")
+    }""", list(LEGACY_TRACE_NAMES))
+
+
+# Screen positions of the drawn matches, in rank order, keeping only those
+# whose pixel actually belongs to the plot's drag layer: the floating key and
+# the badges sit over the canvas, and a click there never reaches Plotly.
+MATCH_PIXELS_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  const t = (gd && gd._fullData || []).find(t => t.name === 'retrieved match');
+  if (!t) return [];
+  const box = gd.getBoundingClientRect();
+  const size = gd._fullLayout._size;
+  const xa = gd._fullLayout.xaxis, ya = gd._fullLayout.yaxis;
+  const out = [];
+  for (let i = 0; i < t.x.length; i++) {
+    const px = box.left + size.l + xa.l2p(t.x[i]);
+    const py = box.top + size.t + ya.l2p(t.y[i]);
+    const el = document.elementFromPoint(px, py);
+    if (!el || !el.closest('#manifold-graph') || !el.closest('.draglayer')) continue;
+    out.push({x: px, y: py, gsm: String(t.customdata[i][2] || '')});
+  }
+  return out;
+}"""
+
+
+HOVERED_MATCH_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  const hd = (gd && gd._hoverdata) || [];
+  const p = hd[0];
+  return p && p.data && p.data.name === 'retrieved match' && p.customdata
+    ? String(p.customdata[2] || '') : null;
+}"""
+
+
+def check_map_click_focuses_match(page, c: "Checks", dash_changes: list[str],
+                                  k: int) -> None:
+    """A real mouse click on a match mark focuses that match in the explorer.
+
+    The marks carry the explorer's own customdata convention, so a click on
+    the map has to land in the same focus store a Samples row writes, switch
+    the explorer to Samples, and ring exactly one mark - without rerunning
+    the retrieval.
+    """
+    # Frame first, the way a reader does: at whole-map zoom the k matches of
+    # one query sit within a few pixels of each other and of the OSDR glyphs
+    # around the query, so the closest-point hover resolves to an OSDR
+    # diamond rather than a match. Fit results is the map's own answer.
+    def any_figure_response(response) -> bool:
+        if (response.request.method != "POST"
+                or "/_dash-update-component" not in response.url):
+            return False
+        try:
+            output = str(response.request.post_data_json.get("output", ""))
+        except Exception:
+            return False
+        return "manifold-graph.figure" in output
+
+    with page.expect_response(any_figure_response, timeout=90_000):
+        page.locator("#frame-retrieval").click()
+    _map_x_range(page)
+    search = page.locator("#neighborhood-search")
+    search.fill("")
+    page.wait_for_function(
+        "k => document.querySelectorAll('.bm-neighborhood-sample').length === k",
+        arg=k, timeout=30_000)
+    page.mouse.move(5, 5)
+    runs_before = dash_changes.count("search-button.n_clicks")
+    target = None
+    for candidate in (page.evaluate(MATCH_PIXELS_JS) or [])[:40]:
+        page.mouse.move(candidate["x"], candidate["y"])
+        page.wait_for_timeout(120)
+        if page.evaluate(HOVERED_MATCH_JS) == candidate["gsm"]:
+            target = candidate
+            break
+    if not c.ok(target is not None,
+                "a match mark on the framed map is reachable by the mouse "
+                "and hovers as itself"):
+        return
+    with page.expect_response(
+            _figure_response_for("neighborhood-focus-store.data"),
+            timeout=90_000):
+        page.mouse.click(target["x"], target["y"])
+    page.wait_for_function(
+        "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
+        " return gd && (gd._fullData || []).some(t => t.name === 'focused match'); }",
+        timeout=90_000)
+    focused = _trace_state(page)
+    c.ok(focused["focusTraces"] == 1 and focused["focusMarks"] == 1,
+         f"clicking match {target['gsm']} rings exactly that one mark "
+         f"({focused['focusMarks']})")
+    samples = page.get_by_role("radio", name=re.compile(rf"^Samples\s+{k:,}$"))
+    c.ok(samples.count() == 1 and samples.is_checked(),
+         "the map click switches the explorer to its Samples tab")
+    page.wait_for_selector(".bm-neighborhood-sample[aria-pressed='true']",
+                           timeout=30_000)
+    pressed = page.locator(
+        ".bm-neighborhood-sample[aria-pressed='true'] .bm-neighborhood-row-primary"
+    ).all_inner_texts()
+    c.ok([t.strip() for t in pressed] == [target["gsm"]],
+         f"and selects that same match's row ({pressed})")
+    c.ok(focused["matchMarks"] == page.evaluate(STORED_MATCHES_JS)["located"],
+         "focusing a match leaves every match drawn")
+    c.ok(dash_changes.count("search-button.n_clicks") == runs_before,
+         "a map click on a match does not rerun retrieval")
+    page.mouse.move(5, 5)
 
 
 def _drawer_geometry(page, width: int) -> dict:
@@ -231,11 +365,19 @@ def _drawer_geometry(page, width: int) -> dict:
         STABLE_DRAWER_GEOMETRY_JS, arg=width, timeout=30_000).json_value()
 
 
-def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> None:
-    """Exercise the explorer from one real cached OSDR retrieval."""
+def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str],
+                                k: int) -> None:
+    """Exercise the explorer from one real cached OSDR retrieval of k matches.
+
+    Since 2026-10-22 the explorer *is* the retrieved matches: its Samples tab
+    lists the k rows the table lists, and the map draws each of them once.
+    """
     page.locator("#see-on-map").click()
     page.wait_for_url(re.compile(r"/map$"), timeout=30_000)
     page.wait_for_function(MAP_RETRIEVAL_READY_JS, timeout=180_000)
+    stored = page.evaluate(STORED_MATCHES_JS)
+    c.ok(stored["stored"] == k,
+         f"the map reads the same {k} matches the table listed ({stored['stored']})")
 
     print("\n=== 7b. exact retrieval neighborhood explorer ===")
     results = page.locator("#frame-retrieval")
@@ -253,7 +395,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    traces = _wait_for_evidence(page, "scattergl")
+    traces = _wait_for_evidence(page, "scatter")
     first_open = time.perf_counter() - t0
     c.note(f"first neighborhood open and evidence render in {first_open:.2f}s")
 
@@ -297,10 +439,29 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.ok("Evidence neighborhood" not in shown["badges"]
          and "Showing retrieval" not in shown["badges"],
          "redundant evidence and retrieval badges are absent")
-    c.ok(traces["evidenceTraces"] == 1,
-         "the exact evidence neighborhood is drawn once")
-    c.ok(traces["evidenceMarks"] == 250,
-         f"that evidence trace contains all 250 neighbors ({traces['evidenceMarks']})")
+    c.ok(traces["matchTraces"] == 1,
+         "the retrieved matches are drawn once, as one trace")
+    c.ok(traces["matchMarks"] == stored["located"] > 0,
+         f"that trace holds every locatable match ({traces['matchMarks']} of "
+         f"{stored['located']} located, k={k})")
+    c.ok(traces["legacyTraces"] == 0,
+         "no separate 512-D evidence layer or white hit-ring trace is drawn")
+    c.ok(traces["matchKinds"] == ["neighborhood"],
+         f"every match carries the explorer's click convention ({traces['matchKinds']})")
+    c.ok([str(col).lower() for col in traces["matchColours"]] == ["#61ddd3"],
+         f"the matches are drawn in the match teal ({traces['matchColours']})")
+    key_rows = page.eval_on_selector_all(
+        "#legend-retrieval .bm-key-row",
+        """rows => rows.map(r => ({
+          glyph: [...r.querySelector('.bm-key-glyph').classList]
+            .filter(c => c.startsWith('is-')),
+          label: (r.querySelector('.bm-key-label') || {}).textContent || '',
+          count: (r.querySelector('.bm-key-count') || {}).textContent || ''}))""")
+    c.ok(key_rows == [
+            {"glyph": ["is-star"], "label": "the query sample", "count": "1"},
+            {"glyph": ["is-match"], "label": "retrieved match",
+             "count": f"{stored['located']:,}"}],
+         f"the key decodes a single query as its sample and its matches ({key_rows})")
 
     # Opening focuses the announced heading. Reverse-tab reaches Close; a
     # forward Tab then enters the radio-tab group. Native radio groups use one
@@ -356,7 +517,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.wait_for_function(
         "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
         " return gd && (gd._fullData || []).some("
-        "t => t.name === 'focused evidence neighbor'); }", timeout=90_000)
+        "t => t.name === 'focused match'); }", timeout=90_000)
     focused = _trace_state(page)
     c.ok(focused["focusTraces"] == 1 and focused["focusMarks"] > 0,
          f"selecting a study adds one focus trace ({focused['focusMarks']} marks)")
@@ -386,7 +547,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
           const row = document.querySelector('.bm-neighborhood-study');
           return gd && row && row.getAttribute('aria-pressed') === 'false'
             && !(gd._fullData || []).some(
-              t => t.name === 'focused evidence neighbor');
+              t => t.name === 'focused match');
         }""", timeout=90_000)
     cleared = _trace_state(page)
     c.ok(cleared["focusTraces"] == 0,
@@ -404,13 +565,14 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             "Tab traversal returns from study rows to the selected Studies tab"):
         return
     page.keyboard.press("ArrowRight")
-    samples_radio = page.get_by_role("radio", name=re.compile(r"^Samples\s+250$"))
+    samples_name = re.compile(rf"^Samples\s+{k:,}$")
+    samples_radio = page.get_by_role("radio", name=samples_name)
     page.wait_for_selector(".bm-neighborhood-sample", timeout=30_000)
     c.ok(samples_radio.count() == 1 and samples_radio.is_checked(),
-         "the Samples tab has a radio role, exact count-bearing name, and keyboard state")
+         f"the Samples tab is a checked radio named with the match count, Samples {k:,}")
     sample_rows = page.locator(".bm-neighborhood-sample")
-    c.ok(sample_rows.count() == 250,
-         f"the complete evidence list contains 250 samples ({sample_rows.count()})")
+    c.ok(sample_rows.count() == k,
+         f"the Samples list holds exactly the {k} retrieved matches ({sample_rows.count()})")
     first_gsm = sample_rows.first.locator(
         ".bm-neighborhood-row-primary").inner_text().strip()
     c.ok(page.get_by_role(
@@ -448,18 +610,16 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
-    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(FOCUS_ABSENT_JS, timeout=90_000)
     page.wait_for_function(
         "() => document.activeElement.id === 'frame-retrieval'",
         timeout=30_000)
     closed = _trace_state(page)
-    white = {"#fff", "#ffffff", "rgb(255, 255, 255)", "white"}
-    c.ok(closed["evidenceTraces"] == 0 and closed["focusTraces"] == 0,
-         "Close removes evidence and focus marks")
-    c.ok(closed["requestedTraces"] > 0
-         and all(str(colour).lower() in white
-                 for colour in closed["requestedColours"]),
-         "Close preserves the requested white hit rings")
+    c.ok(closed["focusTraces"] == 0 and closed["legacyTraces"] == 0,
+         "Close removes the focus outline and draws no legacy evidence layer")
+    c.ok(closed["matchTraces"] == 1
+         and closed["matchMarks"] == stored["located"],
+         f"Close keeps every retrieved match drawn ({closed['matchMarks']})")
     c.ok(page.evaluate("() => document.activeElement.id") == "frame-retrieval",
          "Close returns focus to Fit results")
 
@@ -469,7 +629,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         results.click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    _wait_for_evidence(page, "scattergl")
+    _wait_for_evidence(page, "scatter")
     after_reopen = _map_x_range(page)
     c.ok(max(abs(a - b) for a, b in zip(before_reopen, after_reopen)) < 0.05,
          "Repeated Fit results reopens without changing the fitted viewport")
@@ -478,7 +638,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         page.get_by_role("button", name="Close neighborhood explorer").click()
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
-    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(FOCUS_ABSENT_JS, timeout=90_000)
 
     # Fit results already framed this query on the first open. Restore the
     # whole map before checking that the same action can narrow it again.
@@ -490,7 +650,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             _figure_response_for("viewport-store.data"), timeout=90_000):
         page.get_by_role("button", name="Fit results").click()
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    _wait_for_evidence(page, "scattergl")
+    _wait_for_evidence(page, "scatter")
     before_frame_span = abs(before_frame[1] - before_frame[0])
     framed = _map_x_range(page)
     c.ok(abs(framed[1] - framed[0]) < before_frame_span,
@@ -506,7 +666,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
-    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(FOCUS_ABSENT_JS, timeout=90_000)
     page.wait_for_function(
         "() => document.activeElement.id === 'frame-retrieval'", timeout=30_000)
     c.ok(page.evaluate("() => document.activeElement.id") == "frame-retrieval",
@@ -517,7 +677,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
-    _wait_for_evidence(page, "scattergl")
+    _wait_for_evidence(page, "scatter")
 
     set_segment(page, "Dimensions", "3D")
     page.wait_for_function(
@@ -538,7 +698,7 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
             timeout=90_000):
         page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="hidden", timeout=30_000)
-    page.wait_for_function(EVIDENCE_ABSENT_JS, timeout=90_000)
+    page.wait_for_function(FOCUS_ABSENT_JS, timeout=90_000)
     page.wait_for_function(
         "() => document.activeElement.id === 'frame-retrieval'",
         timeout=30_000)
@@ -558,9 +718,11 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
         page.keyboard.press("Enter")
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
     three_d = _wait_for_evidence(page, "scatter3d")
-    c.ok(three_d["evidenceTraces"] == 1
-         and three_d["evidenceTypes"] == ["scatter3d"],
-         f"View results draws the evidence once in 3-D ({three_d['evidenceTypes']})")
+    c.ok(three_d["matchTraces"] == 1
+         and three_d["matchTypes"] == ["scatter3d"]
+         and three_d["matchMarks"] == stored["located"],
+         f"View results draws the matches once in 3-D ({three_d['matchTypes']}, "
+         f"{three_d['matchMarks']} marks)")
     camera_after = page.evaluate(camera_js)
     c.ok(max(abs(a - b) for a, b in zip(camera_before, camera_after)) < 1e-6,
          "View results preserves the 3-D camera")
@@ -569,11 +731,13 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.wait_for_function(
         "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
         " return gd && (gd._fullData || []).some(t => "
-        "t.name === '512-D evidence neighbor' && t.type === 'scattergl'); }",
+        "t.name === 'retrieved match' && t.type === 'scatter'); }",
         timeout=90_000)
-    samples_radio = page.get_by_role("radio", name=re.compile(r"^Samples\s+250$"))
-    page.get_by_text(re.compile(r"^Samples\s+250$"), exact=True).click()
+    page.get_by_text(samples_name, exact=True).click()
     page.wait_for_selector("#neighborhood-search", state="visible", timeout=30_000)
+
+    print("\n=== 7c'. clicking a match on the map focuses it ===")
+    check_map_click_focuses_match(page, c, dash_changes, k)
 
     print("\n=== 7d. docked drawer and bottom sheet ===")
     for width, height in ((1440, 1000), (1024, 900), (768, 900), (320, 780)):
@@ -1080,7 +1244,7 @@ def main() -> int:
                      f"the AI panel stays on screen (bottom at {geom['aiBottom']})")
             else:
                 c.ok(False, "no match row to open in the inspector")
-            check_neighborhood_explorer(rp, c, dash_changes)
+            check_neighborhood_explorer(rp, c, dash_changes, listed)
             rp.close()
 
             print("\n=== 8. finding a sample on the map ===")

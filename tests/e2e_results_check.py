@@ -10,8 +10,9 @@ what is on screen, leave for the map and come back to the same table.
 
 It asserts on what the page reports about itself. The query is the OSD-100
 left-eye sample the design was measured on, because its top 30 carries six
-profiles deposited twice (GSE88819 and GSE124745), which is what the identical
-profile marks and the merge option exist for.
+profiles deposited twice (GSE88819 and GSE124745), which is what the "Same data
+as" note exists for. Since 2026-10-22 duplicates are noted, never merged: there
+is no merge option, and a series filter always shows only the chosen series.
 
     /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_results_check.py \\
         [--port 8065] [--headed]
@@ -221,29 +222,35 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     print("\n[identical profiles]")
     twin_rows = page.locator("#results-table-wrap .result-twin")
     c.ok(twin_rows.count() >= 2, f"identical profiles are marked ({twin_rows.count()} on page one)")
-    page.locator("#filter-merge").get_by_text("Merge identical profiles").click()
-    settle(page)
-    text = summary(page)
-    merged = re.search(r"([\d,]+) identical profiles? merged", text)
-    c.ok(bool(merged), f"merging states how many it hid: {text!r}")
-    c.ok("positions among all" in text, "merging explains why ranks now skip")
-    page.locator("#filter-merge").get_by_text("Merge identical profiles").click()
-    settle(page)
+    notes = [t.strip() for t in twin_rows.all_inner_texts()]
+    c.ok(notes and all(re.fullmatch(r"Same data as GSM\d+(, GSM\d+)*", t) for t in notes),
+         f"each duplicate says plainly which sample it repeats: {notes[:2]!r}")
+    c.ok(not any("Same profile" in t for t in notes),
+         "the old 'Same profile:' wording is gone")
+    page_gsms = set(page.locator("#results-table-wrap .result-select").all_inner_texts())
+    named = {g for t in notes for g in re.findall(r"GSM\d+", t)}
+    c.ok(bool(named & page_gsms),
+         f"a duplicate names a sample that is itself a row ({sorted(named & page_gsms)[:2]})")
+    c.ok(page.locator("#filter-merge").count() == 0
+         and page.get_by_text("Merge identical", exact=False).count() == 0,
+         "there is no merge checkbox: duplicates are noted, never hidden")
 
     print("\n[series filter]")
     choose(page, "filter-series", TWIN_SERIES[0])
     gses = column_text(page, "Series")
-    c.ok(gses and set(gses) == {TWIN_SERIES[0]}, f"Show only keeps {TWIN_SERIES[0]}")
+    c.ok(gses and set(gses) == {TWIN_SERIES[0]},
+         f"a series filter shows only {TWIN_SERIES[0]}")
+    c.ok(page.locator("#filter-series-mode").count() == 0
+         and page.locator("#results-filters").get_by_text("Hide", exact=True).count() == 0
+         and page.locator("#results-filters").get_by_text("Show only", exact=True).count() == 0,
+         "there is no Show only / Hide toggle beside the series filter")
     text = summary(page)
     c.ok(bool(re.match(r"[\d,]+ of 1,000 matches shown", text)), f"count line: {text!r}")
     kept = ranks(page)
     c.ok(kept == sorted(kept) and kept != list(range(1, len(kept) + 1)),
          "filtered ranks keep their true positions")
     c.ok(page.locator("#filter-clear").is_visible(), "Clear filters appears")
-    page.locator("#filter-series-mode").get_by_text("Hide", exact=True).click()
-    settle(page)
-    c.ok(TWIN_SERIES[0] not in column_text(page, "Series"), "Hide drops that series")
-    shot(page, "02-series-hidden")
+    shot(page, "02-series-only")
     page.locator("#filter-clear").click()
     settle(page)
     c.ok(summary(page).startswith("1,000 matches for"), "Clear filters restores all rows")

@@ -6,6 +6,16 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-22, later (the matches are the neighborhood; table cleanup; tissue survey)
+
+Joshua found the map messy after Fit results: the neighborhood explorer read a separate fixed top-250 prefix, drawn as teal marks under k large white hit rings, so most matches wore two rings and the explorer and the table disagreed in number.
+The explorer now is the retrieved matches: the retrieval view stores an availability marker and the map builds the explorer's rows from the stored hits, and matches draw once as small open teal marks (`theme.MATCH_*`) that carry the explorer's click data. The white rings are gone.
+He also asked to remove "Merge identical profiles" (duplicates now carry a plain "Same data as GSM..." note) and the Series filter's Hide mode (show only).
+The tissue survey branch was merged at his request: 25,931 ARCHS4 samples change bucket and 871,816 (92.7%) are placed. The local `cache/archs4_metadata.parquet` was regenerated offline (previous kept as `archs4_metadata.pre-survey-fix-2026-10-22.parquet`) and the new file was uploaded to the NASA server's `.ship/incoming/data-20261022-archs4-metadata/`, checksum-verified; swapping it into `~/fm_viz_new/cache/` is a user-run step.
+A read-only audit of the NASA server found that the 10-22 shipment removed `manifold/preflight.py`, which the server's GitLab checkout still needs for its precompute scripts, and that `ship.json` and `.ship/*.json` are tracked there; the report went to Joshua with exact commands, none run.
+
+Validation: 932 pytest tests; browser suites 217 main, 191 cohort, 59 results, 33 network style, 3 cleanup; the upload suite was not rerun (nothing it exercises changed). README images recaptured.
+
 ## 2026-10-22 (review changes: no Similarity plot, cohorts by arm)
 
 Joshua reviewed the results view on `feature/retrieval-table` and asked for three things.

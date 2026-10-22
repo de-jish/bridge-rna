@@ -135,7 +135,7 @@ MAP_OVERLAY_JS = """() => {
   if (!gd || !gd._fullData) return null;
   const out = {members: [], hits: []};
   for (const t of gd._fullData) {
-    if (t.name !== 'query' && t.name !== 'retrieved hit') continue;
+    if (t.name !== 'query' && t.name !== 'retrieved match') continue;
     const pts = [];
     for (let i = 0; i < (t.x || []).length; i++) {
       pts.push(t.x[i].toFixed(4) + ',' + t.y[i].toFixed(4));
@@ -149,18 +149,36 @@ MAP_OVERLAY_JS = """() => {
 }"""
 
 
+# Since 2026-10-22 the explorer is the retrieved matches: each drawn cohort
+# has exactly one `retrieved match` trace and there is no separate 250-deep
+# `512-D evidence neighbor` layer and no white `retrieved hit` ring trace.
 NEIGHBORHOOD_EVIDENCE_JS = """() => {
   const gd = document.querySelector('#manifold-graph .js-plotly-plot');
   const raw = (gd && gd.data || []).filter(
-    t => t.name === '512-D evidence neighbor');
+    t => t.name === 'retrieved match');
   const full = (gd && gd._fullData || []).filter(
-    t => t.name === '512-D evidence neighbor');
+    t => t.name === 'retrieved match');
   return {
     sourceTraces: raw.length,
     renderedTraces: full.length,
     marks: full.map(t => t.x ? t.x.length : 0),
     symbols: full.map(t => t.marker.symbol),
+    legacy: (gd && gd._fullData || []).filter(t => ['512-D evidence neighbor',
+      'retrieved hit', 'focused evidence neighbor'].includes(t.name)).length,
   };
+}"""
+
+
+# Each arm's stored matches, and how many of them the map can place.
+STORED_MATCHES_JS = """() => {
+  let p = null;
+  try { p = JSON.parse(sessionStorage.getItem('hits-store') || 'null'); }
+  catch (e) { p = null; }
+  const located = hits => hits.filter(
+    h => h.archs4_index !== null && h.archs4_index !== undefined).length;
+  const a = (p && p.hits) || [];
+  const b = (p && p.comparison && p.comparison.hits_b) || [];
+  return {a: a.length, b: b.length, locA: located(a), locB: located(b)};
 }"""
 
 
@@ -203,27 +221,27 @@ def _response_evidence_gsms(response, arm="a") -> list[str]:
     """Read the exact evidence identity from the response being awaited."""
     figure = response.json()["response"]["manifold-graph"]["figure"]
     traces = [trace for trace in figure.get("data", [])
-              if trace.get("name") == "512-D evidence neighbor"
+              if trace.get("name") == "retrieved match"
               and trace.get("customdata") and trace["customdata"][0][7] == arm]
     if len(traces) != 1:
         raise AssertionError(
-            f"figure response contained {len(traces)} evidence traces")
+            f"figure response contained {len(traces)} match traces for arm {arm}")
     return [str(row[2] or "") for row in traces[0].get("customdata", [])]
 
 
 def _wait_for_evidence_gsms(page, expected: list[str], arm="a") -> dict:
-    """Wait until Plotly rendered the response's exact 250-sample identity."""
+    """Wait until Plotly rendered the response's exact match identity."""
     page.wait_for_function(
         """({expected, arm}) => {
           const gd = document.querySelector('#manifold-graph .js-plotly-plot');
-          const own = t => t.name === '512-D evidence neighbor'
+          const own = t => t.name === 'retrieved match'
             && t.customdata && t.customdata[0][7] === arm;
           const raw = (gd && gd.data || []).filter(own);
           const full = (gd && gd._fullData || []).filter(own);
           const rows = raw.length === 1 && Array.isArray(raw[0].customdata)
             ? raw[0].customdata : [];
           return raw.length === 1 && full.length === 1
-            && full[0].x && full[0].x.length === 250
+            && full[0].x && full[0].x.length === expected.length
             && rows.length === expected.length
             && rows.every((row, index) => String(row[2] || '') === expected[index]);
         }""", arg={"expected": expected, "arm": arm}, timeout=90_000)
@@ -846,9 +864,18 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok(len(hits) == 2, f"two hit traces, one per cohort: {len(hits)}")
     c.ok(len({h["symbol"] for h in hits}) == 2,
          f"hits differ by ring shape: {[h['symbol'] for h in hits]}")
-    c.ok(len({str(h["colour"]).lower() for h in hits}) == 1,
-         "and every ring stays white, which is what keeps it visible "
-         "over any tissue colour")
+    c.ok({str(h["colour"]).lower() for h in hits} == {"#61ddd3"},
+         f"both arms' matches share the one match teal, so shape alone names "
+         f"the cohort: {[h['colour'] for h in hits]}")
+    stored = page.evaluate(STORED_MATCHES_JS)
+    c.ok(stored["a"] == depth and stored["b"] == depth,
+         f"each arm stores the {depth} matches asked for: {stored}")
+    c.ok(len(hits) == 2 and sorted(h["n"] for h in hits)
+         == sorted([stored["locA"], stored["locB"]]),
+         f"each arm's match trace holds every locatable match: "
+         f"{[h['n'] for h in hits]} against {stored}")
+    c.ok(page.evaluate(NEIGHBORHOOD_EVIDENCE_JS)["legacy"] == 0,
+         "no 512-D evidence neighbor or white retrieved-hit trace is drawn")
     c.ok(not any(h["hasText"] for h in hits),
          "rank numerals are dropped when two rank sets would compete")
 
@@ -870,23 +897,23 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # adjacent and differ only in shape. That layout is the explanation;
     # no sentence has to assert the rule.
     key = page.locator("#legend-retrieval").inner_text()
-    c.ok("POOLED MEMBERS" in key.upper() and "RETRIEVED HITS" in key.upper(),
+    c.ok("POOLED MEMBERS" in key.upper() and "RETRIEVED MATCHES" in key.upper(),
          f"the key groups the marks by role: {key[:60]!r}")
     c.ok("retrieved by both" in key,
          f"and rows the doubled mark: {key[:90]!r}")
-    # Exact class tokens, not substrings: "is-hit-b" is a prefix of
-    # "is-hit-both", so a substring test counts the doubled mark as a
-    # cohort-B row and reports three hit rows as two.
+    # Exact class tokens, not substrings: "is-match-b" is a prefix of
+    # "is-match-both", so a substring test counts the doubled mark as a
+    # cohort-B row and reports three match rows as two.
     glyphs = page.eval_on_selector_all(
         "#legend-retrieval .bm-key-glyph",
         "els => els.map(e => [...e.classList])")
     shapes = [c for g in glyphs for c in g if c.startswith("is-")]
     c.ok(shapes.count("is-star") == 2,
          f"two member rows, same shape: {shapes}")
-    c.ok(shapes.count("is-hit-a") == 1 and shapes.count("is-hit-b") == 1,
-         f"two hit rows, different shapes: {shapes}")
-    c.ok(shapes == ["is-star", "is-star", "is-hit-a", "is-hit-b",
-                    "is-hit-both"],
+    c.ok(shapes.count("is-match") == 1 and shapes.count("is-match-b") == 1,
+         f"two match rows, different shapes: {shapes}")
+    c.ok(shapes == ["is-star", "is-star", "is-match", "is-match-b",
+                    "is-match-both"],
          f"grouped by role, so each pair varies in one channel: {shapes}")
     fills = page.eval_on_selector_all(
         "#legend-retrieval .bm-key-glyph-fill",
@@ -937,16 +964,20 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          "the comparison explorer opens on arm A")
     c.ok(evidence_a["sourceTraces"] == 2
          and evidence_a["renderedTraces"] == 2
-         and evidence_a["marks"] == [250, 250]
+         and evidence_a["marks"] == [stored["locA"], stored["locB"]]
          and evidence_a["symbols"] == ["circle-open", "square-open"]
-         and len(evidence_gsms_a) == 250,
-         "both cohorts draw their complete 250-point evidence sets "
+         and evidence_a["legacy"] == 0
+         and len(evidence_gsms_a) == stored["locA"],
+         "opening the explorer draws each cohort's matches once, no more "
          f"({evidence_a['sourceTraces']} source, "
          f"{evidence_a['renderedTraces']} rendered, {evidence_a['marks']} marks)")
+    samples_tab = page.locator(
+        "#neighborhood-tab .dash-options-list-option:has(input[value='samples'])")
+    c.ok(samples_tab.inner_text().split() == ["Samples", f"{stored['a']:,}"],
+         f"the explorer's Samples count is arm A's {stored['a']} matches: "
+         f"{samples_tab.inner_text()!r}")
 
-    page.locator(
-        "#neighborhood-tab .dash-options-list-option:has(input[value='samples'])"
-    ).click()
+    samples_tab.click()
     page.wait_for_function(
         """expected => {
           const rows = [...document.querySelectorAll(
@@ -985,20 +1016,23 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"{heading_a!r} -> {heading_b!r}")
     c.ok(evidence_b["sourceTraces"] == 2
          and evidence_b["renderedTraces"] == 2
-         and evidence_b["marks"] == [250, 250]
+         and evidence_b["marks"] == [stored["locA"], stored["locB"]]
          and evidence_b["symbols"] == ["circle-open", "square-open"]
-         and len(evidence_gsms_b) == 250,
-         "selecting B preserves both complete 250-point evidence sets "
+         and len(evidence_gsms_b) == stored["locB"],
+         "selecting B preserves both cohorts' complete match traces "
          f"({evidence_b['sourceTraces']} source, "
          f"{evidence_b['renderedTraces']} rendered, {evidence_b['marks']} marks)")
+    c.ok(samples_tab.inner_text().split() == ["Samples", f"{stored['b']:,}"],
+         f"the Samples count follows arm B's {stored['b']} matches: "
+         f"{samples_tab.inner_text()!r}")
     c.ok(rows_a == evidence_gsms_a and rows_b == evidence_gsms_b
          and rows_a != rows_b,
-         "the complete 250-row Samples list changes with the selected arm")
+         f"the complete {depth}-row Samples list changes with the selected arm")
     c.ok(set(evidence_gsms_a) != set(evidence_gsms_b),
          f"the arms retain independently ranked evidence point sets "
          f"({len(set(evidence_gsms_a) & set(evidence_gsms_b))} shared)")
     c.ok((page.evaluate(MAP_OVERLAY_JS) or {}) == requested_before,
-         "arm switching preserves both cohorts' requested-hit traces")
+         "arm switching preserves both cohorts' match traces")
     c.ok({prop: dash_changes.count(prop) for prop in runs_before_neighborhood}
          == runs_before_neighborhood,
          "opening and switching evidence does not rerun either retrieval path")
@@ -1014,22 +1048,24 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
         """() => {
           const gd = document.querySelector('#manifold-graph .js-plotly-plot');
           return gd && !(gd._fullData || []).some(t =>
-            ['512-D evidence neighbor', 'focused evidence neighbor'].includes(t.name));
+            ['512-D evidence neighbor', 'focused evidence neighbor',
+             'focused match', 'retrieved hit'].includes(t.name));
         }""", timeout=90_000)
     c.ok((page.evaluate(MAP_OVERLAY_JS) or {}) == requested_before,
-         "Close removes comparison evidence but preserves requested-hit traces")
+         "Close removes only the explorer's focus and keeps both cohorts' matches")
 
     # The claim that dropping the rank numerals is safe because "the
     # hover says strictly more" was untrue: two traces at one coordinate
     # resolve to one tooltip, so a shared hit named one arm only.
     shared_hover = page.evaluate("""() => {
       const gd = document.querySelector('.js-plotly-plot');
-      const hits = gd._fullData.filter(t => t.name === 'retrieved hit');
+      const hits = gd._fullData.filter(t => t.name === 'retrieved match');
       if (hits.length !== 2) return null;
       const key = t => t.x.map((x, i) => x.toFixed(4) + ',' + t.y[i].toFixed(4));
       const a = key(hits[0]), b = new Set(key(hits[1]));
       const i = a.findIndex(p => b.has(p));
-      return i < 0 ? null : hits[0].customdata[i][1];
+      // [kind, rank, gsm, gse, score, tissue, species, role, facts]
+      return i < 0 ? null : hits[0].customdata[i][8];
     }""")
     if c.ok(shared_hover is not None, "a shared hit is locatable"):
         c.ok(shared_hover.count("512-d rank") == 2,

@@ -130,11 +130,26 @@ async def check(url: str, out: Path):
         # section of the surviving overview, so it still proves the whole body
         # rendered rather than just the heading.
         await expect(page.locator("#neighborhood-body")).to_contain_text("Leading studies")
+        # The explorer is the retrieved matches (2026-10-22): one
+        # `retrieved match` trace holding every match the map can place, and
+        # no separate 250-deep evidence layer or white hit-ring trace.
         await page.wait_for_function("""() => {
-            const gd = document.querySelector('#manifold-graph .js-plotly-plot');
-            return gd && (gd._fullData || []).some(
-                t => t.name === '512-D evidence neighbor' && t.x.length === 250);
+            const stored = JSON.parse(sessionStorage.getItem('hits-store') || 'null');
+            const located = ((stored && stored.hits) || []).filter(
+                h => h.archs4_index !== null && h.archs4_index !== undefined).length;
+            const full = (document.querySelector('#manifold-graph .js-plotly-plot')
+                          || {})._fullData || [];
+            const matches = full.filter(t => t.name === 'retrieved match');
+            return located > 0 && matches.length === 1
+                && matches[0].x.length === located
+                && !full.some(t => ['512-D evidence neighbor', 'retrieved hit',
+                                    'focused evidence neighbor'].includes(t.name));
         }""", timeout=90000)
+        stored = await page.evaluate(
+            "() => (JSON.parse(sessionStorage.getItem('hits-store') || 'null')"
+            " || {hits: []}).hits.length")
+        await expect(page.locator("#neighborhood-tab")).to_contain_text(
+            f"Samples {stored:,}")
         await page.screenshot(path=str(out / "after-neighborhood.png"))
         for width in (768, 393):
             await page.set_viewport_size({"width": width, "height": 900})
