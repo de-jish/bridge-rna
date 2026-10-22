@@ -6,11 +6,10 @@ theme tokens in assets/00-tokens.css. Keep GRAPH_THEME in sync with :root there.
 
 from __future__ import annotations
 
-import textwrap
-
 import pandas as pd
 import plotly.graph_objects as go
 
+from . import network_labels
 from .util import _safe_str
 
 
@@ -78,6 +77,17 @@ EDGE_WIDTH = 3.0
 #: the figure. Its two arms share one vertical rhythm, so the node count is
 #: `2 * k` in the worst case and the labels would collide long before k = 30.
 COMPARISON_MAX_LABELS = 20
+
+#: A solid canvas-colored outline around each glyph, built from text shadows
+#: in a ring because Plotly gives SVG text no stroke. `network_labels.place`
+#: keeps every label off its own node's edges and, wherever the canvas allows,
+#: off everyone else's; this is the backstop for a crowded result, where a
+#: neighbor's edge or a 4.5 px emphasized one still has to pass a label. The
+#: edge then stops short of the glyphs instead of striking through them. A
+#: blurred halo was tried first and lets a 3 px edge show at full strength.
+_HALO_RING = [(0, 3), (2, 2), (3, 0), (2, -2), (0, -3), (-2, -2), (-3, 0), (-2, 2),
+              (1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2)]
+LABEL_HALO = ", ".join(f"{dx}px {dy}px 0 {GRAPH_THEME['paper_bg']}" for dx, dy in _HALO_RING)
 
 
 def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
@@ -215,19 +225,32 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
     else:
         node_df["display_label"] = node_df["label"]
 
+    # Line breaks keep long sample identifiers inside laptop-sized plots.
+    # Customdata, hover identifiers and node positions are unchanged.
+    label_lines = [network_labels.wrap_identifier(label) if kind == "query" else [label] if label else []
+                   for label, kind in zip(node_df["display_label"], node_df["kind"])]
+    label_nodes = [{"node_id": node_id, "kind": kind, "x": x, "y": y, "size": size, "lines": lines}
+                   for node_id, kind, x, y, size, lines in zip(
+                       node_df["node_id"], node_df["kind"], node_df["x"], node_df["y"],
+                       node_df["size"], label_lines)]
+    margin = network_labels.margins(
+        next(n["lines"] for n in label_nodes if n["kind"] == "query"),
+        float(node_df.loc[node_df["kind"] == "query", "size"].iloc[0]),
+        [n["lines"] for n in label_nodes if n["kind"] == "gse"],
+        float(node_df.loc[node_df["kind"] == "gse", "size"].max()) if (node_df["kind"] == "gse").any() else 0.0,
+    )
+    positions = network_labels.place(label_nodes, edge_rows, margin)
+
     fig.add_trace(
         go.Scatter(
             x=node_df["x"],
             y=node_df["y"],
             mode="markers+text",
-            # Line breaks keep long sample identifiers inside laptop-sized plots.
-            # Customdata, hover identifiers, node positions and axes are unchanged.
-            text=["<br>".join(textwrap.wrap(str(label), width=20,
-                                          break_on_hyphens=False))
-                  if kind == "query" else label
-                  for label, kind in zip(node_df["display_label"], node_df["kind"])],
-            textposition="top center",
-            textfont={"family": GRAPH_THEME["font_sans"], "size": 11, "color": GRAPH_THEME["text_secondary"]},
+            text=["<br>".join(lines) for lines in label_lines],
+            textposition=[positions.get(node_id, "top center") for node_id in node_df["node_id"]],
+            textfont={"family": GRAPH_THEME["font_mono"], "size": network_labels.FONT_SIZE,
+                      "color": GRAPH_THEME["text_secondary"],
+                      "shadow": LABEL_HALO},
             hovertemplate="%{customdata[2]}<extra></extra>",
             customdata=node_df[["kind", "node_id", "hover"]].values,
             marker={
@@ -242,33 +265,22 @@ def build_network_figure(query: pd.Series, hits_df: pd.DataFrame) -> go.Figure:
             # Presentation-only metadata for local hover and
             # inspector emphasis. Node customdata and scientific data stay intact.
             meta={"network_nodes": True},
-            # Let labels on the outermost nodes spill into the margin instead of
-            # being cut off at the plot edge. The axis padding below sizes the
-            # plot so this is a backstop for narrow viewports, not the main fix.
+            # Labels on the outermost nodes are drawn into the margin reserved
+            # for them below rather than being cut off at the plot edge.
             cliponaxis=False,
             showlegend=False,
         )
     )
 
-    # Labels are centered on their node, so half of each one overhangs the node
-    # it belongs to. The query sits at the far left (x=0.0) and carries the
-    # longest text -- OSDR sample names run past 25 characters -- so Plotly's
-    # autorange, which pads by only a few percent of the data extent, renders it
-    # clipped. Pad each side by the overhang of the widest label anchored there.
-    x_chars_per_unit = 88.0  # ~11px glyphs across the 0.0-2.1 node span
-    def _label_overhang(kind: str) -> float:
-        widest = max((len(str(v)) for v in node_df.loc[node_df["kind"] == kind, "label"]), default=0)
-        return widest / (2.0 * x_chars_per_unit)
-
+    # Room for the side labels is reserved as pixel margins: it is a pixel
+    # quantity, and the data-unit padding this replaced shrank with the canvas,
+    # exactly when a label needed it most.
     fig.update_layout(
-        margin={"l": 48, "r": 48, "t": 16, "b": 16},
+        margin=margin,
         paper_bgcolor=GRAPH_THEME["paper_bg"],
         plot_bgcolor=GRAPH_THEME["plot_bg"],
         font={"family": GRAPH_THEME["font_sans"], "color": GRAPH_THEME["text_primary"]},
-        xaxis={
-            "visible": False,
-            "range": [0.0 - _label_overhang("query") - 0.04, 2.1 + _label_overhang("gse") + 0.04],
-        },
+        xaxis={"visible": False},
         yaxis={"visible": False},
         # "event", not "event+select". Clicking a node opens it in the
         # inspector; it does not select anything. With "+select" Plotly applied

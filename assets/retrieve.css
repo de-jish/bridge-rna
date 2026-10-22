@@ -470,6 +470,9 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
 
 .detail-collapse { margin-top: var(--space-3); }
 .detail-collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   cursor: pointer;
   list-style: none;
   font-size: var(--text-sm);
@@ -479,13 +482,22 @@ details[open] > .advanced-summary::after { transform: rotate(45deg); }
   user-select: none;
 }
 .detail-collapse > summary::-webkit-details-marker { display: none; }
+/* The rail's Metadata options chevron, leading instead of trailing. This was
+   `content: "▸ "` on an inline-block, whose trailing space is trimmed at the
+   end of its own line box, so the triangle sat flush against the title; and
+   swapping glyphs on open gave the transform transition nothing to animate. */
 .detail-collapse > summary::before {
-  content: "▸ ";
-  display: inline-block;
-  transition: transform 0.15s ease;
-  color: var(--text-muted);
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 2px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 160ms ease;
 }
-.detail-collapse[open] > summary::before { content: "▾ "; }
+.detail-collapse[open] > summary::before { transform: rotate(45deg); }
 
 /* ==========================================================================
    AI summary panel

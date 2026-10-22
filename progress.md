@@ -6,6 +6,24 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-21 (network labels clear of every edge; inspector disclosure gap)
+
+Retrieval network labels sat centered above every node, so edges struck through the query's name and most accessions: 9 crossings in the README's OSD-100 search at 1440 px, measured per glyph in the browser.
+The query's name now sits on its left and each study's accession on its right, where no edge ever runs.
+Each hit's label is chosen by `bridge_rna/network_labels.place`, which scores six candidate spots in pixels against every edge, marker and placed label on each canvas size the view produces, and never accepts a spot the hit's own edges cross.
+Labels are DM Mono and carry a solid canvas-colored knockout, so where a crowded result leaves no clear spot a neighbor's edge passes behind the text instead of through it.
+At k = 5 no edge touches any label at 1680, 1440 or 1024 px; on every size and k the query, study labels and each label's own edges are clear.
+Design, measurements and rejected alternatives: `docs/design-notes.md#network-labels`.
+
+Found on the way and fixed before commit: fitting the axes exactly to the nodes made the outermost markers half-clickable, because Plotly hit-tests only inside the plot area. Autorange is kept, the placer models it to within 1.5 px, and a test pins it.
+
+The inspector's "GEO summary" / "Overall design" disclosures drew "▸GEO summary" with no gap: the marker was `content: "▸ "` on an inline-block, whose trailing space is trimmed. It is now the rail's rotated chevron with a flex gap, and its transform transition finally animates.
+
+Node positions, edges, the 3 px edge width, node sizes, hover and click data, scores and ranks are unchanged.
+
+Validation: 525 pytest tests (17 new); `e2e_network_style.py` 42 checks (11 new: per-glyph label/edge contact at 1440, 1280 and 390 px, the knockout, and the disclosure gap); `e2e_check.py` passes; README retrieval capture passes all three of its checks.
+`tests/screenshot_readme.py` on main still waits for upper-case inspector titles that the HDS rebrand removed; the fix is on `cc/hungry-cori-9e3447` (b4841c5) and was borrowed uncommitted to take the before/after captures.
+
 ## 2026-09-19 (NASA Human Design System)
 
 Merged `prototype/hds-exploration` into main. The interface now resolves every chrome color through NASA's Human Design System: `assets/00-hds-tokens.css` is HDS's generated token file, `assets/00-tokens.css` maps the app's semantic names onto it, and `manifold/theme.py` mirrors the resolved values for Plotly. Carbon-05 canvas, white panels, black header with a carbon-70 rule, NASA blue `#1c67e3` as the accent, `#d83933` for the one primary query action. Public Sans, Inter and DM Mono are vendored under `assets/fonts/` with their licenses and named in `deploy/common.STATIC_ASSETS` so the ship path carries them.

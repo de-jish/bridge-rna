@@ -29,6 +29,7 @@ The last of those is the part worth keeping: several of the features below were 
 | [File ingestion](#file-ingestion) | embedding an uploaded counts file and retrieving against it |
 | [Retrieval neighborhood explorer](#retrieval-neighborhood-explorer) | inspecting exact 512-D evidence without mistaking the projection for similarity |
 | [README screenshots](#readme-screenshots) | capturing the two images by measurement rather than by eye |
+| [Network labels](#network-labels) | where each label of the retrieval network goes, so no edge strikes through text |
 
 ---
 
@@ -1766,3 +1767,54 @@ Do not widen the rail to make it go away.
 
 It boots `app.py` against the real `cache/`, so it needs the artifacts and the LFS objects, and it takes about three minutes.
 It exits non-zero if either frame ends up with a clipped panel, a figure touching its canvas edge, or a console error, so a layout change that breaks the images fails the capture rather than shipping a cut one.
+
+---
+
+<a id="network-labels"></a>
+
+## Labels in the retrieval network
+
+Measured and built on 2026-10-21.
+Code: `bridge_rna/network_labels.py`; tests: `tests/test_network_labels.py` and the label checks in `tests/e2e_network_style.py`.
+
+### The defect
+
+Every label sat centered above its node (`textposition="top center"`).
+The network is three columns, query -> hits -> studies, with every edge running left to right, so a label centered over a node straddles the very edges that leave it.
+In the README capture (OSD-100, `Mmus_C57-6J_EYE_FLT_Rep1_M23`, k = 5) the query's name sat on its two upper edges and the edges struck through `GSE210492`, `GSE205070`, `GSM6431234` and `GSM4256053`.
+Measured per glyph in the browser, the default search drew **9** edge-through-text crossings at 1440 px and 13 at 390 px; k = 12 drew 27 at 1440 px.
+
+### What was built
+
+Two of the three label kinds have an answer that holds for any result.
+Nothing leaves the query to the left, so its name sits on its left (`middle left`), wrapped after an underscore so a line ends on a field boundary.
+Nothing leaves a study to the right, so its accession sits on its right (`middle right`).
+
+A hit has an edge on each side, and which of its six candidate spots is clear depends on where its neighbors' edges run.
+`network_labels.place` scores each spot in pixels against every edge, every marker and every label already placed, and never accepts a spot one of the hit's own edges crosses.
+The figure does not know the canvas it will be drawn on, so a spot is scored on each canvas the retrieval view actually produces - measured at 1680, 1440 and 1280 px wide, and on the 320 px strip the view becomes below its 1180 px breakpoint - and the lowest total wins.
+Ties go to centered, then to the fan of query edges, then toward the studies.
+
+The pixel model reproduces Plotly rather than approximating it: label boxes are Plotly's `textPointPosition` offsets (text sits `size / 1.6 + 1` px from a marker's center), and the data-to-pixel map is its autorange, which keeps each outermost marker `size / 1.6` plus 5% of the axis inside the plot.
+Checked against the rendered figure, every node lands within 1.5 px of the model.
+Room for the side labels is a pixel margin; the old data-unit padding shrank with the canvas, exactly when a label needed it.
+
+Labels are set in DM Mono, the face the rail already uses for identifiers and the comparison network already uses for its accessions, which is also what makes a label's width predictable (0.6 em per character).
+
+Where a crowded result leaves a hit no clear spot, each label carries a solid knockout: sixteen unblurred `text-shadow`s in a 3 px ring of the canvas color, so an edge stops short of the glyphs and visibly passes behind them.
+It lives in the trace's own `textfont.shadow`, so it survives PNG export.
+
+### Result
+
+Measured per glyph on the rendered figure, at k = 5: no edge touches any label at 1680 (the README), 1440 or 1024 px; at 1280 px two hit labels and on a phone four have a neighbor's edge pass behind their knockout.
+On every canvas and at k = 3, 5 and 12, no label sits on its own node's edges, the query and study labels touch no edge at all, no label overlaps another or covers another node, and nothing leaves the canvas.
+On a phone this also removed a real collision: the query's name used to overlap the middle hit's label.
+
+### Rejected
+
+- **A blurred halo.** Tried first: a 3 px edge showed through the glyphs at full strength.
+- **Every hit label on its right.** Removed every crossing with the hit's own edges but left it in the hit-to-study band, where edges run at any slope and cross each other; neighbor crossings stayed at 2 to 25.
+- **Every hit label inside the query fan.** Better, because the fan's edges never cross, but the outer hits' fan edges still cut their neighbors' labels at 1280 px, and on a phone the middle hit's label ran into the query.
+- **Axes fitted exactly to the nodes.** Made the pixel model trivial and was shipped for one capture: Plotly hit-tests clicks and hover only inside the plot area, so the top hit, the query and every study lost half their target. Autorange is kept and modeled instead; a test pins it.
+- **Label plates (annotations with a background).** A rectangle hides a whole stretch of edge where the knockout hides only what lies under the glyphs, and annotations would separate the labels from the node trace that carries their hover and click data.
+

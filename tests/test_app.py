@@ -1528,6 +1528,22 @@ def test_the_retrieval_input_rules_cannot_reach_the_map():
     assert ".sidebar .dash-input .dash-input-element" in retrieve
 
 
+def test_an_inspector_disclosure_keeps_its_marker_apart_from_its_title():
+    """"▸GEO summary": the triangle sat flush against the title.
+
+    The marker was `content: "▸ "` on an inline-block, and the trailing space
+    of an inline-block is trimmed at the end of its own line box, so the gap
+    the string asked for never rendered. The gap is now layout, not a
+    character, and the marker turns rather than swapping glyphs.
+    """
+    retrieve = (paths.ASSETS_DIR / "retrieve.css").read_text()
+    summary = re.search(r"\.detail-collapse > summary \{([^}]*)\}", retrieve).group(1)
+    marker = re.search(r"\.detail-collapse > summary::before \{([^}]*)\}", retrieve).group(1)
+    assert "display: flex" in summary and "gap:" in summary
+    assert 'content: ""' in marker and "transform:" in marker
+    assert not re.search(r"\.detail-collapse\[open\] > summary::before \{[^}]*content:", retrieve)
+
+
 def test_the_map_view_has_a_landmark_and_a_heading(map_view):
     """The map had a page title and no structure under it.
 

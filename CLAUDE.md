@@ -20,7 +20,7 @@ reintroduce its panel, warnings, or payload. Executed membership remains a discl
 `app.py` is the single entry point and owns the header and the router.
 **The router must decline to repaint a route that is already on screen.** `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` alone let the router rebuild the view on every load. Rebuilding the retrieval view reads the OSDR catalog, so its response landed a few hundred milliseconds later, on top of whatever the user had done meanwhile - clicking Cohort on arrival opened the cohort panel and then closed it again, 6 times out of 6, while the click's own callback had returned the right answer. `route-store` records what was painted and `app.navigation_for` is the decision, split out so it is testable without Dash plumbing. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 508 tests pass in about thirty seconds, plus 487 browser checks: 205 in `tests/e2e_check.py`, 178 in `tests/e2e_cohort_check.py`, 70 in `tests/e2e_upload_check.py`, 31 in `tests/e2e_network_style.py`, and 3 in `tests/e2e_cleanup_check.py`.
+**Current state: built, run on the real corpus, and tested.** 525 tests pass in about thirty seconds, plus 498 browser checks: 205 in `tests/e2e_check.py`, 178 in `tests/e2e_cohort_check.py`, 70 in `tests/e2e_upload_check.py`, 42 in `tests/e2e_network_style.py`, and 3 in `tests/e2e_cleanup_check.py`.
 Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted - and they drifted again, which is why these were re-measured by running every suite rather than by adding up the last recorded numbers.
 **The last two take a `--url` or `--port` and do not start their own server**, so they are the two that silently go unrun; both were stale when this was written.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
@@ -164,7 +164,8 @@ bridge_rna/cohorts.py    what a cohort is: three facets, grouping, the vMF
                          estimator, leave-one-out cosines, low-N tiering. Opens
                          no embedding and no memmap.
 bridge_rna/              the retrieval half (config, util, preflight, osdr, ai, geo,
-                         figures, retrieval, panels, layout, callbacks)
+                         figures, network_labels, retrieval, panels, layout,
+                         callbacks)
 manifold/paths.py        every artifact path, one place; env-overridable
 manifold/preflight.py    PRECOMPUTE_REQUIRED vs APP_REQUIRED, LFS pointer guard
 manifold/data.py         cached loaders: coords, points_meta, osdr_metadata, archs4
@@ -391,13 +392,13 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python tests/check_join.py              # the join, on the real corpus
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8000
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 508 tests, about thirty seconds
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 525 tests, about thirty seconds
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 205 browser checks, about five minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 178 cohort checks, about five minutes
 
 # These two need an app already running, and default to :8000 now that app.py does.
-/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_network_style.py --port 8000   # 31 checks
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_network_style.py --port 8000   # 42 checks
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cleanup_check.py --url http://127.0.0.1:8000  # 3 checks
 /Users/josh/Bridge-RNA/.venv/bin/python tests/screenshot_readme.py       # rewrites README's two images, about three minutes
 ```
@@ -482,6 +483,8 @@ Stacked, the plot takes `68vh` with a 420 px floor and the document scrolls, whi
 
 **One quantity gets one channel, and that channel is in the key.**
 The retrieval network uses constant node sizes and a constant 3 px width for every edge, including study links and both comparison arms. Cosine similarity remains numerical metadata in hover and the inspector; no legend entry claims that width encodes it.
+
+**No edge may strike through a network label.** Labels sat centered over every node until 2026-10-21, which put the query's name and most accessions on their own edges. The query's name now sits on its left and each study's accession on its right, where no edge ever runs, and `bridge_rna/network_labels.place` chooses each hit's spot by scoring it in pixels against every edge, marker and label on each canvas size the view produces. Its pixel model reproduces Plotly's text offsets and autorange to within 1.5 px; **keep the axes on autorange**, because Plotly hit-tests only inside the plot area and an exact fit left the outermost markers half-clickable. Labels are DM Mono with a solid canvas-colored knockout, so where a crowded result leaves no clear spot a neighbor's edge passes behind the text. Design: [`docs/design-notes.md`](docs/design-notes.md#network-labels).
 
 The map's evidence explorer draws both cohorts' independent top-250 cosine neighborhoods together: blue-green open circles for A and larger open squares for B. Shared samples carry both outlines at the same coordinate, with both ranks and scores in hover. The explorer's A/B selector controls details and focus, while the map visibility checkboxes control which cohorts are drawn. Clicking an evidence mark opens its cohort's sample details. No retrieval, pooling, preprocessing or projection calculation changes.
 
