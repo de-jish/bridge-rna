@@ -1434,7 +1434,7 @@ The fix is structural: the family's input moved to `choose_suggestion`, which wr
 A third, smaller one is recorded because it looks like a defect and is not. `page.fill` followed immediately by `page.press("Enter")` commits the *previous* text, because the two are CDP calls with no event-loop tick between them and Dash's Input publishes `value` one tick after the change. Measured: a gap of 0 ms is stale and **every gap from 5 ms up is correct**, against a fastest realistic keypress-to-keypress of tens of milliseconds. It is not reachable from a keyboard, and the harness now reproduces the ordering a real one has.
 
 **Whether the list is open is the browser's business; what is in it is the server's.** Two independent facts, one owner each, composed by CSS into a single `display`: `offer_suggestions` renders the rows and `.bm-suggest:empty` hides an empty list, while one `is-closed` class on the group records that the reader dismissed it. No callback writes a `style` here and `assets/find-suggest.js` never removes a row, so the two cannot race over one property.
-That file is the map's only JavaScript, and it exists for the one thing Dash cannot express: a keystroke. Selection goes **through** Dash rather than around it - a row is a real component with a pattern-matching id carrying its own identifier, so a click, a tap and Enter all end in the same `n_clicks` and the same server callback, and Enter is implemented as `activeRow.click()` for exactly that reason.
+That file exists for the one thing Dash cannot express here: a keystroke. Selection goes **through** Dash rather than around it - a row is a real component with a pattern-matching id carrying its own identifier, so a click, a tap and Enter all end in the same `n_clicks` and the same server callback, and Enter is implemented as `activeRow.click()` for exactly that reason.
 Two smaller decisions in that file are load-bearing. `mousedown` inside the list is `preventDefault`ed, because without it the mousedown blurs the input, `n_blur` commits the fragment in the box, and the click commits the real identifier a moment later - two searches for one gesture, the first of them wrong. And Enter is stopped in the **capture** phase when a row is active, so Dash's own Enter handler never sees it; with no row active it is left alone and Enter means what it always did.
 
 **The row is two lines, and that was measured.** Side by side on a 268 px rail the identifier and its detail compete for about 220 px, and which one loses is decided by CSS rather than by which matters: with both at the default shrink the accession itself ellipsed, and `flex-shrink: 0` instead spent the detail down to `OSD-100 · l…`.
@@ -1643,6 +1643,78 @@ Plotly's equal-axis constraint compressed the numeric range when the canvas narr
 The figure callback also used to restate `autorange` on every neighborhood-only update, which let a responsive relayout choose a fresh window.
 Neighborhood open, arm and focus updates now leave unframed axes untouched.
 The browser regression compares the Plotly x range before first open and after reopen, in addition to checking that explicit **Frame retrieval** still narrows the view.
+
+### Browser finding: a framed map held its frame only when the race went its way (2026-10-21)
+
+`constrain="domain"` fixed the unframed map and was believed to fix framed ones too.
+It does not, and `tests/e2e_cohort_check.py` section 8c had been failing intermittently because of it, on main as well as on later branches.
+
+**What happened.**
+Fit results writes `viewport-store` and opens the drawer in the same click.
+The drawer's callback answers in tens of milliseconds and docks the drawer, which narrows the plot from 1412 px to 1022 px; the framed figure takes about two seconds to build.
+The axes are scale-anchored, so Plotly fits a window by widening one of its ranges, and it writes the widened range back into the layout (`ax._input.range`).
+When the resize landed first, the figure was fitted to 1022 px and the docked map was right.
+When the figure landed first, it was fitted to 1412 px, and the 100 ms-debounced `Plots.resize` then narrowed the canvas starting from the widened range: Plotly kept it and widened the other axis instead.
+Measured on the OSD-137 comparison, the stored window was 1.139 by 1.107 in UMAP units in every cycle.
+The right docked view is 0.001173 units per pixel; the wrong one was 0.00162, the same frame shown 1.38x further out.
+It reproduced 3 times in 4 on this branch.
+
+`constrain="domain"` cannot prevent this, because Plotly 3.6 abandons the domain branch for any range zoomed in from the one it first constrained (`_inputRange`, the whole-corpus range).
+That is every framed view.
+
+**Why the check was wrong too.**
+Section 8c compared the x span before and after closing the drawer.
+For a window bound by its height, the x span at one scale has to grow with the canvas, from 1.198 at 1022 px to 1.656 at 1412 px.
+So the spans matched only when the docked map was carrying the stale full-width range.
+The check passed on the bug and failed on the correct frame.
+It now checks what a frame owes the reader: the docked scale equals the scale that fits the stored window; closing the drawer keeps that scale and centre; the whole stored window stays on screen; and `viewport-store` is untouched.
+It also forces both orders of the race by holding one callback's response, instead of waiting for the race to come up.
+
+**The fix.**
+A framed figure states its window in `layout.meta.viewport` (`callbacks.viewport_axes`), because the axis ranges stop saying it once Plotly has drawn them.
+`assets/map-frame.js` holds that window centred at the scale it was first fitted at, and never at a smaller one than containing all of it needs.
+A wider canvas reveals more around the frame, and a narrower one zooms out only as far as containing it requires.
+So the docked view is the same whichever response lands first, closing the drawer is not a zoom, and docking it cannot hide a result.
+The asset issues a relayout with whole-range keys, which `_viewport_from_relayout` reads as unchanged, so the stored frame is never rewritten by a resize.
+
+**A second defect, found while forcing the race.**
+`_viewport_from_relayout` read `{"autosize": true}` as "back to the whole map".
+dcc.Graph forwards that event on every responsive resize, and does not resend an unchanged value.
+That kept the bug hidden only until `relayoutData` held anything else, which happens at the first scroll-zoom.
+After that, Fit results framed the map, the drawer docked, and the resize put the whole corpus back.
+It reproduced 3 times in 3 on unmodified main.
+A resize is not a zoom, so it now reads as unchanged; only an explicit `autorange` resets.
+
+**A third, found by the primary suite once the first two were fixed.**
+`uirevision="keep"` keeps a GUI zoom unless the figure moves the attribute away from its value before the zoom.
+A scroll-zoom of the whole map starts from `autorange: true`, which is exactly what a reset restates, so Reset view held only if a framed figure with explicit ranges had painted in between.
+Four quick wheel steps queue four viewport responses; when they land together Dash supersedes every zoomed figure, and a Reset pressed then left the map zoomed while `viewport-store`, and the hidden Reset button, said it was not.
+It reproduced 3 times in 8 on unmodified main.
+Each 2-D axis now carries its own `uirevision` from `callbacks.axis_revision(method, dims, reset clicks)`: it changes exactly when a frame is released on purpose, so Plotly drops the GUI zoom then, and it is restated unchanged by every other update, the preserving drawer updates included.
+10 of 10 resets held afterwards, 8 of them on the race path.
+
+**Alternatives rejected.**
+Fitting the frame afresh on every resize is simpler, but closing the drawer would then zoom in on any frame that is bound by its width, and this section exists because a drawer must not be a hidden zoom.
+Letterboxing the frame inside a shrunken domain, which is what `constrain="domain"` was meant to do, would keep the x span exactly, but it clips the points beyond the frame at an invisible edge and leaves empty bands on a map you can still pan.
+Making the dock and the figure one callback response removes the race only for the drawer, delays the drawer by the two seconds the figure takes to build, and still leaves the frame to the order of any other resize.
+
+**Painting the frame once.**
+Every drawer toggle restates the stored frame, and on a close the figure usually lands after the 100 ms-debounced resize.
+Plotly would then fit the stored window to the wider canvas, which zooms a frame bound by its width, and paint that before the asset could put the held scale back.
+So the asset wraps `Plotly.react` for this one graph: when the incoming figure restates the frame already held, it is handed over with the held window in place of the stored one.
+The window is fitted to Plotly's current canvas, not the container's new size, because a react does not re-measure the container; the debounced resize does that next.
+A new frame passes through untouched and is adopted after Plotly fits it.
+
+A framed figure also switches both axes to `constrain="range"`, and the whole map keeps `domain`.
+Plotly's relayout of an axis range resets the reference range its domain mode compares against, so after the asset's first relayout the next wider canvas letterboxed the frame for one paint: the frame inside empty navy bands, its neighbours clipped at an invisible edge.
+That was measured as an off-scale paint on 3 of 5 drawer closes before the switch, and on 0 of 9 after it.
+It also changes how a scroll-zoom from the whole map looks.
+The whole map is letterboxed in a shrunken x domain (1012 of 1412 px), and a scroll-zoom used to keep that letterbox, because the user's relayout reset the same reference range; now the zoomed map fills the canvas, as a Fit results frame always did.
+So a scroll-zoom can widen the x span on screen while every mark gets bigger, and `e2e_check.py` judges it by units per pixel.
+
+**Known limit.**
+When a new frame paints before the drawer docks, the resize paints Plotly's widened range once before the asset's relayout corrects it.
+That is the order that used to stick; with natural timing it is rare, because the framed figure takes about two seconds to build and the dock about a tenth of one.
 
 ---
 

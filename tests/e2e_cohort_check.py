@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -218,12 +219,113 @@ def _wait_for_evidence_gsms(page, expected: list[str], arm="a") -> dict:
     return page.evaluate(NEIGHBORHOOD_EVIDENCE_JS)
 
 
+def _overlay_with_arms(page, arms: int, timeout: int = 90_000) -> dict:
+    """The map overlay once it draws `arms` cohorts, or as it is at timeout.
+
+    A tick redraws the 942,563-point figure, which on a loaded machine takes
+    longer than any fixed pause; reading too early judged the previous figure.
+    """
+    try:
+        page.wait_for_function(
+            "(arms) => { const o = (" + MAP_OVERLAY_JS + ")();"
+            " return !!o && (o.members || []).length === arms; }",
+            arg=arms, timeout=timeout)
+    except Exception:
+        pass
+    return page.evaluate(MAP_OVERLAY_JS) or {}
+
+
 def _stable_map_span(page) -> float:
     """Read the x span only after Plotly's responsive relayout has settled."""
     page.evaluate("() => { delete window.__bmCohortRangeStability; }")
     ranges = page.wait_for_function(
         STABLE_MAP_RANGE_JS, timeout=90_000).json_value()
     return float(ranges["x"][1] - ranges["x"][0])
+
+
+FRAME_GEOMETRY_JS = """() => {
+  const gd = document.querySelector('#manifold-graph .js-plotly-plot');
+  const l = gd._fullLayout;
+  return {x: Array.from(l.xaxis.range).map(Number),
+          y: Array.from(l.yaxis.range).map(Number),
+          w: l._size.w, h: l._size.h,
+          viewport: (gd.layout.meta || {}).viewport || null};
+}"""
+
+
+def _frame_geometry(page) -> dict:
+    """The settled 2-D window, read against the frame the server stored.
+
+    A framed window is not judged by its x span. The axes are scale-anchored,
+    so the span along the unconstrained axis follows the canvas width, and a
+    span that survives a 390 px change of width is a stale range, not a held
+    one - which is exactly the defect this replaced a span check to catch.
+    What a frame owes the reader is its scale, its centre, and every point of
+    the stored window on screen.
+    """
+    _stable_map_span(page)
+    g = page.evaluate(FRAME_GEOMETRY_JS)
+    vp = g["viewport"]
+    g["scale_x"] = (g["x"][1] - g["x"][0]) / g["w"]
+    g["scale_y"] = (g["y"][1] - g["y"][0]) / g["h"]
+    g["centre"] = ((g["x"][0] + g["x"][1]) / 2, (g["y"][0] + g["y"][1]) / 2)
+    if vp:
+        g["fit"] = max((vp[1] - vp[0]) / g["w"], (vp[3] - vp[2]) / g["h"])
+        g["vp_centre"] = ((vp[0] + vp[1]) / 2, (vp[2] + vp[3]) / 2)
+        eps = g["fit"] * 0.5
+        g["contains"] = (g["x"][0] <= vp[0] + eps and g["x"][1] >= vp[1] - eps
+                         and g["y"][0] <= vp[2] + eps
+                         and g["y"][1] >= vp[3] - eps)
+    return g
+
+
+def _same(a: float, b: float, rel: float = 0.005) -> bool:
+    return abs(a - b) <= abs(b) * rel
+
+
+def _centred(g: dict) -> bool:
+    """Within a pixel of the stored window's centre, on both axes."""
+    return all(abs(a - b) <= g["fit"] for a, b in zip(g["centre"], g["vp_centre"]))
+
+
+DELAY_RESPONSES_JS = """(needle) => {
+  // Hold one callback's response so the other side of a race lands first.
+  // Installed once; `needle` names the output whose response is held, and
+  // null releases the hold for every later request.
+  // `__bmInFlight` counts Dash requests not yet handed back, held or not, so
+  // a check can wait for the map to have received everything it asked for.
+  window.__bmHoldOutput = needle;
+  if (window.__bmHoldInstalled) return;
+  window.__bmHoldInstalled = true;
+  window.__bmInFlight = 0;
+  const original = window.fetch;
+  window.fetch = async function (url, options) {
+    const body = options && typeof options.body === 'string' ? options.body : '';
+    window.__bmInFlight++;
+    try {
+      const response = await original.apply(this, arguments);
+      const needle = window.__bmHoldOutput;
+      if (needle && body.includes('"output":')
+          && body.split('"outputs"')[0].includes(needle)) {
+        await new Promise(resolve => setTimeout(resolve, 4000));
+      }
+      return response;
+    } finally {
+      window.__bmInFlight--;
+    }
+  };
+}"""
+
+
+def _settle(page) -> None:
+    """Wait until every Dash request is answered, then past Plotly's resize.
+
+    `Plots.resize` is debounced by 100 ms, and holding a frame across it is one
+    more relayout, so the quiet period is what the settled read stands on.
+    """
+    page.wait_for_function("() => window.__bmInFlight === 0", timeout=90_000)
+    page.wait_for_timeout(400)
+    page.wait_for_function("() => window.__bmInFlight === 0", timeout=90_000)
 
 
 class Checks:
@@ -247,6 +349,25 @@ class Checks:
 #: Which pass of `--loops` is running. Screenshots are namespaced by it, so a
 #: failure on the second pass does not land under the first pass's filename.
 _RUN = 1
+
+
+def text_once(page, selector: str, needle: str, timeout: int = 30_000) -> str:
+    """The element's text once it contains `needle`, or as it stands at timeout.
+
+    For a readout a callback fills: reading it straight after the click that
+    triggers the callback reads whatever was there before the response, which
+    on a loaded machine is the empty string. The check that follows still
+    decides; this only stops it judging a value that has not arrived yet.
+    """
+    try:
+        page.wait_for_function(
+            """([selector, needle]) => {
+              const el = document.querySelector(selector);
+              return !!el && el.innerText.includes(needle);
+            }""", arg=[selector, needle], timeout=timeout)
+    except Exception:
+        pass
+    return page.locator(selector).inner_text()
 
 
 def shot(page, name: str) -> None:
@@ -376,7 +497,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # ---- 1. the rail opens on Sample and stays quiet ----------------
     print("\n=== 1. a cold load runs nothing ===")
     page.goto(f"{base}/", wait_until="load")
-    page.wait_for_selector(".sample-preview", timeout=60_000)
+    page.wait_for_selector(".sample-preview", timeout=120_000)
     page.wait_for_timeout(1500)
 
     c.ok(page.locator(".mode-tab").count() == 3,
@@ -427,7 +548,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok(on.count() == chips.count(),
          f"every offered facet is on by default, saw {on.count()}")
 
-    summary = page.locator("#cohort-facet-summary").inner_text()
+    summary = text_once(page, "#cohort-facet-summary", "212 cohorts")
     c.ok("212 cohorts" in summary,
          f"the definition reports its consequence: {summary[:80]!r}")
     c.ok("2,105 of 2,108" in summary,
@@ -440,7 +561,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
 
     # ---- 3. the rail before a search -------------------------------
     print("\n=== 3. the rail says only what it knows yet ===")
-    card = page.locator("#cohort-card").inner_text()
+    card = text_once(page, "#cohort-card", "samples pooled into one query")
     c.ok("samples pooled into one query" in card,
          "the card states the pooled size")
     c.ok("STABILITY" not in card.upper(),
@@ -879,8 +1000,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     c.ok("Show it on the map" not in labels,
          f"each tick carries its cohort's own name: {labels[:70]!r}")
     ticks.nth(1).uncheck()
-    page.wait_for_timeout(2500)
-    solo = page.evaluate(MAP_OVERLAY_JS) or {}
+    solo = _overlay_with_arms(page, 1)
     c.ok(len(solo.get("members", [])) == 1,
          "unticking an arm removes it from the map")
     c.ok(any(h["hasText"] for h in solo.get("hits", [])),
@@ -965,8 +1085,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     page.wait_for_timeout(4000)
 
     ticks.nth(1).check()
-    page.wait_for_timeout(2500)
-    c.ok(len((page.evaluate(MAP_OVERLAY_JS) or {}).get("members", [])) == 2,
+    c.ok(len(_overlay_with_arms(page, 2).get("members", [])) == 2,
          "and reticking brings it back")
 
     # ---- 8c. framing a comparison, and the one control that undoes it ----
@@ -983,25 +1102,56 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     whole = _stable_map_span(page)
     c.ok(not page.locator("#reset-view").is_visible(),
          "the map is unframed until something frames it")
-    with page.expect_response(
-            _figure_response_for("viewport-store.data"), timeout=90_000):
-        page.locator("#frame-retrieval").click()
-    page.locator("#neighborhood-drawer").wait_for(
-        state="visible", timeout=30_000)
-    framed = _stable_map_span(page)
+    page.evaluate(DELAY_RESPONSES_JS, None)
+
+    def frame_and_dock() -> dict:
+        with page.expect_response(
+                _figure_response_for("viewport-store.data"), timeout=90_000):
+            page.locator("#frame-retrieval").click()
+        page.locator("#neighborhood-drawer").wait_for(
+            state="visible", timeout=30_000)
+        _settle(page)
+        return _frame_geometry(page)
+
+    def close_drawer() -> dict:
+        page.get_by_role("button", name="Close neighborhood explorer").click()
+        page.locator("#neighborhood-drawer").wait_for(
+            state="hidden", timeout=30_000)
+        _settle(page)
+        return _frame_geometry(page)
+
+    def fitted(g: dict) -> bool:
+        return (bool(g.get("viewport")) and _same(g["scale_x"], g["fit"])
+                and _same(g["scale_y"], g["fit"]) and _centred(g)
+                and g["contains"])
+
+    docked = frame_and_dock()
+    framed = docked["x"][1] - docked["x"][0]
     c.ok(framed < whole * 0.9,
          f"framing a comparison narrows the view ({framed:.2f} of {whole:.2f})")
     c.ok(page.locator("#reset-view").is_visible(),
          "and the reset appears once it has")
-    with page.expect_response(
-            _figure_response_for("neighborhood-open-store.data"),
-            timeout=90_000):
-        page.get_by_role("button", name="Close neighborhood explorer").click()
-    page.locator("#neighborhood-drawer").wait_for(
-        state="hidden", timeout=30_000)
-    framed_closed = _stable_map_span(page)
-    c.ok(abs(framed_closed - framed) < max(framed * 0.02, 0.001),
-         f"closing the drawer preserves the explicit frame ({framed_closed:.2f})")
+    # Plotly fits a window to equal-scale axes by widening one range and
+    # writing the widened range back into the layout. When the framed figure
+    # painted before the drawer docked, the docked map kept the full-width
+    # range and showed this frame 1.4x further out than it needed to - the
+    # race the old span check here was failing on, intermittently.
+    c.ok(fitted(docked),
+         f"the docked map shows the stored frame at exactly the scale that fits "
+         f"it ({docked['scale_x']:.6f} against {docked.get('fit', 0):.6f} per px)")
+
+    closed = close_drawer()
+    c.ok(closed["viewport"] == docked["viewport"],
+         "closing the drawer leaves the stored frame alone")
+    # Not the x span: a wider canvas at the same scale shows more around the
+    # frame, so the span along the unconstrained axis has to grow with it.
+    c.ok(_same(closed["scale_x"], docked["scale_x"])
+         and _same(closed["scale_y"], docked["scale_x"]),
+         f"closing the drawer is not a zoom ({closed['scale_x']:.6f} per px "
+         f"at {closed['w']:.0f} px, {docked['scale_x']:.6f} at {docked['w']:.0f})")
+    c.ok(_centred(closed) and closed["contains"],
+         "nor a pan, and the whole frame stays on screen")
+
     with page.expect_response(
             _figure_response_for("viewport-store.data"), timeout=90_000):
         page.locator("#reset-view").click()
@@ -1015,21 +1165,48 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"both cohorts survive the reset: {len(after.get('members', []))} arms")
     c.ok(len(after.get("hits", [])) == len(drawn.get("hits", [])),
          "and so does every hit they retrieved")
+
+    # The race itself, forced rather than waited for: the drawer's response is
+    # held so the framed figure paints at full width and the dock lands after
+    # it. Before the fix this was the order that zoomed the docked map out.
+    page.evaluate(DELAY_RESPONSES_JS, "map-workspace.className")
+    reframed = frame_and_dock()
+    page.evaluate(DELAY_RESPONSES_JS, None)
+    c.ok(fitted(reframed) and _same(reframed["scale_x"], docked["scale_x"]),
+         f"re-framing gives the same window even when the figure paints before "
+         f"the drawer docks ({reframed['scale_x']:.6f} per px)")
+
+    # And the other order on the way out: the figure is held until the resize
+    # has happened, so the restated frame arrives at full width.
+    page.evaluate(DELAY_RESPONSES_JS, "manifold-graph.figure")
+    late = close_drawer()
+    page.evaluate(DELAY_RESPONSES_JS, None)
+    c.ok(_same(late["scale_x"], docked["scale_x"]) and _centred(late)
+         and late["contains"],
+         f"closing is not a zoom when the figure lands after the resize either "
+         f"({late['scale_x']:.6f} per px)")
     with page.expect_response(
             _figure_response_for("viewport-store.data"), timeout=90_000):
-        page.locator("#frame-retrieval").click()
-    page.locator("#neighborhood-drawer").wait_for(
-        state="visible", timeout=30_000)
-    reframed = _stable_map_span(page)
-    c.ok(abs(reframed - framed) < max(framed * 0.02, 0.001),
-         f"re-framing gives the same window, not a stale one ({reframed:.2f})")
+        page.locator("#reset-view").click()
+    _stable_map_span(page)
 
+    # A resize is not a reset. dcc.Graph forwards one as `{"autosize": true}`,
+    # which used to unframe the map: after any scroll-zoom, Fit results framed
+    # it, the drawer docked, and the resize put the whole corpus back.
+    box = page.locator("#manifold-graph").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     with page.expect_response(
-            _figure_response_for("neighborhood-open-store.data"),
-            timeout=90_000):
-        page.get_by_role("button", name="Close neighborhood explorer").click()
-    page.locator("#neighborhood-drawer").wait_for(
-        state="hidden", timeout=30_000)
+            _figure_response_for("viewport-store.data"), timeout=90_000):
+        page.mouse.wheel(0, 400)
+    _stable_map_span(page)
+    zoomed_then_framed = frame_and_dock()
+    c.ok(page.locator("#reset-view").is_visible()
+         and fitted(zoomed_then_framed)
+         and _same(zoomed_then_framed["scale_x"], docked["scale_x"]),
+         f"Fit results still frames after a scroll-zoom "
+         f"({zoomed_then_framed['scale_x']:.6f} per px)")
+
+    close_drawer()
     with page.expect_response(
             _figure_response_for("viewport-store.data"), timeout=90_000):
         page.locator("#reset-view").click()
@@ -1044,7 +1221,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # of a correct answer, so the click was thrown away with it. No
     # settle here on purpose - the settle is what used to hide it.
     page.goto(f"{base}/")
-    page.wait_for_selector(".sample-preview", timeout=60_000)
+    page.wait_for_selector(".sample-preview", timeout=120_000)
     page.locator("#mode-tab-cohort").click()
     page.wait_for_timeout(2500)
     c.ok("is-active" in (page.locator("#mode-tab-cohort")
@@ -1055,7 +1232,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
 
     for study, topk in SWEEP:
         page.goto(f"{base}/")
-        page.wait_for_selector(".sample-preview", timeout=60_000)
+        page.wait_for_selector(".sample-preview", timeout=120_000)
         open_mode(page, "cohort")
         choose(page, "study-dropdown", study, exact=True)
         set_topk(page, topk)
@@ -1116,6 +1293,27 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
          f"{network_errors[:2]}")
 
 
+REQUEST_LOG = re.compile(r'"(GET|POST|HEAD) [^"]*" \d{3}')
+
+
+def drain_server_output(server: subprocess.Popen) -> None:
+    """Keep reading the server's output for as long as it runs.
+
+    The dev server logs every request to this pipe, and nothing read it after
+    the start-up line. A pipe holds about 64 KB, so a few hundred callbacks
+    into a run the server blocked on writing a log line and every request after
+    that hung - a page that never loaded, a search that timed out - always late
+    in a run and most often in a second `--loops` pass. Request lines are
+    dropped; anything else, a traceback included, is still printed.
+    """
+    def drain():
+        for line in server.stdout:
+            if not REQUEST_LOG.search(line):
+                print("    [server] " + line.rstrip(), flush=True)
+
+    threading.Thread(target=drain, daemon=True).start()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8064)
@@ -1146,6 +1344,7 @@ def main() -> int:
         else:
             print("server never announced itself")
             return 1
+        drain_server_output(server)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(

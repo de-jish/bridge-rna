@@ -29,6 +29,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -478,7 +479,10 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     c.ok(page.evaluate("() => document.activeElement.id") == "frame-retrieval",
          "Close returns focus to Fit results")
 
-    before_reopen = _map_x_range(page)
+    # Compared with the first docked view, not with the closed one: the closed
+    # map is 390 px wider at the same scale, so its x range is wider by
+    # construction, and matching it meant the docked map had kept a stale
+    # full-width range - the framing race `assets/map-frame.js` removes.
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
@@ -486,8 +490,9 @@ def check_neighborhood_explorer(page, c: "Checks", dash_changes: list[str]) -> N
     page.locator("#neighborhood-drawer").wait_for(state="visible", timeout=30_000)
     _wait_for_evidence(page, "scattergl")
     after_reopen = _map_x_range(page)
-    c.ok(max(abs(a - b) for a, b in zip(before_reopen, after_reopen)) < 0.05,
-         "Repeated Fit results reopens without changing the fitted viewport")
+    c.ok(max(abs(a - b) for a, b in zip(after, after_reopen)) < 0.05,
+         f"Repeated Fit results reopens without changing the fitted viewport "
+         f"({after} -> {after_reopen})")
     with page.expect_response(
             _figure_response_for("neighborhood-open-store.data"),
             timeout=90_000):
@@ -665,6 +670,27 @@ def set_segment(page, group_label: str, option_text: str):
     ).first.click()
 
 
+REQUEST_LOG = re.compile(r'"(GET|POST|HEAD) [^"]*" \d{3}')
+
+
+def drain_server_output(server: subprocess.Popen) -> None:
+    """Keep reading the server's output for as long as it runs.
+
+    The dev server logs every request to this pipe, and nothing read it after
+    the start-up line. A pipe holds about 64 KB, so a few hundred callbacks
+    into a run the server blocked on writing a log line and every request after
+    that hung - a page that never loaded, a search that timed out - always late
+    in a run and most often in a second `--loops` pass. Request lines are
+    dropped; anything else, a traceback included, is still printed.
+    """
+    def drain():
+        for line in server.stdout:
+            if not REQUEST_LOG.search(line):
+                print("    [server] " + line.rstrip(), flush=True)
+
+    threading.Thread(target=drain, daemon=True).start()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8062)
@@ -689,6 +715,7 @@ def main() -> int:
         else:
             print("server never announced itself")
             return 1
+        drain_server_output(server)
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -1368,6 +1395,18 @@ def main() -> int:
                                   "._fullLayout.xaxis.range.slice()")
                 return abs(r[1] - r[0])
 
+            def x_scale():
+                # Data units per pixel. The whole map is letterboxed in a
+                # shrunken x domain and a frame fills the canvas, so a zoom in
+                # can widen the x span while every mark gets bigger.
+                return page.evaluate("""() => {
+                  const x = document.querySelector('#manifold-graph .js-plotly-plot')
+                    ._fullLayout.xaxis;
+                  return Math.abs(x.range[1] - x.range[0]) / x._length;
+                }""")
+
+            whole_scale = x_scale()
+
             find_it("OSD-100")
             page.click("#frame-find")
             page.wait_for_timeout(3000)
@@ -1406,7 +1445,16 @@ def main() -> int:
                 page.mouse.wheel(0, -240)
                 page.wait_for_timeout(400)
             page.wait_for_timeout(2500)
-            c.ok(x_span() < abs(whole[1] - whole[0]), "a scroll zoom narrows the view")
+            c.ok(x_scale() < whole_scale,
+                 f"a scroll zoom narrows the view ({x_scale():.5f} units per px, "
+                 f"from {whole_scale:.5f})")
+            # Waited for, not sampled: each wheel step queues a figure rebuild
+            # ahead of the viewport response that reveals the button.
+            try:
+                page.locator("#reset-view").wait_for(state="visible",
+                                                     timeout=60_000)
+            except Exception:
+                pass
             c.ok(page.locator("#reset-view").is_visible(),
                  "and offers the same reset")
             page.click("#reset-view")

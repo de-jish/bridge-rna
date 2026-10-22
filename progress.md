@@ -6,6 +6,34 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-21 (a framed map holds its frame when the drawer docks)
+
+`tests/e2e_cohort_check.py` 8c, "closing the drawer preserves the explicit frame", failed intermittently on main and on later branches.
+Reproduced on the real corpus, OSD-137 comparison: 3 of 4 cycles.
+The stored viewport was identical in every cycle; what varied was whether the framed figure or the drawer's resize landed first.
+Plotly fits a window to scale-anchored axes by widening one range and writes the widened range back into the layout, so when the figure painted at 1412 px before the drawer narrowed the plot to 1022 px, the docked map kept the full-width range and showed the frame 1.38x further out (0.00162 against 0.001173 units per pixel).
+`constrain="domain"` does not cover framed views, because Plotly drops its domain branch for any range zoomed in from the first one.
+The check itself compared x spans across that 390 px width change, which at one scale must differ for a height-bound frame, so it passed only on the stale range.
+
+Fix: a framed figure states its window in `layout.meta.viewport` and uses `constrain="range"`, and the new `assets/map-frame.js` holds the frame centred at the scale it was first fitted at, never smaller than containing it needs.
+It corrects a resize with one relayout and hands `Plotly.react` the held window when the server restates the frame, so a drawer close paints once.
+Off-scale paints on a width-bound close went from 3 of 5 to 0 of 9.
+
+A second defect surfaced while forcing the race: `_viewport_from_relayout` read dcc.Graph's `{"autosize": true}` resize event as "whole map", so after any scroll-zoom Fit results framed the map and the dock erased the frame (3 of 3 on unmodified main).
+A resize now reads as unchanged.
+
+A third, found by `e2e_check.py` once those were fixed and also pre-existing (3 of 8 on unmodified main): Reset view after a fast scroll-zoom left the map zoomed under an unframed store, because `uirevision="keep"` kept the GUI zoom when the reset restated the same `autorange: true` the zoom had started from. Each 2-D axis now carries its own `uirevision` from `callbacks.axis_revision`, renamed exactly when a frame is released on purpose; 10 of 10 resets held.
+
+Two `e2e_check.py` checks compared spans across a change of canvas geometry, the same flaw as 8c: reopening Fit results is now compared with the first docked view rather than the closed one, and a scroll-zoom is judged by units per pixel, because a zoomed frame now fills the canvas where the whole map is letterboxed.
+
+Section 8c now checks scale, centre, containment and an untouched `viewport-store`, forces both orders of the race by holding one callback response, and covers zoom-then-fit.
+Two readouts in sections 2 and 3, and the arm re-tick in 8b, read the page a fixed pause after the click that changes it and judged the previous state on a loaded machine; they now wait for the state.
+
+The late-run stalls had a cause of their own. `e2e_cohort_check.py` and `e2e_check.py` start the app with its output piped, read the pipe only until "serving on", and never again. The dev server logs every request there, so a few hundred callbacks in, the roughly 64 KB pipe was full, the server blocked writing a log line, and every later request hung: a page that never loaded, a search that timed out, always late and most often in a second `--loops` pass. Both now drain the pipe on a thread and still print anything that is not a request line. `e2e_upload_check.py`, `screenshots.py` and `screenshot_readme.py` start their server the same way and were left for a follow-up.
+Design and rejected alternatives: `docs/design-notes.md`, "a framed map held its frame only when the race went its way".
+
+Validation on the final tree, real corpus: 513 pytest tests; `e2e_check.py` 205 of 205; `e2e_cohort_check.py --loops 3` 549 of 549 (183 per pass, three consecutive passes against one server). `e2e_upload_check.py`, `e2e_network_style.py` and `e2e_cleanup_check.py` were not rerun; nothing they exercise changed.
+
 ## 2026-09-19 (NASA Human Design System)
 
 Merged `prototype/hds-exploration` into main. The interface now resolves every chrome color through NASA's Human Design System: `assets/00-hds-tokens.css` is HDS's generated token file, `assets/00-tokens.css` maps the app's semantic names onto it, and `manifold/theme.py` mirrors the resolved values for Plotly. Carbon-05 canvas, white panels, black header with a carbon-70 rule, NASA blue `#1c67e3` as the accent, `#d83933` for the one primary query action. Public Sans, Inter and DM Mono are vendored under `assets/fonts/` with their licenses and named in `deploy/common.STATIC_ASSETS` so the ship path carries them.
