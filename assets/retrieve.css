@@ -1292,7 +1292,6 @@ summary:focus-visible,
 }
 .results-table {
   width: 100%;
-  min-width: 680px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -1351,6 +1350,16 @@ summary:focus-visible,
   white-space: nowrap;
 }
 .results-table thead th { white-space: nowrap; }
+/* Headers are labels, not values: the cell fonts above (mono numerals and
+   accessions, italic species) matched the header cells too, so "Score" and
+   "Series" set in mono and "Species" in italic beside sans "Tissue category". */
+.results-table thead th.col-num,
+.results-table thead th.col-gse,
+.results-table thead th.col-species {
+  font-family: var(--font-heading);
+  font-style: normal;
+  font-size: var(--text-sm);
+}
 .results-table .col-text {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1489,6 +1498,44 @@ summary:focus-visible,
    328 px, so it gives up 56 px here rather than the table scrolling sideways. */
 @media (min-width: 1181px) and (max-width: 1480px) {
   .app-grid { grid-template-columns: 288px minmax(0, 1fr) 328px; }
+}
+
+/* The table fits its own frame by dropping the least essential columns as the
+   frame narrows, rather than scrolling sideways. Ranks, scores and GSM always
+   stay; whatever is hidden is still in the inspector and the CSV. A comparison
+   needs more room (two ranks and two scores), and before this it ran 16 px past
+   its frame at 1,440 px and 275 px at 1,181 px, with Title squeezed to nothing
+   and Species clipped (found 2026-10-22).
+
+   Order: Species, then Series, then Title, then Tissue category. Each
+   threshold is the sum of the visible fixed widths above plus 140 px for
+   Title, the narrowest it is still worth showing.
+     single:      58+74+124+100+128+100 = 584
+     comparison:  70+82+70+82+124+100+128+100 = 756 */
+.results-table-wrap { container: results-table / inline-size; }
+@container results-table (max-width: 723px) {
+  .results-table:not(.results-table--comparison) .col-species { display: none; }
+}
+@container results-table (max-width: 623px) {
+  .results-table:not(.results-table--comparison) .col-gse { display: none; }
+}
+@container results-table (max-width: 523px) {
+  .results-table:not(.results-table--comparison) .col-title { display: none; }
+}
+@container results-table (max-width: 383px) {
+  .results-table:not(.results-table--comparison) .col-tissue { display: none; }
+}
+@container results-table (max-width: 895px) {
+  .results-table--comparison .col-species { display: none; }
+}
+@container results-table (max-width: 795px) {
+  .results-table--comparison .col-gse { display: none; }
+}
+@container results-table (max-width: 695px) {
+  .results-table--comparison .col-title { display: none; }
+}
+@container results-table (max-width: 555px) {
+  .results-table--comparison .col-tissue { display: none; }
 }
 
 @media (max-width: 1180px) {

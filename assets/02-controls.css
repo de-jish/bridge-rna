@@ -21,6 +21,24 @@
 }
 .dash-dropdown-content .dash-dropdown-search { color: var(--control-ink); }
 .dash-dropdown-content .dash-dropdown-search::placeholder { color: var(--text-secondary); }
+/* A multi-select's search box is a container holding the magnifier and the
+   input. The box and its focus ring belong on the container, the one element
+   that holds both: the global focus ring landed on the inner input alone, so
+   the magnifier sat in a bordered block of its own, jutting out to the left
+   of a blue-ringed field (found in the cohort table's Tissue category filter,
+   2026-10-22). */
+.dash-dropdown-content .dash-dropdown-search-container {
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.dash-dropdown-content .dash-dropdown-search-container:focus-within {
+  border-color: var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.dash-dropdown-content .dash-dropdown-search:focus,
+.dash-dropdown-content .dash-dropdown-search:focus-visible { outline: none; }
 
 .btn-secondary, .btn-ghost, .bm-button, .bm-neighborhood-close {
   color: var(--control-ink);
