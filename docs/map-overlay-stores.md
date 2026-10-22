@@ -75,14 +75,34 @@ One upload per visit, against the per-interaction uploads above, is the trade wo
 
 ## What it measures now
 
-Measured in the browser after the change, same searches (`tests/e2e_results_check.py` asserts the bounds):
+Measured in the browser after the change, on the same real 1,000-match searches: the OSD-100 left-eye sample, and the first OSD-137 cohort comparison the picker offers.
+Bytes are the JSON of the retrieval stores each request carried.
 
-The table of measured numbers is filled in below once the build is verified.
+| what | single sample | comparison |
+| --- | --- | --- |
+| `hits-store` in session storage | 472 KB | 945 KB |
+| arriving: the derivation, the one call that carries `hits-store` | 502 KB | 1,006 KB |
+| one zoom: the viewport callback | 0.8 KB | 1.1 KB |
+| one zoom or tick: the figure | 114 KB | 229 KB |
+| one tick: the rail summary | 0.8 KB | 1.1 KB |
+| one drawer tab or search keystroke | 88 KB | 174 KB |
+| Fit results: the drawer's open state | 0.8 KB | 1.1 KB |
+| switching to 3-D: every callback but the figure | 0.8 KB | 1.1 KB |
+
+Every map callback except the figure and the drawer now carries at most about 1 KB of the retrieval, independent of k.
+A zoom went from about 945 KB of upload to about 115 KB for one sample, and from about 1.9 MB to about 230 KB for a comparison.
+The figure still builds once on arrival, not twice.
+
+For scale, the figure callback's *response* for that single-sample search is 11.2 MB, so the 114 KB it now uploads is about 1% of that callback's traffic.
+The cut is larger than the 63 KB its values alone would suggest because JSON repeats each field name on every row; a columnar layout would roughly halve it, and was not taken because it would give up the payload shape the equality proof rests on, for about 0.5% of the callback's traffic.
+
+`tests/e2e_results_check.py` asserts the bounds on every run: on arrival `hits-store` is posted once and only to the derivation; no zoom or tick posts it; every callback but the figure carries at most 4 KB of retrieval data; the figure carries at most a third of the payload; and the map still draws all 1,000 rings.
 
 ## The floor, and what was not done to go under it
 
 The figure callback rebuilds the whole figure on every zoom, so it has to receive every hit it draws.
-At k=1,000 that is about 42 KB per arm, plus the evidence rows when the drawer is open, and no stateless design posts less while keeping the hover exact.
+At k=1,000 its values are about 42 KB per arm, plus about 21 KB of evidence rows, and no stateless design posts less while keeping the hover exact.
+The drawer is the same: it searches and prints 250 rows of GEO text per arm, so it receives them.
 Three ways under it were considered and rejected:
 
 - **A server-side cache keyed by a digest**, so requests carry only a key.

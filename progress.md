@@ -6,6 +6,13 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-21 (the map stops posting hits-store per interaction)
+
+On `feature/retrieval-table`. At k=1,000 hits-store is 472 KB per sample and 945 KB for a comparison, and the map took it in six callbacks, so one zoom uploaded about 945 KB (1.9 MB for a comparison) and every tick, Fit results, drawer tab and drawer keystroke uploaded it again.
+`manifold.callbacks.derive_map_stores` now reads it once per map visit and writes three payload-shaped or summary cuts; design, measurements and the rejected alternatives (a server cache, which two gunicorn workers rule out; a `Patch` second writer; a packed encoding) are in `docs/map-overlay-stores.md`.
+A zoom now uploads about 115 KB for one sample and 230 KB for a comparison, nearly all of it the hits the figure draws, against an 11.2 MB figure response; every other map callback carries about 1 KB.
+`tests/test_map_stores.py` (69 tests) proves the map draws byte-identical figures, drawer, rail and frames from the cuts for single, upload, demo, cohort and comparison payloads; `tests/e2e_results_check.py` asserts the browser-side bounds.
+
 ## 2026-10-21 (the retrieval result is a ranked table, not a network)
 
 Branch `feature/retrieval-table`, from `main`, pushed to origin and not merged.
@@ -19,7 +26,7 @@ Not merged and untouched: PR #2 (Compare tab) and PR #3 (whitening); Joshua does
 
 Validation: 802 pytest tests and 554 browser checks (206 map/sample, 184 cohort, 70 upload, 58 results, 33 network style, 3 cleanup). The browser suites were ported in a parallel session. One known flaky check in `e2e_cohort_check.py`, a map-framing race when the evidence drawer closes, reproduces on main and is not addressed here.
 
-Open: the map view still posts the full hits payload in four callbacks per visit, which is heavier at k=1,000. Timings in this session were taken on a machine shared with another project's browser tests; a quiet-machine 1,000-deep search measured 0.7 to 1.0 s.
+The map no longer posts the full hits payload per interaction (see the entry above). Timings in this session were taken on a machine shared with another project's browser tests; a quiet-machine 1,000-deep search measured 0.7 to 1.0 s.
 
 ## 2026-09-19 (NASA Human Design System)
 

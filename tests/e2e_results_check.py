@@ -367,8 +367,10 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
         " return gd && (gd.data || []).some(t => t.name === 'retrieved hit'); }",
         timeout=120_000)
     settle(page, 2000)
+    # `_fullData`, not `data`: Plotly 6 ships coordinates as base64 typed
+    # arrays, which only the full data has decoded into something with a length.
     rings = page.evaluate(
-        "() => document.querySelector('#manifold-graph .js-plotly-plot').data"
+        "() => document.querySelector('#manifold-graph .js-plotly-plot')._fullData"
         ".filter(t => t.name === 'retrieved hit').reduce((n, t) => n + t.x.length, 0)")
     c.ok(rings == 1000, f"the map draws all 1,000 matches as rings ({rings})")
     arrived = list(posts)
