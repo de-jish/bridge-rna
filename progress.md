@@ -16,6 +16,8 @@ The two repositories were merged on 2026-07-22 and it now covers the whole produ
 
 **Found along the way.** The phone header wrapped "Bridge RNA" onto two lines once the guide button joined it; the header now uses a 16 px gutter and 12 px gaps below 640 px. Codex assessed the plan before building and reviewed the result; three of its four findings were fixed and the fourth was already covered (`docs/help-and-guide.md`). A new browser suite, `tests/e2e_help_check.py` (45 checks), caught the tour opening over a cold map a beat before its view mounted; fixed. All seven browser suites pass: 618 checks.
 
+**Shipped, not yet applied.** `20261027T173439Z-3f1ca27d` (commit `4c7ddb1`) was transferred and read-back verified on 2026-10-27; the pre-transfer audit found no server drift, nothing removed and no dependency changes (25 files added: the help and guide code and 20 screenshots; 7 changed). It goes live when `apply.py apply` runs on the server and Gunicorn restarts.
+
 **Disk.** 9.9 GB free, under the 15 GB floor. Nothing safe was left to clear: DerivedData is empty, npm and brew were cleaned, and both iOS DeviceSupport folders (12 GB) match the iPhone's and iPad's current OS versions. A stray `app.py --port 8200` from five days ago is still running and was left alone.
 
 ## 2026-10-22, evening (skeleton loading; table fit; vector separation answer)
