@@ -176,8 +176,11 @@
 }
 
 @media (max-width: 640px) {
+  /* Brand, switcher and the guide button share 343 px on a phone; with the
+     desktop's 20 px gutter and gaps the title wrapped to two lines. */
+  .app-header { gap: var(--space-3); padding-left: 16px; padding-right: 16px; }
   .app-subtitle { display: none; }
-  .app-nav-item { padding: 6px 12px; }
+  .app-nav-item { padding: 6px 10px; }
 }
 
 .app-brand-mark img { width: 34px; height: 34px; object-fit: contain; }

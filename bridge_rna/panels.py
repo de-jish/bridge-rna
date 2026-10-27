@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 from dash import html
 
+from . import help as info_help
 from .config import ROOT
 from .osdr import _fetch_osdr_study_summary
 from .preflight import (
@@ -63,11 +64,18 @@ def _detail_link_row(label: str, url: str) -> Any:
     )
 
 
-def _detail_section(title: str, rows: list[Any]) -> Any | None:
+def _detail_section(title: str, rows: list[Any], info: str | None = None) -> Any | None:
+    """A titled group of rows. `info` puts an "i" beside the title: the first
+    section of a record carries the record's explanation, because the head
+    above it has no room once the score badge is there."""
     rows = [r for r in rows if r is not None]
     if not rows:
         return None
-    return html.Div(className="details-section", children=[html.Div(title, className="details-section-title"), *rows])
+    title_node: Any = html.Div(title, className="details-section-title")
+    if info is not None:
+        title_node = html.Div(className="control-label-row details-section-head",
+                              children=[title_node, info_help.info(info)])
+    return html.Div(className="details-section", children=[title_node, *rows])
 
 
 def _detail_text_block(title: str, text: str, collapsible: bool = False, placeholder: str = "Not available.") -> Any:
@@ -292,8 +300,7 @@ def build_cohort_details(query: pd.Series, role: str = "", *,
     parts: list[Any] = [
         _details_head(kicker, label),
         _detail_section(
-            "Definition",
-            [
+            "Definition", info="cohort", rows=[
                 _accession_row("Study", study),
                 _detail_row("Grouped by", _safe_str(query.get("grouped_by"))),
                 _detail_row("Samples pooled", str(len(members))) if show_size else None,
@@ -407,8 +414,7 @@ def _build_query_details(query: pd.Series, compact: bool,
     parts: list[Any] = [
         _details_head("Query sample", heading),
         _detail_section(
-            "Identity",
-            [
+            "Identity", info="query-details", rows=[
                 _detail_row("Sample ID", _safe_str(query.get("sample_id")), mono=True),
                 _accession_row("Study ID", _safe_str(query.get("study_id"))),
             ],
@@ -485,8 +491,7 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
             _details_head("GSE study", node_id),
             _accession_row("Study", node_id),
             _detail_section(
-                "Overview",
-                [
+                "Overview", info="study-details", rows=[
                     _detail_row("Connected GSM hits", str(len(df))),
                     _detail_row("Example GSMs", examples),
                 ],
@@ -525,8 +530,7 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
     parts: list[Any] = [
         _details_head("ARCHS4 hit · GSM", _safe_str(r.get("gsm")), score=float(r.get("score", 0.0))),
         _detail_section(
-            "Identity",
-            [
+            "Identity", info="match-details", rows=[
                 _accession_row("GSM", _safe_str(r.get("gsm"))),
                 _accession_row("GSE", gse),
                 _detail_row("Title", title),

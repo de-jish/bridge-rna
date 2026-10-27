@@ -1,0 +1,19 @@
+{
+  "captured_utc": "2026-10-27T07:54:29+00:00",
+  "revision": "c34ffc5+uncommitted",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "device_scale_factor": 1.5,
+  "image": [
+    1440,
+    900
+  ],
+  "webp_quality": 82,
+  "query": {
+    "study": "OSD-100",
+    "sample": "Mmus_C57-6J_EYE_FLT_Rep1_M23",
+    "matches": 30
+  }
+}

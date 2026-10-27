@@ -14,6 +14,8 @@ from urllib.parse import quote
 
 from dash import dcc, html
 
+from bridge_rna import help as info_help
+
 from . import colorby, data, find, render, theme
 
 
@@ -195,7 +197,15 @@ def resolve_budget(dims: str, current: str | None) -> str:
     return current if current in valid else default_budget(dims)
 
 
-def _group(label_id: str, label: str, *children):
+def _label_row(label, info: str | None):
+    """A rail heading with its "i" beside it, never inside it."""
+    if info is None:
+        return label
+    return html.Div(className="bm-group-label-row",
+                    children=[label, info_help.info(info)])
+
+
+def _group(label_id: str, label: str, *children, info: str | None = None):
     """A rail group and the heading that names its controls, tied together.
 
     The headings here are styled divs rather than `<label>`s, and the controls
@@ -209,7 +219,8 @@ def _group(label_id: str, label: str, *children):
     return html.Div(
         className="bm-group", role="group",
         **{"aria-labelledby": label_id},
-        children=[html.Div(label, id=label_id, className="bm-group-label"), *children],
+        children=[_label_row(html.Div(label, id=label_id, className="bm-group-label"), info),
+                  *children],
     )
 
 
@@ -254,6 +265,7 @@ def control_rail() -> html.Aside:
                     html.P("Projected distances differ from the embedding cosine similarity used for retrieval.",
                            className="bm-hint"),
                 ]),
+                info="projection",
             ),
             _group(
                 "dims-label", "Dimensions",
@@ -261,6 +273,7 @@ def control_rail() -> html.Aside:
                     {"label": "2D", "value": "2d"},
                     {"label": "3D", "value": "3d"},
                 ], "2d"),
+                info="dimensions",
             ),
             # The color-by group carries its own coverage readout, so the answer
             # to "how much of this map is this field actually coloring?" sits
@@ -278,6 +291,7 @@ def control_rail() -> html.Aside:
                 ),
                 html.Div(id="coverage", className="bm-coverage"),
                 html.Div(id="color-by-hint", className="bm-hint"),
+                info="color-by",
             ),
             _group(
                 "layers-label", "Layers",
@@ -290,6 +304,7 @@ def control_rail() -> html.Aside:
                     value=["archs4", "osdr"],
                     className="bm-checklist",
                 ),
+                info="layers",
             ),
             # In 2-D the glyph sample can carry the whole corpus (the density
             # raster it used to sit above is gone, so the sample is the only
@@ -308,6 +323,7 @@ def control_rail() -> html.Aside:
             _group(
                 "budget-label", "Number of ARCHS4 points",
                 _segmented("budget", budget_options("2d"), default_budget("2d")),
+                info="point-budget",
             ),
             # "Where did this study land?" - the one question the map could not
             # be asked until now. It sits here, after the controls that decide how
@@ -328,8 +344,9 @@ def control_rail() -> html.Aside:
                 id="find-group", className="bm-group", role="group",
                 **{"aria-labelledby": "find-label"},
                 children=[
-                    html.Label("Find a study", id="find-label",
-                               className="bm-group-label", htmlFor="find-input"),
+                    _label_row(html.Label("Find a study", id="find-label",
+                                          className="bm-group-label", htmlFor="find-input"),
+                               "find-study"),
                     dcc.Input(
                         id="find-input", type="text",
                         className="bm-find-input",
@@ -413,7 +430,8 @@ def control_rail() -> html.Aside:
             # mistyped, which is the same reason the legend is built this way.
             html.Div(id="retrieval-group", className="bm-group",
                      style={"display": "none"}, children=[
-                html.Div("Your retrieval", className="bm-group-label"),
+                _label_row(html.Div("Your retrieval", className="bm-group-label"),
+                           "your-retrieval"),
                 dcc.Checklist(
                     id="show-retrieval",
                     options=[{"label": " Show it on the map", "value": "on"}],
@@ -463,7 +481,7 @@ def control_rail() -> html.Aside:
             # startup.
             html.Div(id="view-group", className="bm-group",
                      style={"display": "none"}, children=[
-                html.Div("View", className="bm-group-label"),
+                _label_row(html.Div("View", className="bm-group-label"), "reset-view"),
                 html.Button("Reset view", id="reset-view", n_clicks=0,
                             className="bm-button",
                             title="Return to the whole map"),
@@ -1140,8 +1158,9 @@ def build_view() -> html.Div:
                 **{"aria-labelledby": "neighborhood-heading"},
                 children=[
                     html.Div(className="bm-neighborhood-head", children=[
-                        html.Div("Neighborhood explorer",
-                                 className="bm-group-label"),
+                        _label_row(html.Div("Neighborhood explorer",
+                                            className="bm-group-label"),
+                                   "neighborhood"),
                         html.Button(
                             "Close", id="neighborhood-close", n_clicks=0,
                             className="bm-neighborhood-close",

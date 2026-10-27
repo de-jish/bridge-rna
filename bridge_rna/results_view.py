@@ -19,6 +19,7 @@ import pandas as pd
 from dash import ALL, ClientsideFunction, Input, Output, State, ctx, dcc, html, no_update
 
 from . import result_plots as P
+from . import help as info_help
 from . import results as R
 from .figures import _empty_network_figure, build_comparison_figure, build_network_figure
 from .similarity import identical_groups
@@ -110,8 +111,11 @@ def build_topk_control() -> Any:
         **{"aria-labelledby": "topk-label"},
         children=[
             html.Div(className="topk-head", children=[
-                html.Label("Number of matches", id="topk-label",
-                           htmlFor="topk-input", className="control-label"),
+                html.Div(className="control-label-row", children=[
+                    html.Label("Number of matches", id="topk-label",
+                               htmlFor="topk-input", className="control-label"),
+                    info_help.info("number-of-matches"),
+                ]),
                 # No min/max here, deliberately: Dash 4 reports a number outside
                 # them as None, so "5000" reached the callback as nothing to
                 # clamp and the next search ran with the default 5. The box
@@ -136,14 +140,23 @@ def build_topk_control() -> Any:
     )
 
 
+def _label_row(label: Any, info: str | None) -> Any:
+    if info is None:
+        return label
+    return html.Div(className="control-label-row",
+                    children=[label, info_help.info(info)])
+
+
 def _filter_group(label_id: str, label: str, *children: Any,
-                  extra_class: str = "", **attrs: Any) -> Any:
+                  extra_class: str = "", info: str | None = None,
+                  **attrs: Any) -> Any:
     return html.Div(
         className="results-filter" + (f" {extra_class}" if extra_class else ""),
         role="group",
         **{"aria-labelledby": label_id},
         **attrs,
-        children=[html.Label(label, id=label_id, className="control-label"), *children],
+        children=[_label_row(html.Label(label, id=label_id, className="control-label"), info),
+                  *children],
     )
 
 
@@ -156,7 +169,8 @@ def build_results_panel() -> Any:
         children=[
             html.Div(className="results-head", children=[
                 html.Div(className="results-heading", children=[
-                    html.H2("Matches", id="results-title", className="panel-title"),
+                    _label_row(html.H2("Matches", id="results-title", className="panel-title"),
+                               "matches"),
                     html.P(id="results-summary", className="panel-subtitle",
                            **{"aria-live": "polite"}),
                 ]),
@@ -167,6 +181,7 @@ def build_results_panel() -> Any:
                     html.Button("Download CSV", id="results-download-button",
                                 n_clicks=0, className="btn-secondary btn-compact",
                                 disabled=True),
+                    info_help.info("download-csv"),
                     dcc.Download(id="results-download"),
                 ]),
             ]),
@@ -176,8 +191,8 @@ def build_results_panel() -> Any:
                     role="group",
                     **{"aria-labelledby": "filter-series-label"},
                     children=[
-                        html.Label("Series", id="filter-series-label",
-                                   className="control-label"),
+                        _label_row(html.Label("Series", id="filter-series-label",
+                                              className="control-label"), "filter-series"),
                         dcc.Dropdown(id="filter-series", multi=True, options=[],
                                      value=[], placeholder="All series",
                                      className="results-dropdown"),
@@ -188,23 +203,25 @@ def build_results_panel() -> Any:
                     dcc.Dropdown(id="filter-tissue", multi=True, options=[],
                                  value=[], placeholder="All",
                                  className="results-dropdown"),
+                    info="filter-tissue",
                 ),
                 _filter_group(
                     "filter-species-label", "Species",
                     dcc.Dropdown(id="filter-species", multi=True, options=[],
                                  value=[], placeholder="All",
                                  className="results-dropdown"),
+                    info="filter-species",
                 ),
                 html.Div(className="results-filter", children=[
-                    html.Label("Minimum score", htmlFor="filter-min-score",
-                               className="control-label"),
+                    _label_row(html.Label("Minimum score", htmlFor="filter-min-score",
+                                          className="control-label"), "filter-min-score"),
                     dcc.Input(id="filter-min-score", type="text", inputMode="decimal",
                               placeholder="Any", debounce=0.4, autoComplete="off",
                               className="results-input results-input--score"),
                 ]),
                 html.Div(className="results-filter results-filter--grow", children=[
-                    html.Label("Text contains", htmlFor="filter-text",
-                               className="control-label"),
+                    _label_row(html.Label("Text contains", htmlFor="filter-text",
+                                          className="control-label"), "filter-text"),
                     dcc.Input(id="filter-text", type="search", debounce=0.3,
                               placeholder="GSM, series, title or source",
                               className="results-input"),
@@ -215,6 +232,7 @@ def build_results_panel() -> Any:
                                    inline=True, options=[],
                                    className="results-seg"),
                     id="filter-retrieved-by-group",
+                    info="filter-retrieved-by",
                     style={"display": "none"},
                     extra_class="results-filter--wide",
                 ),
@@ -261,6 +279,7 @@ def build_plot_panel(graph_legend: Any) -> Any:
                              for k in PLOT_KINDS],
                     className="results-seg results-seg--plot",
                 ),
+                info_help.info("plot-switch"),
                 html.P(id="plot-caption", className="panel-subtitle plot-caption"),
             ]),
             html.Div(id="graph-legend", className="graph-legend",

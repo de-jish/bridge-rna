@@ -125,8 +125,8 @@ def audit(sftp, dest, store):
         before=backup/name;after=dest/name
         if before.is_file() and observed[name]!=meta['files'][name]:
             out=dest.parent/'diffs'/name;out.parent.mkdir(parents=True,exist_ok=True)
-            if name.endswith('.woff2'):
-                out.write_text(f'Binary font changed: {name}\n'
+            if name.endswith(('.woff2', '.webp')):
+                out.write_text(f'Binary file changed: {name}\n'
                                f'server SHA-256: {observed[name]}\n'
                                f'local SHA-256: {meta["files"][name]}\n')
             else:

@@ -54,8 +54,15 @@ def _modules_the_app_loads(root):
                     base='.'.join(parts+([base] if base else []))
                 found.add(base)
                 found|={f'{base}.{a.name}' for a in node.names}
-        strings={n.value.strip() for n in ast.walk(ast.parse(text))
-                 if isinstance(n,ast.Constant) and isinstance(n.value,str)}
+        tree=ast.parse(text)
+        # The "i" explanations cite source files they quote (help._x(path,
+        # ...)); a citation is documentation, not a script the app runs.
+        cited={id(c.args[0]) for c in ast.walk(tree)
+               if isinstance(c,ast.Call) and getattr(c.func,'id',None) in ('_x','Excerpt')
+               and c.args and isinstance(c.args[0],ast.Constant)}
+        strings={n.value.strip() for n in ast.walk(tree)
+                 if isinstance(n,ast.Constant) and isinstance(n.value,str)
+                 and id(n) not in cited}
         found|={m for m,p in mods.items()
                 if p.name in strings or str(p.relative_to(root)) in strings}
         return found&set(mods)
@@ -80,7 +87,7 @@ def test_the_payload_is_exactly_what_the_app_needs():
     root=Path(__file__).resolve().parents[1]
     listed=set(json.loads((root/'deploy/runtime-files.json').read_text()))
     needed=_modules_the_app_loads(root)
-    assets={str(p.relative_to(root)) for pattern in ('assets/*.css','assets/*.js')
+    assets={str(p.relative_to(root)) for pattern in ('assets/*.css','assets/*.js','assets/guide/*.webp')
             for p in root.glob(pattern)}
     assert (needed|assets)-listed==set(), 'the app loads files that are not shipped'
     shipped_python={n for n in listed if n.endswith('.py')
@@ -280,10 +287,14 @@ def test_asset_packaging_does_not_broaden_private_reads(name):
     assert not common.runtime_path(name)
 
 
-def test_audit_records_binary_font_differences(tmp_path):
+@pytest.mark.parametrize("font,previous", [
+    ("assets/fonts/inter/Inter-Regular.woff2", b"wOF2\x80previous-font"),
+    # A guide screenshot replaced in place must be compared as bytes too:
+    # decoding it as text would fail the audit outright.
+    ("assets/guide/map-01-overview.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 \xff\xfe"),
+])
+def test_audit_records_binary_asset_differences(tmp_path, font, previous):
     dest = ship.build(tmp_path)
-    font = "assets/fonts/inter/Inter-Regular.woff2"
-    previous = b"wOF2\x80previous-font"
     class FakeSFTP:
         def checked(self, name, missing=False):
             return {} if name == font else None

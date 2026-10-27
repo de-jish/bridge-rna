@@ -31,6 +31,29 @@ STATIC_ASSETS = {
     'assets/fonts/public-sans/PublicSans-Medium.woff2',
     'assets/fonts/public-sans/PublicSans-SemiBold.woff2',
     'assets/fonts/public-sans/PublicSans-Bold.woff2',
+    # The guided tour's screenshots (bridge_rna/guide.py SLIDES), made by
+    # tests/guide_screenshots.py. Listed by exact name like the fonts, so the
+    # transfer boundary never widens to "any file under assets/guide".
+    'assets/guide/retrieve-01-sample.webp',
+    'assets/guide/retrieve-02-search.webp',
+    'assets/guide/retrieve-03-table.webp',
+    'assets/guide/retrieve-04-filter.webp',
+    'assets/guide/retrieve-05-inspect.webp',
+    'assets/guide/retrieve-06-geo.webp',
+    'assets/guide/retrieve-07-plots.webp',
+    'assets/guide/retrieve-08-cohort.webp',
+    'assets/guide/retrieve-09-upload.webp',
+    'assets/guide/retrieve-10-export.webp',
+    'assets/guide/retrieve-11-map.webp',
+    'assets/guide/retrieve-12-neighborhood.webp',
+    'assets/guide/map-01-overview.webp',
+    'assets/guide/map-02-projection.webp',
+    'assets/guide/map-03-3d.webp',
+    'assets/guide/map-04-color.webp',
+    'assets/guide/map-05-points.webp',
+    'assets/guide/map-06-find.webp',
+    'assets/guide/map-07-select.webp',
+    'assets/guide/map-08-reset.webp',
 }
 
 

@@ -16,6 +16,7 @@ from typing import Any
 from dash import dcc, html
 
 from . import cohorts as C
+from . import help as info_help
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
 from .osdr import _eligible_osdr_count, load_osdr_samples
 from .panels import build_gene_list_banner, build_setup_banner
@@ -24,7 +25,18 @@ from .retrieval import _archs4_sample_count
 from .util import _safe_str
 
 
-def _labelled(label_id: str, label: Any, *children: Any) -> Any:
+def _label_row(label: Any, info: str | None) -> Any:
+    """A label with its "i" beside it. The button sits next to the label, never
+    inside it, so clicking the label text does not open the explanation and the
+    button's name is not folded into the control's."""
+    if info is None:
+        return label
+    return html.Div(className="control-label-row",
+                    children=[label, info_help.info(info)])
+
+
+def _labelled(label_id: str, label: Any, *children: Any,
+              info: str | None = None) -> Any:
     """A control and the label that names it, tied together for a screen reader.
 
     Dash 4 renders a Dropdown as a button named by its own *value*
@@ -43,7 +55,7 @@ def _labelled(label_id: str, label: Any, *children: Any) -> Any:
         role="group",
         **{"aria-labelledby": label_id},
         children=[
-            html.Label(label, id=label_id, className="control-label"),
+            _label_row(html.Label(label, id=label_id, className="control-label"), info),
             *children,
         ],
     )
@@ -121,7 +133,7 @@ def build_mode_switch(active: str = DEFAULT_QUERY_MODE) -> Any:
     on Dash's internal class names, which changed under us once already between
     major versions.
     """
-    return html.Div(
+    tabs = html.Div(
         className="mode-switch",
         role="tablist",
         **{"aria-label": "Query source"},
@@ -138,6 +150,9 @@ def build_mode_switch(active: str = DEFAULT_QUERY_MODE) -> Any:
             for m in QUERY_MODES
         ],
     )
+    # Beside the tablist rather than in it: a tablist may only own tabs.
+    return html.Div(className="mode-switch-row",
+                    children=[tabs, info_help.info("query-source")])
 
 
 def build_cohort_facet_chips() -> Any:
@@ -190,11 +205,13 @@ def build_cohort_panel() -> Any:
                 # definition produced, so it belongs here and not in a
                 # summary elsewhere.
                 html.Div(id="cohort-facet-summary", className="facet-summary"),
+                info="group-by",
             ),
             _labelled(
                 "cohort-dropdown-label", "Cohort",
                 dcc.Dropdown(id="cohort-dropdown", clearable=False,
                              placeholder="Select a cohort"),
+                info="cohort",
             ),
             html.Div(id="cohort-card", className="cohort-card-slot"),
             html.Details(
@@ -206,9 +223,12 @@ def build_cohort_panel() -> Any:
                     html.Div(
                         className="cohort-members-body",
                         children=[
-                            html.Div(
-                                "Clear a sample to exclude it from the pooled query.",
-                                className="control-hint"),
+                            html.Div(className="control-label-row", children=[
+                                html.Div(
+                                    "Clear a sample to exclude it from the pooled query.",
+                                    className="control-hint"),
+                                info_help.info("cohort-members"),
+                            ]),
                             dcc.Checklist(id="cohort-members",
                                           className="member-list",
                                           options=[], value=[]),
@@ -223,6 +243,7 @@ def build_cohort_panel() -> Any:
                 dcc.Dropdown(id="cohort-compare-dropdown", clearable=True,
                              placeholder="No comparison"),
                 html.Div(id="cohort-compare-hint", className="control-hint"),
+                info="compare-against",
             ),
             # The second pooled query gets its own card, under its own picker,
             # for the same reason the first one sits under the cohort dropdown:
@@ -312,8 +333,10 @@ def build_view() -> html.Div:
                                         role="group",
                                         **{"aria-labelledby": "study-dropdown-label"},
                                         children=[
-                                            html.Label("OSDR study", id="study-dropdown-label",
-                                                       className="control-label"),
+                                            _label_row(
+                                                html.Label("OSDR study", id="study-dropdown-label",
+                                                           className="control-label"),
+                                                "osdr-study"),
                                             dcc.Dropdown(
                                                 id="study-dropdown",
                                                 options=[{"label": s, "value": s} for s in study_options],
@@ -330,6 +353,7 @@ def build_view() -> html.Div:
                                             _labelled(
                                                 "sample-dropdown-label", "OSDR sample",
                                                 dcc.Dropdown(id="sample-dropdown", clearable=False),
+                                                info="osdr-sample",
                                             ),
                                             html.Div(id="sample-preview", className="sample-preview"),
                                         ],
@@ -341,6 +365,9 @@ def build_view() -> html.Div:
                                         role="tabpanel",
                                         style={"display": "none"},
                                         children=[
+                                            _label_row(
+                                                html.Div("Counts file", className="control-label"),
+                                                "upload-counts"),
                                             dcc.Upload(
                                                 id="upload-counts",
                                                 className="upload-dropzone",
@@ -401,11 +428,11 @@ def build_view() -> html.Div:
                                                     # itself, so a real label
                                                     # association is available
                                                     # here and is stronger.
-                                                    html.Label(
+                                                    _label_row(html.Label(
                                                         "Email for NCBI lookups",
                                                         htmlFor="entrez-email-input",
                                                         className="control-label",
-                                                    ),
+                                                    ), "metadata-options"),
                                                     dcc.Input(
                                                         id="entrez-email-input",
                                                         type="email",
@@ -534,6 +561,10 @@ def build_view() -> html.Div:
                                     html.Summary(
                                         "AI summary", className="advanced-summary",
                                     ),
+                                    html.Div(className="control-label-row", children=[
+                                        html.Span("About this summary", className="control-hint"),
+                                        info_help.info("ai-summary"),
+                                    ]),
                                     html.P(
                                         "Generated interpretation of the primary query and its matches. "
                                         "Check claims against the source records; similarity does not establish a shared mechanism.",

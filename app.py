@@ -24,6 +24,8 @@ import sys
 from dash import Dash, Input, Output, State, dcc, html, no_update
 
 from bridge_rna import callbacks as rna_callbacks
+from bridge_rna import guide as rna_guide
+from bridge_rna import help as rna_help
 from bridge_rna import layout as rna_layout
 from bridge_rna.config import ROOT
 from bridge_rna.util import _format_count
@@ -123,6 +125,7 @@ def header(active: str) -> html.Header:
                     ),
                 ],
             ),
+            rna_guide.guide_button(),
         ],
     )
 
@@ -214,6 +217,13 @@ def build_app() -> Dash:
                 # above. The router compares against this so it can decline to
                 # repaint a view that is already on screen - see `render_page`.
                 dcc.Store(id="route-store", data=route["key"]),
+                # In-app help. Both sit beside the two replaceable slots rather
+                # than in them, so a route change cannot destroy an open guide
+                # or the explanations an open popover was copied from. Neither
+                # is touched by a callback; `assets/info-popover.js` and
+                # `assets/guide.js` own everything about them that changes.
+                rna_help.library(),
+                rna_guide.build_guide(),
             ],
         )
 
