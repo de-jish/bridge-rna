@@ -187,11 +187,17 @@
     }
   }, true);
 
+  // Dismissed by the page moving rather than by the reader: if the reader's
+  // focus was in the popover, it goes back to the button, not to <body>.
+  function closeKeepingPlace() {
+    close(!!pop && pop.contains(document.activeElement));
+  }
+
   window.addEventListener("scroll", function (event) {
     if (pop && !pop.hidden && !(event.target instanceof Node && pop.contains(event.target))) {
-      close(false);
+      closeKeepingPlace();
     }
   }, true);
 
-  window.addEventListener("resize", function () { close(false); });
+  window.addEventListener("resize", closeKeepingPlace);
 })();

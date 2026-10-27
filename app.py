@@ -133,6 +133,7 @@ def header(active: str) -> html.Header:
 def map_unavailable_view() -> html.Div:
     """What `/map` shows on a clone whose precompute has not been run."""
     return html.Div(
+        id="map-unavailable",
         className="app-root",
         children=[
             html.Div(

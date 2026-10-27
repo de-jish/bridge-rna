@@ -24,6 +24,7 @@
  * is not ready within a bounded wait, or if the reader starts using the page
  * first, and it records the visit only once it has really opened. A blocked
  * localStorage means it never opens by itself, which is the safe failure.
+ * Nor does it open by itself in an automated browser (`navigator.webdriver`).
  */
 (function () {
   "use strict";
@@ -187,9 +188,10 @@
     }
     var skeleton = document.getElementById("map-skeleton");
     if (skeleton) return skeleton.classList.contains("is-done");
-    // No skeleton: the map is unavailable on this machine and its explanation
-    // is what is on screen, which is as ready as that page gets.
-    return !!document.querySelector(".page-content, #page-content > *");
+    // No skeleton yet is not "no map": Dash can drop its loading node a beat
+    // before the view mounts. Only the explanation the shell draws when this
+    // machine has no map cache counts as ready without a figure.
+    return !!document.getElementById("map-unavailable");
   }
 
   function cancelAutoOpen() {
@@ -201,7 +203,10 @@
   }
 
   function scheduleAutoOpen() {
-    if (seen()) return;
+    // An automated browser - the test suites, the screenshot scripts - is not
+    // a first-time reader, and a modal opening over it would make the page it
+    // is driving inert.
+    if (seen() || navigator.webdriver) return;
     var started = Date.now();
     document.addEventListener("pointerdown", cancelAutoOpen, true);
     document.addEventListener("keydown", cancelAutoOpen, true);

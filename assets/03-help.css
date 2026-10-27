@@ -294,7 +294,9 @@
 .guide-close:hover { background: var(--control-hover-fill); color: var(--text-primary); }
 .guide-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 0; }
 
-.guide-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Scrolls only when even a fully shrunk screenshot leaves the words no room
+   (a very short window); otherwise the image gives way first. */
+.guide-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .guide-chapter { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .guide-chapter:not([data-current]),
 .guide-slide:not([data-current]) { display: none; }

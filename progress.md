@@ -6,6 +6,18 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-27 (in-app help: "i" explanations and a guided tour)
+
+**"i" explanations.** Thirty-two small "i" buttons across both views, beside the controls, filters, plot switch, inspector, AI summary, map rail and neighborhood explorer. Each opens a short plain explanation and, where it helps, the real lines of code behind the feature with the file they come from. Joshua asked for many so he can prune them; removing one is deleting one `info(...)` call. `tests/test_help.py` requires every quoted block to appear contiguously and in order in the cited file, so an explanation can never show code the app no longer runs. The explanations render once on the shell and `assets/info-popover.js` shows one in a body-level popover, which no scroll container can clip and which never rewrites a Dash node.
+
+**The guided tour.** "How it works" in the header opens a native dialog with two chapters, "Sample to map" (12 slides: sample, search, table, filters, inspector, GEO, plots, cohort, upload, export, map, neighborhood explorer) and "Explore the map" (8). It opens at the chapter for the current page, and once by itself on a first visit, after the page has drawn (on the map, after the first figure). It does not open by itself in an automated browser. The screenshots are real captures made by `tests/guide_screenshots.py`, each spotlighting its feature; they load only when their slide is shown. Rerun the script after any interface change; `docs/guide-screenshots.json` records the commit they show.
+
+**Shipping.** The images ship by exact name (`deploy/common.STATIC_ASSETS`, `deploy/runtime-files.json`), and `deploy/ship.py`'s pre-transfer audit now compares WebP files as bytes; before, replacing a screenshot already on the server would have failed while decoding it as text.
+
+**Found along the way.** The phone header wrapped "Bridge RNA" onto two lines once the guide button joined it; the header now uses a 16 px gutter and 12 px gaps below 640 px. Codex assessed the plan before building and reviewed the result; three of its four findings were fixed and the fourth was already covered (`docs/help-and-guide.md`). A new browser suite, `tests/e2e_help_check.py` (45 checks), caught the tour opening over a cold map a beat before its view mounted; fixed. All seven browser suites pass: 618 checks.
+
+**Disk.** 9.9 GB free, under the 15 GB floor. Nothing safe was left to clear: DerivedData is empty, npm and brew were cleaned, and both iOS DeviceSupport folders (12 GB) match the iPhone's and iPad's current OS versions. A stray `app.py --port 8200` from five days ago is still running and was left alone.
+
 ## 2026-10-22, evening (skeleton loading; table fit; vector separation answer)
 
 **Skeleton loading.** The map passed through Dash's bare "Loading..." text and then Plotly's default white axes (-1 to 6) before its figure. The page template now draws a skeleton of the shell while Dash boots (route-aware: navy canvas and key for `/map`, results and inspector panels for `/`), and the map's graph starts on a navy placeholder figure under a skeleton of its badges and key that a clientside callback hides when the real figure lands. Design notes: `docs/design-notes.md#loading-skeletons-2026-10-22`.

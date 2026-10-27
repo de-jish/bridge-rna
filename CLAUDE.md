@@ -20,7 +20,7 @@ reintroduce its panel, warnings, or payload. Executed membership remains a discl
 `app.py` is the single entry point and owns the header and the router.
 **The router must decline to repaint a route that is already on screen.** `serve_layout` paints the requested view server-side, but `dcc.Location` publishes `pathname` once it mounts and Dash reads that as a change, so `prevent_initial_call` alone let the router rebuild the view on every load. Rebuilding the retrieval view reads the OSDR catalog, so its response landed a few hundred milliseconds later, on top of whatever the user had done meanwhile - clicking Cohort on arrival opened the cohort panel and then closed it again, 6 times out of 6, while the click's own callback had returned the right answer. `route-store` records what was painted and `app.navigation_for` is the decision, split out so it is testable without Dash plumbing. There is no `app_osdr_dash.py` and no `app_manifold.py`; both were deleted when the two repositories merged on 2026-07-22, and the map's 19 commits are in this history.
 
-**Current state: built, run on the real corpus, and tested.** 941 tests pass in about a minute, plus 573 browser checks: 217 in `tests/e2e_check.py`, 191 in `tests/e2e_cohort_check.py`, 70 in `tests/e2e_upload_check.py`, 59 in `tests/e2e_results_check.py`, 33 in `tests/e2e_network_style.py`, and 3 in `tests/e2e_cleanup_check.py` (re-measured 2026-10-22 by running every suite except the upload suite, which no change touched).
+**Current state: built, run on the real corpus, and tested.** 1,001 tests pass in about a minute, plus 618 browser checks: 217 in `tests/e2e_check.py`, 191 in `tests/e2e_cohort_check.py`, 70 in `tests/e2e_upload_check.py`, 59 in `tests/e2e_results_check.py`, 45 in `tests/e2e_help_check.py`, 33 in `tests/e2e_network_style.py`, and 3 in `tests/e2e_cleanup_check.py` (re-measured 2026-10-27 by running every suite).
 Each browser suite counts and prints what it actually ran, because the documented totals were hand-written and had drifted - and they drifted again, which is why these were re-measured by running every suite rather than by adding up the last recorded numbers.
 **The last two take a `--url` or `--port` and do not start their own server**, so they are the two that silently go unrun; both were stale when this was written.
 The ARCHS4 GEO metadata join is built (`cache/archs4_metadata.parquet`, 940,455 rows, 51,284 distinct GEO series), so the map colors by tissue across both corpora rather than by species alone.
@@ -423,11 +423,13 @@ Run the pipeline in this order; `fetch_archs4_meta.py` joins onto the identity t
 /Users/josh/Bridge-RNA/.venv/bin/python tests/check_join.py              # the join, on the real corpus
 /Users/josh/Bridge-RNA/.venv/bin/python app.py                          # http://127.0.0.1:8000
 
-/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 941 tests, about a minute
+/Users/josh/Bridge-RNA/.venv/bin/python -m pytest tests/ -q              # 1,001 tests, about a minute
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_check.py               # 217 browser checks, about five minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_upload_check.py        # 70 upload checks, about eight minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_cohort_check.py        # 191 cohort checks, about five minutes
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_results_check.py       # 59 results-view checks, about five minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_help_check.py          # 45 help and guide checks, about four minutes
+/Users/josh/Bridge-RNA/.venv/bin/python tests/guide_screenshots.py       # rewrites the guide's 20 screenshots, about four minutes
 
 # These two need an app already running, and default to :8000 now that app.py does.
 /Users/josh/Bridge-RNA/.venv/bin/python tests/e2e_network_style.py --port 8000   # 33 checks
@@ -458,6 +460,23 @@ Every build stage ends with an **objective validation**, not a visual glance: di
 That mixing check is not a lasso remnant; it is the honesty check behind the app's premise, and it must keep working.
 `validate_artifacts.py --quality` scores every coordinate set on 15-NN recall against the exact 512-d neighbours and on 25-NN tissue purity, each against a null, and `--compare DIR` scores a second set of coordinate parquets alongside so a candidate build can be held against the shipped one.
 Structural checks pass for any set of finite numbers, so they cannot tell a good projection from a scrambled one; that is what the quality check is for.
+
+## In-app help: the "i" explanations and the guided tour (2026-10-27)
+
+Joshua asked for many "i" icons, each showing a plain explanation and a couple of lines of real code, and a centered slide-by-slide tour of the typical flow; he will prune the icons he finds unnecessary.
+Design, decisions and Codex's two reviews: [`docs/help-and-guide.md`](docs/help-and-guide.md).
+
+Five things about it are load-bearing.
+
+**Every excerpt is real code, and `tests/test_help.py` keeps it that way.** An excerpt in `bridge_rna/help.py` is blocks of lines separated by `...`; each block must appear in its cited file as consecutive lines (indentation aside) and the blocks in order. Editing a quoted line in the source fails the test until the excerpt is updated, which is the point: an explanation must never show code the app no longer runs. Negative cases pin the validator itself, so it cannot be weakened to line-by-line matching unnoticed.
+
+**An "i" is only a button carrying a key; the explanations render once, on the shell.** `help.library()` sits beside the header and view slots in `app.py`, and `assets/info-popover.js` copies one entry into a single popover it creates on `<body>`. Do not render a panel beside each button: every scroll container on both views would clip it, and a key used twice would duplicate ids. The script never rewrites a Dash node; it owns only its popover and the button's `aria-expanded`/`aria-controls`. Removing an explanation is deleting its `info(...)` call; `tests/test_help.py` fails if an entry is placed nowhere. Inspector entries sit on each record's first section title (`panels._detail_section(info=...)`), because the head above has no room beside the cosine badge.
+
+**The tour is a native `<dialog>` on the shell, and `assets/guide.js` owns everything that changes on it.** Dash sets none of `data-current`, `aria-selected`, the counter or the images' `src`; screenshots load from `data-src` only when their slide is shown. It opens by itself once on a first visit and only after the page has drawn (on the map, after the first figure), never after the reader has started clicking, and **never in an automated browser** (`navigator.webdriver`): every browser suite starts from a fresh profile, and a modal would make the page it drives inert.
+
+**The screenshots are made only by `tests/guide_screenshots.py`. Rerun it after any interface change.** It walks both flows on the real corpus and writes 1440 x 900 WebP frames to `assets/guide/`, each spotlighting its feature, plus `docs/guide-screenshots.json` with the commit they show. CDP's clip `scale` ignores the device scale factor, which once produced 960 x 600 frames that looked fine and were soft on Retina; `tests/test_guide.py` checks the size.
+
+**The images ship by exact name.** A slide added or removed must be reflected in `deploy/common.STATIC_ASSETS` and `deploy/runtime-files.json`; `tests/test_guide.py` requires the three lists to agree, and `deploy/ship.py`'s audit compares `.webp` as bytes.
 
 ## Visual language
 

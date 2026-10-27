@@ -76,6 +76,7 @@ An independent assessment by Codex before building changed four things, recorded
   It opens once, for the page you landed on, only after that page has drawn: the boot skeleton gone, and on the map the first figure in place.
   It polls for that every 250 ms for at most 30 s, gives up if the reader starts clicking or typing first, and records the visit only after it has really opened.
   `localStorage` is wrapped in try/catch; a blocked store means it never opens by itself, which is the safe failure.
+  It never opens by itself in an automated browser (`navigator.webdriver`): a modal over a test suite makes the page it drives inert, and every existing browser suite starts from a fresh profile.
   Codex's point that "Dash has mounted" is not "the map is ready" is why the map waits on its own skeleton.
 - **Motion**: the dialog fades and rises 8 px on open and slides cross-fade; the popover fades 4 px from its side.
   All of it is off under reduced motion.
@@ -98,6 +99,21 @@ Each is listed in `deploy/common.STATIC_ASSETS` and `deploy/runtime-files.json`,
 `deploy/ship.py`'s pre-transfer audit used to treat only `.woff2` as binary, so replacing a screenshot already on the server would have failed while decoding it as text; it now records WebP changes by hash, and a test covers it.
 The new Python, CSS and JS files are listed too, and the existing payload test now also requires every guide image to be shipped.
 
+### What Codex's review of the build changed
+
+- Scroll and resize dismissal now return focus to the button when it was inside the popover; before, a keyboard reader lost their place.
+- The guide body scrolls when even a fully shrunk screenshot leaves the words no room, so a very short window cannot cut a slide's text off.
+- The excerpt validator gained negative cases (a silent skip, reordered blocks, an invented or edited line), so it cannot be weakened unnoticed.
+- Its point that readiness and cancellation lacked behavioral tests was already answered by `tests/e2e_help_check.py`, written after the review was requested.
+  That suite then caught a real race of its own: on a cold `/map`, Dash can drop its loading node a beat before the view mounts, and the first readiness check read "no skeleton" as "no map" and opened the tour over a blank canvas.
+  Readiness now needs the first figure, or the explicit `#map-unavailable` view.
+
+### Verification
+
+- `tests/test_help.py` (excerpts, placement, labels) and `tests/test_guide.py` (every slide's image exists at the reserved size, no orphans, the allowlist matches, the dialog sits outside the replaced slots).
+- `tests/e2e_help_check.py`, 45 browser checks with its own server: popover focus, Esc, Tab, outside click, scroll, one at a time, route round trips with a popover open, the callback-rendered inspector entry; the tour's first-visit opening on both routes, waiting for the map's first figure, cancelling on early interaction, opening only once, blocked storage, keyboard, focus return, reduced motion and the phone header.
+- Checked by eye at 1440 x 900, 1280 x 720 and 375 x 812.
+
 ## Tradeoffs
 
 - **Screenshots go stale as the interface changes.**
@@ -114,5 +130,6 @@ The new Python, CSS and JS files are listed too, and the existing payload test n
 - [x] "i" icons placed across Retrieve and Map
 - [x] Guide content, modal, script and header button
 - [x] Screenshot capture script and images
-- [ ] Deploy allowlist, browser checks, docs
-- [ ] Codex review, fixes, ship
+- [x] Deploy allowlist, browser checks, docs
+- [x] Codex review and fixes
+- [ ] Ship to the NASA server (waiting on Joshua)

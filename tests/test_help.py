@@ -38,6 +38,35 @@ def _find_block(source: list[str], block: list[str], start: int) -> int:
     return -1
 
 
+def _excerpt_matches(source: list[str], lines: tuple[str, ...]) -> bool:
+    position = 0
+    for block in _blocks(lines):
+        position = _find_block(source, block, position)
+        if position < 0:
+            return False
+    return True
+
+
+SOURCE = ["def f(x):", "a = 1", "b = 2", "c = 3", "return a + b + c"]
+
+
+@pytest.mark.parametrize("lines,ok", [
+    (("a = 1", "b = 2"), True),                      # contiguous
+    (("    a = 1", "b = 2   "), True),               # indentation aside
+    (("a = 1", "...", "c = 3"), True),               # elision, in order
+    (("a = 1", "c = 3"), False),                     # skips a line without saying so
+    (("c = 3", "...", "a = 1"), False),              # blocks out of order
+    (("a = 1", "d = 4"), False),                     # an invented line
+    (("a = 1 ",), True),
+    (("a = 2",), False),                             # an edited line
+], ids=["contiguous", "indent", "elided", "silent-skip", "reordered", "invented",
+        "trailing-space", "edited"])
+def test_the_validator_rejects_fabricated_excerpts(lines, ok):
+    """Weakening the check (lines found independently, order ignored) must fail
+    here, not only let a future bad excerpt through."""
+    assert _excerpt_matches(SOURCE, lines) is ok
+
+
 EXCERPTS = [(key, excerpt) for key, entry in info_help.ENTRIES.items()
             for excerpt in entry.code]
 
@@ -48,13 +77,9 @@ def test_every_excerpt_is_contiguous_ordered_source(key, excerpt):
     path = ROOT / excerpt.path
     assert path.is_file(), f"{key} cites a missing file: {excerpt.path}"
     source = [line.strip() for line in path.read_text().splitlines()]
-    position = 0
-    for block in _blocks(excerpt.lines):
-        found = _find_block(source, block, position)
-        assert found >= 0, (f"{key}: these lines are not consecutive in "
-                            f"{excerpt.path} after line {position}:\n"
-                            + "\n".join(block))
-        position = found
+    assert _excerpt_matches(source, excerpt.lines), (
+        f"{key}: not consecutive, ordered source in {excerpt.path}:\n"
+        + "\n".join(excerpt.lines))
 
 
 def test_excerpts_are_short_and_well_formed():
