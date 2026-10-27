@@ -1,0 +1,771 @@
+method,bench,tissue,n,knn_acc,precision,null_acc
+raw,A,Adipose,300,0.8083,0.7317,0.0167
+raw,A,Adrenal gland,300,0.6850,0.6763,0.0367
+raw,A,Bladder,300,0.5050,0.4310,0.0233
+raw,A,Blood / immune,300,0.8811,0.8437,0.0400
+raw,A,Bone / cartilage,300,0.5194,0.4357,0.0450
+raw,A,Bone marrow,300,0.6517,0.6023,0.0167
+raw,A,Brain / CNS,300,0.8700,0.8003,0.0200
+raw,A,Breast / mammary,300,0.7517,0.6870,0.0100
+raw,A,Cell line,300,0.3056,0.3027,0.0167
+raw,A,Cultured cells,300,0.1917,0.1833,0.0228
+raw,A,Embryo / stem cell,300,0.8225,0.7383,0.0233
+raw,A,Esophagus,300,0.3775,0.3300,0.0194
+raw,A,Eye,300,0.7625,0.7127,0.0317
+raw,A,Heart,300,0.9058,0.8557,0.0458
+raw,A,Intestine,300,0.8300,0.7253,0.0217
+raw,A,Kidney,300,0.8706,0.8067,0.0250
+raw,A,Liver,300,0.8850,0.8460,0.0392
+raw,A,Lung,300,0.7550,0.6927,0.0300
+raw,A,Lymph node,300,0.1894,0.1773,0.0217
+raw,A,Nerve / spinal cord,300,0.5117,0.5090,0.0200
+raw,A,Ovary,300,0.7150,0.6383,0.0200
+raw,A,Pancreas,300,0.6800,0.6350,0.0400
+raw,A,Pituitary,300,0.6383,0.5393,0.0233
+raw,A,Placenta,300,0.8367,0.7683,0.0250
+raw,A,Prostate,300,0.8561,0.7740,0.0267
+raw,A,Reference RNA,300,0.3250,0.2097,0.0200
+raw,A,Salivary gland,300,0.4247,0.2857,0.0233
+raw,A,Skeletal muscle,300,0.9078,0.8463,0.0267
+raw,A,Skin,300,0.6636,0.5753,0.0233
+raw,A,Spleen,300,0.4828,0.4483,0.0100
+raw,A,Stomach,300,0.5056,0.4347,0.0256
+raw,A,Testis,300,0.8617,0.7977,0.0167
+raw,A,Thymus,300,0.5894,0.4970,0.0206
+raw,A,Thyroid,300,0.5344,0.4423,0.0350
+raw,A,Tumor / cancer,300,0.4800,0.3907,0.0200
+raw,A,Uterus,300,0.6167,0.5580,0.0289
+raw,A,Vasculature,300,0.6422,0.5737,0.0233
+raw,B,Adipose,48,1.0000,1.0000,0.0208
+raw,B,Adrenal gland,56,0.9911,0.9839,0.0357
+raw,B,Bone / cartilage,36,0.9028,0.6000,0.0278
+raw,B,Bone marrow,24,1.0000,0.9417,0.0000
+raw,B,Brain / CNS,159,0.9969,0.9667,0.0818
+raw,B,Breast / mammary,43,0.8953,0.6721,0.0233
+raw,B,Cultured cells,18,0.0000,0.0000,0.2222
+raw,B,Eye,72,1.0000,1.0000,0.0139
+raw,B,Heart,89,1.0000,0.9955,0.0899
+raw,B,Intestine,93,1.0000,0.9785,0.0323
+raw,B,Kidney,264,1.0000,0.9943,0.1402
+raw,B,Liver,392,0.9974,0.9883,0.1939
+raw,B,Lung,86,0.9767,0.9407,0.0581
+raw,B,Skeletal muscle,229,0.9454,0.8044,0.0830
+raw,B,Skin,219,0.9863,0.8242,0.1233
+raw,B,Spleen,131,0.9695,0.9145,0.0840
+raw,B,Thymus,149,0.6711,0.6094,0.0671
+raw,C,replicates,14085,0.1366,0.1249,
+abtt1,A,Adipose,300,0.8067,0.7303,0.0167
+abtt1,A,Adrenal gland,300,0.7283,0.7110,0.0333
+abtt1,A,Bladder,300,0.5378,0.4667,0.0233
+abtt1,A,Blood / immune,300,0.8839,0.8427,0.0433
+abtt1,A,Bone / cartilage,300,0.5250,0.4413,0.0500
+abtt1,A,Bone marrow,300,0.6650,0.6097,0.0167
+abtt1,A,Brain / CNS,300,0.8633,0.8010,0.0200
+abtt1,A,Breast / mammary,300,0.7750,0.7060,0.0100
+abtt1,A,Cell line,300,0.3167,0.3170,0.0200
+abtt1,A,Cultured cells,300,0.2367,0.1897,0.0167
+abtt1,A,Embryo / stem cell,300,0.8250,0.7390,0.0233
+abtt1,A,Esophagus,300,0.4447,0.3673,0.0283
+abtt1,A,Eye,300,0.7592,0.7220,0.0333
+abtt1,A,Heart,300,0.9011,0.8643,0.0433
+abtt1,A,Intestine,300,0.8417,0.7473,0.0233
+abtt1,A,Kidney,300,0.8783,0.8107,0.0183
+abtt1,A,Liver,300,0.8850,0.8573,0.0383
+abtt1,A,Lung,300,0.7689,0.7117,0.0300
+abtt1,A,Lymph node,300,0.2278,0.1970,0.0217
+abtt1,A,Nerve / spinal cord,300,0.5278,0.5120,0.0211
+abtt1,A,Ovary,300,0.7617,0.6753,0.0167
+abtt1,A,Pancreas,300,0.7172,0.6593,0.0350
+abtt1,A,Pituitary,300,0.6583,0.5423,0.0183
+abtt1,A,Placenta,300,0.8350,0.7777,0.0283
+abtt1,A,Prostate,300,0.8450,0.7760,0.0300
+abtt1,A,Reference RNA,300,0.3108,0.2050,0.0292
+abtt1,A,Salivary gland,300,0.5150,0.3557,0.0278
+abtt1,A,Skeletal muscle,300,0.9067,0.8537,0.0267
+abtt1,A,Skin,300,0.7017,0.6077,0.0250
+abtt1,A,Spleen,300,0.5072,0.4657,0.0111
+abtt1,A,Stomach,300,0.5383,0.4780,0.0278
+abtt1,A,Testis,300,0.8733,0.8077,0.0167
+abtt1,A,Thymus,300,0.6100,0.5227,0.0183
+abtt1,A,Thyroid,300,0.5683,0.4717,0.0300
+abtt1,A,Tumor / cancer,300,0.4850,0.4060,0.0233
+abtt1,A,Uterus,300,0.6478,0.5953,0.0250
+abtt1,A,Vasculature,300,0.6583,0.5923,0.0300
+abtt1,B,Adipose,48,1.0000,1.0000,0.0208
+abtt1,B,Adrenal gland,56,1.0000,0.9893,0.0357
+abtt1,B,Bone / cartilage,36,0.9722,0.8222,0.0278
+abtt1,B,Bone marrow,24,1.0000,0.9708,0.0000
+abtt1,B,Brain / CNS,159,1.0000,0.9824,0.0818
+abtt1,B,Breast / mammary,43,0.8721,0.6860,0.0233
+abtt1,B,Cultured cells,18,0.0000,0.0000,0.2222
+abtt1,B,Eye,72,1.0000,1.0000,0.0139
+abtt1,B,Heart,89,1.0000,0.9978,0.0899
+abtt1,B,Intestine,93,1.0000,0.9882,0.0323
+abtt1,B,Kidney,264,1.0000,0.9977,0.1402
+abtt1,B,Liver,392,0.9974,0.9885,0.1939
+abtt1,B,Lung,86,0.9767,0.9430,0.0581
+abtt1,B,Skeletal muscle,229,0.9541,0.8214,0.0852
+abtt1,B,Skin,219,0.9863,0.8114,0.1233
+abtt1,B,Spleen,131,0.9847,0.9481,0.0840
+abtt1,B,Thymus,149,0.7506,0.5852,0.0570
+abtt1,C,replicates,14085,0.1892,0.1668,
+abtt2,A,Adipose,300,0.8067,0.7350,0.0167
+abtt2,A,Adrenal gland,300,0.7267,0.7180,0.0333
+abtt2,A,Bladder,300,0.5581,0.4883,0.0294
+abtt2,A,Blood / immune,300,0.8828,0.8447,0.0433
+abtt2,A,Bone / cartilage,300,0.5250,0.4387,0.0467
+abtt2,A,Bone marrow,300,0.6606,0.6033,0.0167
+abtt2,A,Brain / CNS,300,0.8444,0.7977,0.0200
+abtt2,A,Breast / mammary,300,0.7889,0.7170,0.0100
+abtt2,A,Cell line,300,0.3100,0.3080,0.0200
+abtt2,A,Cultured cells,300,0.2433,0.1933,0.0133
+abtt2,A,Embryo / stem cell,300,0.8217,0.7333,0.0217
+abtt2,A,Esophagus,300,0.4642,0.3860,0.0300
+abtt2,A,Eye,300,0.7650,0.7263,0.0333
+abtt2,A,Heart,300,0.9117,0.8710,0.0433
+abtt2,A,Intestine,300,0.8161,0.7353,0.0200
+abtt2,A,Kidney,300,0.8667,0.8080,0.0200
+abtt2,A,Liver,300,0.8900,0.8587,0.0367
+abtt2,A,Lung,300,0.7800,0.7157,0.0267
+abtt2,A,Lymph node,300,0.2375,0.2047,0.0167
+abtt2,A,Nerve / spinal cord,300,0.5400,0.5210,0.0183
+abtt2,A,Ovary,300,0.7650,0.6860,0.0167
+abtt2,A,Pancreas,300,0.7086,0.6597,0.0300
+abtt2,A,Pituitary,300,0.6683,0.5567,0.0183
+abtt2,A,Placenta,300,0.8500,0.7930,0.0250
+abtt2,A,Prostate,300,0.8400,0.7830,0.0283
+abtt2,A,Reference RNA,300,0.3150,0.2367,0.0250
+abtt2,A,Salivary gland,300,0.5283,0.3610,0.0267
+abtt2,A,Skeletal muscle,300,0.9100,0.8597,0.0267
+abtt2,A,Skin,300,0.7069,0.6210,0.0267
+abtt2,A,Spleen,300,0.5017,0.4777,0.0117
+abtt2,A,Stomach,300,0.5467,0.4860,0.0278
+abtt2,A,Testis,300,0.8833,0.8187,0.0167
+abtt2,A,Thymus,300,0.6217,0.5067,0.0200
+abtt2,A,Thyroid,300,0.5744,0.4753,0.0367
+abtt2,A,Tumor / cancer,300,0.4778,0.4153,0.0200
+abtt2,A,Uterus,300,0.6328,0.5957,0.0250
+abtt2,A,Vasculature,300,0.6656,0.5990,0.0283
+abtt2,B,Adipose,48,1.0000,1.0000,0.0208
+abtt2,B,Adrenal gland,56,1.0000,0.9875,0.0357
+abtt2,B,Bone / cartilage,36,0.9722,0.8278,0.0278
+abtt2,B,Bone marrow,24,1.0000,0.9917,0.0000
+abtt2,B,Brain / CNS,159,1.0000,0.9824,0.0818
+abtt2,B,Breast / mammary,43,0.8953,0.6907,0.0233
+abtt2,B,Cultured cells,18,0.0000,0.0000,0.2222
+abtt2,B,Eye,72,1.0000,1.0000,0.0139
+abtt2,B,Heart,89,1.0000,0.9966,0.0899
+abtt2,B,Intestine,93,1.0000,0.9925,0.0323
+abtt2,B,Kidney,264,1.0000,0.9962,0.1402
+abtt2,B,Liver,392,0.9974,0.9913,0.1939
+abtt2,B,Lung,86,0.9767,0.9593,0.0581
+abtt2,B,Skeletal muscle,229,0.9651,0.8376,0.0939
+abtt2,B,Skin,219,0.9863,0.8064,0.1233
+abtt2,B,Spleen,131,0.9847,0.9626,0.0840
+abtt2,B,Thymus,149,0.7634,0.5940,0.0503
+abtt2,C,replicates,14085,0.2054,0.1755,
+abtt3,A,Adipose,300,0.8083,0.7260,0.0167
+abtt3,A,Adrenal gland,300,0.7400,0.7253,0.0333
+abtt3,A,Bladder,300,0.5494,0.4873,0.0294
+abtt3,A,Blood / immune,300,0.8822,0.8453,0.0433
+abtt3,A,Bone / cartilage,300,0.5267,0.4457,0.0467
+abtt3,A,Bone marrow,300,0.6683,0.6073,0.0167
+abtt3,A,Brain / CNS,300,0.8400,0.8007,0.0200
+abtt3,A,Breast / mammary,300,0.7850,0.7110,0.0100
+abtt3,A,Cell line,300,0.3067,0.3030,0.0211
+abtt3,A,Cultured cells,300,0.2350,0.1910,0.0183
+abtt3,A,Embryo / stem cell,300,0.8217,0.7390,0.0233
+abtt3,A,Esophagus,300,0.4786,0.3887,0.0333
+abtt3,A,Eye,300,0.7542,0.7247,0.0350
+abtt3,A,Heart,300,0.9033,0.8657,0.0433
+abtt3,A,Intestine,300,0.8194,0.7390,0.0217
+abtt3,A,Kidney,300,0.8833,0.8117,0.0217
+abtt3,A,Liver,300,0.8928,0.8623,0.0367
+abtt3,A,Lung,300,0.7800,0.7230,0.0250
+abtt3,A,Lymph node,300,0.2356,0.2040,0.0167
+abtt3,A,Nerve / spinal cord,300,0.5383,0.5203,0.0183
+abtt3,A,Ovary,300,0.7617,0.6850,0.0167
+abtt3,A,Pancreas,300,0.7103,0.6597,0.0283
+abtt3,A,Pituitary,300,0.6667,0.5580,0.0167
+abtt3,A,Placenta,300,0.8517,0.7947,0.0267
+abtt3,A,Prostate,300,0.8417,0.7827,0.0300
+abtt3,A,Reference RNA,300,0.3150,0.2163,0.0300
+abtt3,A,Salivary gland,300,0.5383,0.3720,0.0267
+abtt3,A,Skeletal muscle,300,0.9050,0.8577,0.0267
+abtt3,A,Skin,300,0.7072,0.6193,0.0250
+abtt3,A,Spleen,300,0.5150,0.4790,0.0100
+abtt3,A,Stomach,300,0.5450,0.4790,0.0283
+abtt3,A,Testis,300,0.8883,0.8183,0.0167
+abtt3,A,Thymus,300,0.6300,0.5053,0.0200
+abtt3,A,Thyroid,300,0.5844,0.4777,0.0323
+abtt3,A,Tumor / cancer,300,0.4811,0.4113,0.0200
+abtt3,A,Uterus,300,0.6329,0.5940,0.0217
+abtt3,A,Vasculature,300,0.6783,0.6047,0.0300
+abtt3,B,Adipose,48,1.0000,1.0000,0.0208
+abtt3,B,Adrenal gland,56,1.0000,0.9893,0.0357
+abtt3,B,Bone / cartilage,36,0.9722,0.8278,0.0278
+abtt3,B,Bone marrow,24,1.0000,0.9958,0.0000
+abtt3,B,Brain / CNS,159,1.0000,0.9686,0.0818
+abtt3,B,Breast / mammary,43,0.8953,0.6977,0.0233
+abtt3,B,Cultured cells,18,0.0000,0.0000,0.2222
+abtt3,B,Eye,72,1.0000,1.0000,0.0139
+abtt3,B,Heart,89,1.0000,0.9978,0.0899
+abtt3,B,Intestine,93,1.0000,0.9935,0.0323
+abtt3,B,Kidney,264,1.0000,0.9981,0.1402
+abtt3,B,Liver,392,0.9974,0.9921,0.1939
+abtt3,B,Lung,86,0.9767,0.9616,0.0581
+abtt3,B,Skeletal muscle,229,0.9651,0.8349,0.0917
+abtt3,B,Skin,219,0.9863,0.8137,0.1233
+abtt3,B,Spleen,131,0.9847,0.9618,0.0840
+abtt3,B,Thymus,149,0.7232,0.5537,0.0503
+abtt3,C,replicates,14085,0.2081,0.1773,
+abtt5,A,Adipose,300,0.7853,0.7300,0.0167
+abtt5,A,Adrenal gland,300,0.7367,0.7300,0.0333
+abtt5,A,Bladder,300,0.5569,0.4903,0.0283
+abtt5,A,Blood / immune,300,0.8817,0.8460,0.0400
+abtt5,A,Bone / cartilage,300,0.5278,0.4457,0.0483
+abtt5,A,Bone marrow,300,0.6750,0.6110,0.0150
+abtt5,A,Brain / CNS,300,0.8417,0.7967,0.0200
+abtt5,A,Breast / mammary,300,0.7833,0.7107,0.0100
+abtt5,A,Cell line,300,0.3217,0.3083,0.0167
+abtt5,A,Cultured cells,300,0.2167,0.1937,0.0217
+abtt5,A,Embryo / stem cell,300,0.8050,0.7290,0.0200
+abtt5,A,Esophagus,300,0.4767,0.3853,0.0317
+abtt5,A,Eye,300,0.7617,0.7267,0.0333
+abtt5,A,Heart,300,0.9050,0.8697,0.0433
+abtt5,A,Intestine,300,0.8211,0.7313,0.0217
+abtt5,A,Kidney,300,0.8783,0.8103,0.0200
+abtt5,A,Liver,300,0.8844,0.8630,0.0367
+abtt5,A,Lung,300,0.7850,0.7263,0.0333
+abtt5,A,Lymph node,300,0.2389,0.2053,0.0167
+abtt5,A,Nerve / spinal cord,300,0.5367,0.5247,0.0200
+abtt5,A,Ovary,300,0.7483,0.6847,0.0167
+abtt5,A,Pancreas,300,0.6994,0.6577,0.0317
+abtt5,A,Pituitary,300,0.6856,0.5723,0.0133
+abtt5,A,Placenta,300,0.8550,0.7943,0.0233
+abtt5,A,Prostate,300,0.8517,0.7907,0.0300
+abtt5,A,Reference RNA,300,0.3161,0.2587,0.0300
+abtt5,A,Salivary gland,300,0.5439,0.3650,0.0267
+abtt5,A,Skeletal muscle,300,0.9183,0.8603,0.0267
+abtt5,A,Skin,300,0.7172,0.6233,0.0250
+abtt5,A,Spleen,300,0.5233,0.4777,0.0150
+abtt5,A,Stomach,300,0.5394,0.4770,0.0250
+abtt5,A,Testis,300,0.8867,0.8213,0.0167
+abtt5,A,Thymus,300,0.6083,0.5053,0.0217
+abtt5,A,Thyroid,300,0.5961,0.4910,0.0342
+abtt5,A,Tumor / cancer,300,0.4911,0.4120,0.0233
+abtt5,A,Uterus,300,0.6228,0.5877,0.0233
+abtt5,A,Vasculature,300,0.6767,0.6083,0.0317
+abtt5,B,Adipose,48,1.0000,1.0000,0.0208
+abtt5,B,Adrenal gland,56,1.0000,0.9893,0.0357
+abtt5,B,Bone / cartilage,36,0.9722,0.8333,0.0278
+abtt5,B,Bone marrow,24,1.0000,0.9958,0.0000
+abtt5,B,Brain / CNS,159,1.0000,0.9635,0.0818
+abtt5,B,Breast / mammary,43,0.7907,0.6419,0.0233
+abtt5,B,Cultured cells,18,0.0000,0.0000,0.2222
+abtt5,B,Eye,72,1.0000,1.0000,0.0139
+abtt5,B,Heart,89,1.0000,0.9989,0.0899
+abtt5,B,Intestine,93,1.0000,0.9935,0.0323
+abtt5,B,Kidney,264,1.0000,0.9992,0.1402
+abtt5,B,Liver,392,0.9974,0.9921,0.1939
+abtt5,B,Lung,86,0.9767,0.9616,0.0581
+abtt5,B,Skeletal muscle,229,0.9585,0.8293,0.0917
+abtt5,B,Skin,219,0.9726,0.8155,0.1187
+abtt5,B,Spleen,131,0.9847,0.9626,0.0840
+abtt5,B,Thymus,149,0.7315,0.5698,0.0470
+abtt5,C,replicates,14085,0.2120,0.1789,
+abtt10,A,Adipose,300,0.8150,0.7263,0.0167
+abtt10,A,Adrenal gland,300,0.7467,0.7363,0.0333
+abtt10,A,Bladder,300,0.5711,0.5047,0.0317
+abtt10,A,Blood / immune,300,0.8761,0.8433,0.0400
+abtt10,A,Bone / cartilage,300,0.5317,0.4497,0.0533
+abtt10,A,Bone marrow,300,0.6533,0.6063,0.0183
+abtt10,A,Brain / CNS,300,0.8417,0.8053,0.0200
+abtt10,A,Breast / mammary,300,0.7922,0.7200,0.0100
+abtt10,A,Cell line,300,0.3417,0.3177,0.0183
+abtt10,A,Cultured cells,300,0.2150,0.1993,0.0217
+abtt10,A,Embryo / stem cell,300,0.8172,0.7290,0.0200
+abtt10,A,Esophagus,300,0.4950,0.4013,0.0250
+abtt10,A,Eye,300,0.7650,0.7323,0.0333
+abtt10,A,Heart,300,0.9050,0.8577,0.0433
+abtt10,A,Intestine,300,0.8300,0.7420,0.0200
+abtt10,A,Kidney,300,0.8794,0.8187,0.0217
+abtt10,A,Liver,300,0.8933,0.8607,0.0333
+abtt10,A,Lung,300,0.7917,0.7290,0.0333
+abtt10,A,Lymph node,300,0.2444,0.2033,0.0217
+abtt10,A,Nerve / spinal cord,300,0.5317,0.5273,0.0200
+abtt10,A,Ovary,300,0.7461,0.6830,0.0167
+abtt10,A,Pancreas,300,0.7194,0.6600,0.0350
+abtt10,A,Pituitary,300,0.6683,0.5667,0.0117
+abtt10,A,Placenta,300,0.8567,0.7997,0.0233
+abtt10,A,Prostate,300,0.8517,0.7993,0.0267
+abtt10,A,Reference RNA,300,0.3217,0.2677,0.0283
+abtt10,A,Salivary gland,300,0.5778,0.3890,0.0283
+abtt10,A,Skeletal muscle,300,0.9167,0.8653,0.0267
+abtt10,A,Skin,300,0.7078,0.6277,0.0283
+abtt10,A,Spleen,300,0.5267,0.4860,0.0117
+abtt10,A,Stomach,300,0.5411,0.4817,0.0200
+abtt10,A,Testis,300,0.8917,0.8237,0.0167
+abtt10,A,Thymus,300,0.6233,0.5083,0.0244
+abtt10,A,Thyroid,300,0.6000,0.5117,0.0367
+abtt10,A,Tumor / cancer,300,0.4806,0.4020,0.0167
+abtt10,A,Uterus,300,0.6483,0.6027,0.0267
+abtt10,A,Vasculature,300,0.6633,0.6027,0.0233
+abtt10,B,Adipose,48,1.0000,1.0000,0.0208
+abtt10,B,Adrenal gland,56,1.0000,0.9893,0.0357
+abtt10,B,Bone / cartilage,36,0.9722,0.8417,0.0278
+abtt10,B,Bone marrow,24,1.0000,0.9750,0.0000
+abtt10,B,Brain / CNS,159,0.9937,0.9264,0.0818
+abtt10,B,Breast / mammary,43,0.8256,0.6628,0.0233
+abtt10,B,Cultured cells,18,0.0000,0.0000,0.2222
+abtt10,B,Eye,72,1.0000,0.9986,0.0139
+abtt10,B,Heart,89,1.0000,0.9955,0.0899
+abtt10,B,Intestine,93,1.0000,0.9946,0.0323
+abtt10,B,Kidney,264,1.0000,0.9951,0.1402
+abtt10,B,Liver,392,0.9974,0.9936,0.1939
+abtt10,B,Lung,86,0.9767,0.9698,0.0581
+abtt10,B,Skeletal muscle,229,0.9651,0.8406,0.0939
+abtt10,B,Skin,219,0.9954,0.8603,0.1279
+abtt10,B,Spleen,131,0.9885,0.9626,0.0840
+abtt10,B,Thymus,149,0.7023,0.5450,0.0470
+abtt10,C,replicates,14085,0.2195,0.1899,
+abtt20,A,Adipose,300,0.8322,0.7347,0.0167
+abtt20,A,Adrenal gland,300,0.7650,0.7527,0.0333
+abtt20,A,Bladder,300,0.5694,0.5113,0.0333
+abtt20,A,Blood / immune,300,0.8917,0.8520,0.0400
+abtt20,A,Bone / cartilage,300,0.5450,0.4527,0.0583
+abtt20,A,Bone marrow,300,0.6844,0.6260,0.0167
+abtt20,A,Brain / CNS,300,0.8533,0.8033,0.0233
+abtt20,A,Breast / mammary,300,0.7844,0.7167,0.0100
+abtt20,A,Cell line,300,0.3467,0.3207,0.0200
+abtt20,A,Cultured cells,300,0.2178,0.1963,0.0183
+abtt20,A,Embryo / stem cell,300,0.8100,0.7230,0.0200
+abtt20,A,Esophagus,300,0.5208,0.4237,0.0283
+abtt20,A,Eye,300,0.7722,0.7423,0.0311
+abtt20,A,Heart,300,0.8911,0.8663,0.0417
+abtt20,A,Intestine,300,0.8278,0.7473,0.0228
+abtt20,A,Kidney,300,0.8828,0.8283,0.0200
+abtt20,A,Liver,300,0.9028,0.8657,0.0367
+abtt20,A,Lung,300,0.7817,0.7230,0.0333
+abtt20,A,Lymph node,300,0.2489,0.2147,0.0194
+abtt20,A,Nerve / spinal cord,300,0.5650,0.5587,0.0217
+abtt20,A,Ovary,300,0.7617,0.6920,0.0167
+abtt20,A,Pancreas,300,0.7344,0.6647,0.0333
+abtt20,A,Pituitary,300,0.6967,0.5863,0.0133
+abtt20,A,Placenta,300,0.8583,0.8003,0.0233
+abtt20,A,Prostate,300,0.8517,0.7963,0.0233
+abtt20,A,Reference RNA,300,0.4033,0.3147,0.0300
+abtt20,A,Salivary gland,300,0.5800,0.3950,0.0233
+abtt20,A,Skeletal muscle,300,0.9144,0.8620,0.0267
+abtt20,A,Skin,300,0.7050,0.6427,0.0300
+abtt20,A,Spleen,300,0.5150,0.4780,0.0150
+abtt20,A,Stomach,300,0.5606,0.4967,0.0233
+abtt20,A,Testis,300,0.8950,0.8380,0.0167
+abtt20,A,Thymus,300,0.6100,0.5163,0.0267
+abtt20,A,Thyroid,300,0.6128,0.5033,0.0250
+abtt20,A,Tumor / cancer,300,0.4978,0.4193,0.0183
+abtt20,A,Uterus,300,0.6556,0.6110,0.0283
+abtt20,A,Vasculature,300,0.6850,0.6197,0.0333
+abtt20,B,Adipose,48,1.0000,1.0000,0.0208
+abtt20,B,Adrenal gland,56,1.0000,0.9911,0.0357
+abtt20,B,Bone / cartilage,36,0.9861,0.8417,0.0278
+abtt20,B,Bone marrow,24,1.0000,0.9583,0.0000
+abtt20,B,Brain / CNS,159,0.9937,0.9340,0.0818
+abtt20,B,Breast / mammary,43,0.7558,0.6116,0.0233
+abtt20,B,Cultured cells,18,0.0000,0.0000,0.1667
+abtt20,B,Eye,72,1.0000,0.9972,0.0139
+abtt20,B,Heart,89,1.0000,0.9978,0.0899
+abtt20,B,Intestine,93,1.0000,0.9925,0.0323
+abtt20,B,Kidney,264,1.0000,0.9973,0.1402
+abtt20,B,Liver,392,0.9987,0.9946,0.1939
+abtt20,B,Lung,86,0.9767,0.9686,0.0581
+abtt20,B,Skeletal muscle,229,0.9629,0.8721,0.0917
+abtt20,B,Skin,219,0.9954,0.8658,0.1279
+abtt20,B,Spleen,131,0.9924,0.9817,0.0840
+abtt20,B,Thymus,149,0.7584,0.5530,0.0470
+abtt20,C,replicates,14085,0.2478,0.2131,
+white_floor0.1,A,Adipose,300,0.8033,0.7307,0.0167
+white_floor0.1,A,Adrenal gland,300,0.7200,0.7003,0.0367
+white_floor0.1,A,Bladder,300,0.5333,0.4633,0.0250
+white_floor0.1,A,Blood / immune,300,0.8778,0.8447,0.0433
+white_floor0.1,A,Bone / cartilage,300,0.5192,0.4460,0.0517
+white_floor0.1,A,Bone marrow,300,0.6617,0.6020,0.0183
+white_floor0.1,A,Brain / CNS,300,0.8633,0.8037,0.0200
+white_floor0.1,A,Breast / mammary,300,0.7717,0.7050,0.0100
+white_floor0.1,A,Cell line,300,0.3050,0.3153,0.0233
+white_floor0.1,A,Cultured cells,300,0.2283,0.1880,0.0167
+white_floor0.1,A,Embryo / stem cell,300,0.8150,0.7370,0.0217
+white_floor0.1,A,Esophagus,300,0.4369,0.3623,0.0283
+white_floor0.1,A,Eye,300,0.7717,0.7247,0.0317
+white_floor0.1,A,Heart,300,0.9094,0.8667,0.0433
+white_floor0.1,A,Intestine,300,0.8228,0.7327,0.0233
+white_floor0.1,A,Kidney,300,0.8750,0.8107,0.0200
+white_floor0.1,A,Liver,300,0.8900,0.8573,0.0367
+white_floor0.1,A,Lung,300,0.7806,0.7193,0.0300
+white_floor0.1,A,Lymph node,300,0.2117,0.1967,0.0267
+white_floor0.1,A,Nerve / spinal cord,300,0.5244,0.5110,0.0200
+white_floor0.1,A,Ovary,300,0.7506,0.6723,0.0167
+white_floor0.1,A,Pancreas,300,0.7067,0.6577,0.0367
+white_floor0.1,A,Pituitary,300,0.6586,0.5493,0.0200
+white_floor0.1,A,Placenta,300,0.8444,0.7893,0.0283
+white_floor0.1,A,Prostate,300,0.8383,0.7783,0.0300
+white_floor0.1,A,Reference RNA,300,0.3150,0.2030,0.0233
+white_floor0.1,A,Salivary gland,300,0.5024,0.3353,0.0300
+white_floor0.1,A,Skeletal muscle,300,0.9100,0.8567,0.0267
+white_floor0.1,A,Skin,300,0.6933,0.5993,0.0200
+white_floor0.1,A,Spleen,300,0.4894,0.4593,0.0100
+white_floor0.1,A,Stomach,300,0.5367,0.4690,0.0233
+white_floor0.1,A,Testis,300,0.8700,0.8097,0.0167
+white_floor0.1,A,Thymus,300,0.6267,0.5173,0.0183
+white_floor0.1,A,Thyroid,300,0.5650,0.4643,0.0275
+white_floor0.1,A,Tumor / cancer,300,0.4933,0.4017,0.0150
+white_floor0.1,A,Uterus,300,0.6200,0.5853,0.0233
+white_floor0.1,A,Vasculature,300,0.6683,0.5927,0.0250
+white_floor0.1,B,Adipose,48,1.0000,1.0000,0.0208
+white_floor0.1,B,Adrenal gland,56,1.0000,0.9857,0.0357
+white_floor0.1,B,Bone / cartilage,36,0.9722,0.7944,0.0278
+white_floor0.1,B,Bone marrow,24,1.0000,0.9667,0.0000
+white_floor0.1,B,Brain / CNS,159,1.0000,0.9736,0.0818
+white_floor0.1,B,Breast / mammary,43,0.8721,0.6837,0.0233
+white_floor0.1,B,Cultured cells,18,0.0000,0.0000,0.2222
+white_floor0.1,B,Eye,72,1.0000,1.0000,0.0139
+white_floor0.1,B,Heart,89,1.0000,0.9966,0.0899
+white_floor0.1,B,Intestine,93,1.0000,0.9914,0.0323
+white_floor0.1,B,Kidney,264,1.0000,0.9966,0.1402
+white_floor0.1,B,Liver,392,0.9974,0.9898,0.1939
+white_floor0.1,B,Lung,86,0.9767,0.9349,0.0581
+white_floor0.1,B,Skeletal muscle,229,0.9454,0.8175,0.0873
+white_floor0.1,B,Skin,219,0.9635,0.7822,0.1187
+white_floor0.1,B,Spleen,131,0.9733,0.9458,0.0840
+white_floor0.1,B,Thymus,149,0.7567,0.6060,0.0604
+white_floor0.1,C,replicates,14085,0.1831,0.1666,
+white_floor0.01,A,Adipose,300,0.8417,0.7397,0.0167
+white_floor0.01,A,Adrenal gland,300,0.7433,0.7360,0.0333
+white_floor0.01,A,Bladder,300,0.5758,0.5057,0.0267
+white_floor0.01,A,Blood / immune,300,0.8917,0.8530,0.0400
+white_floor0.01,A,Bone / cartilage,300,0.5483,0.4540,0.0500
+white_floor0.01,A,Bone marrow,300,0.6700,0.6150,0.0200
+white_floor0.01,A,Brain / CNS,300,0.8550,0.8067,0.0200
+white_floor0.01,A,Breast / mammary,300,0.7792,0.7213,0.0100
+white_floor0.01,A,Cell line,300,0.3417,0.3270,0.0167
+white_floor0.01,A,Cultured cells,300,0.2383,0.2010,0.0200
+white_floor0.01,A,Embryo / stem cell,300,0.8122,0.7320,0.0200
+white_floor0.01,A,Esophagus,300,0.4950,0.4037,0.0350
+white_floor0.01,A,Eye,300,0.7700,0.7360,0.0342
+white_floor0.01,A,Heart,300,0.9050,0.8663,0.0433
+white_floor0.01,A,Intestine,300,0.8233,0.7430,0.0200
+white_floor0.01,A,Kidney,300,0.8883,0.8197,0.0183
+white_floor0.01,A,Liver,300,0.8850,0.8633,0.0367
+white_floor0.01,A,Lung,300,0.7800,0.7247,0.0317
+white_floor0.01,A,Lymph node,300,0.2289,0.2080,0.0233
+white_floor0.01,A,Nerve / spinal cord,300,0.5333,0.5267,0.0200
+white_floor0.01,A,Ovary,300,0.7544,0.6870,0.0167
+white_floor0.01,A,Pancreas,300,0.7150,0.6603,0.0300
+white_floor0.01,A,Pituitary,300,0.6694,0.5603,0.0167
+white_floor0.01,A,Placenta,300,0.8500,0.8003,0.0233
+white_floor0.01,A,Prostate,300,0.8600,0.7953,0.0267
+white_floor0.01,A,Reference RNA,300,0.3183,0.2840,0.0283
+white_floor0.01,A,Salivary gland,300,0.5617,0.3783,0.0250
+white_floor0.01,A,Skeletal muscle,300,0.9183,0.8680,0.0267
+white_floor0.01,A,Skin,300,0.7061,0.6287,0.0283
+white_floor0.01,A,Spleen,300,0.5178,0.4800,0.0100
+white_floor0.01,A,Stomach,300,0.5683,0.4960,0.0283
+white_floor0.01,A,Testis,300,0.8906,0.8273,0.0167
+white_floor0.01,A,Thymus,300,0.6267,0.5170,0.0233
+white_floor0.01,A,Thyroid,300,0.6117,0.5030,0.0300
+white_floor0.01,A,Tumor / cancer,300,0.5033,0.4177,0.0183
+white_floor0.01,A,Uterus,300,0.6444,0.6017,0.0267
+white_floor0.01,A,Vasculature,300,0.6817,0.6140,0.0283
+white_floor0.01,B,Adipose,48,1.0000,1.0000,0.0208
+white_floor0.01,B,Adrenal gland,56,1.0000,0.9911,0.0357
+white_floor0.01,B,Bone / cartilage,36,0.9861,0.8472,0.0278
+white_floor0.01,B,Bone marrow,24,1.0000,0.9833,0.0000
+white_floor0.01,B,Brain / CNS,159,0.9969,0.9503,0.0818
+white_floor0.01,B,Breast / mammary,43,0.8488,0.6628,0.0233
+white_floor0.01,B,Cultured cells,18,0.0000,0.0000,0.2222
+white_floor0.01,B,Eye,72,1.0000,0.9972,0.0139
+white_floor0.01,B,Heart,89,1.0000,0.9933,0.0899
+white_floor0.01,B,Intestine,93,1.0000,0.9925,0.0323
+white_floor0.01,B,Kidney,264,1.0000,0.9973,0.1402
+white_floor0.01,B,Liver,392,0.9974,0.9949,0.1939
+white_floor0.01,B,Lung,86,0.9767,0.9581,0.0581
+white_floor0.01,B,Skeletal muscle,229,0.9541,0.8341,0.0895
+white_floor0.01,B,Skin,219,0.9612,0.8251,0.1187
+white_floor0.01,B,Spleen,131,0.9885,0.9702,0.0840
+white_floor0.01,B,Thymus,149,0.7584,0.5899,0.0537
+white_floor0.01,C,replicates,14085,0.2268,0.1962,
+white_floor0.001,A,Adipose,300,0.8394,0.7423,0.0200
+white_floor0.001,A,Adrenal gland,300,0.7700,0.7620,0.0333
+white_floor0.001,A,Bladder,300,0.5950,0.5303,0.0300
+white_floor0.001,A,Blood / immune,300,0.8850,0.8500,0.0400
+white_floor0.001,A,Bone / cartilage,300,0.5683,0.4727,0.0550
+white_floor0.001,A,Bone marrow,300,0.6928,0.6390,0.0217
+white_floor0.001,A,Brain / CNS,300,0.8550,0.8063,0.0200
+white_floor0.001,A,Breast / mammary,300,0.7889,0.7310,0.0100
+white_floor0.001,A,Cell line,300,0.3233,0.3293,0.0167
+white_floor0.001,A,Cultured cells,300,0.2300,0.2040,0.0261
+white_floor0.001,A,Embryo / stem cell,300,0.8183,0.7313,0.0200
+white_floor0.001,A,Esophagus,300,0.5178,0.4313,0.0383
+white_floor0.001,A,Eye,300,0.8000,0.7520,0.0317
+white_floor0.001,A,Heart,300,0.9033,0.8647,0.0433
+white_floor0.001,A,Intestine,300,0.8433,0.7593,0.0200
+white_floor0.001,A,Kidney,300,0.8817,0.8220,0.0183
+white_floor0.001,A,Liver,300,0.8878,0.8623,0.0400
+white_floor0.001,A,Lung,300,0.7850,0.7227,0.0283
+white_floor0.001,A,Lymph node,300,0.2333,0.2177,0.0278
+white_floor0.001,A,Nerve / spinal cord,300,0.5333,0.5347,0.0200
+white_floor0.001,A,Ovary,300,0.7742,0.6993,0.0167
+white_floor0.001,A,Pancreas,300,0.7250,0.6693,0.0317
+white_floor0.001,A,Pituitary,300,0.6494,0.5607,0.0167
+white_floor0.001,A,Placenta,300,0.8567,0.8110,0.0233
+white_floor0.001,A,Prostate,300,0.8625,0.8067,0.0233
+white_floor0.001,A,Reference RNA,300,0.3150,0.2987,0.0283
+white_floor0.001,A,Salivary gland,300,0.5933,0.4137,0.0283
+white_floor0.001,A,Skeletal muscle,300,0.9133,0.8647,0.0267
+white_floor0.001,A,Skin,300,0.7211,0.6337,0.0267
+white_floor0.001,A,Spleen,300,0.5200,0.4750,0.0167
+white_floor0.001,A,Stomach,300,0.5844,0.5247,0.0267
+white_floor0.001,A,Testis,300,0.8850,0.8340,0.0200
+white_floor0.001,A,Thymus,300,0.6428,0.5547,0.0250
+white_floor0.001,A,Thyroid,300,0.6461,0.5517,0.0278
+white_floor0.001,A,Tumor / cancer,300,0.5133,0.4280,0.0217
+white_floor0.001,A,Uterus,300,0.6678,0.6260,0.0267
+white_floor0.001,A,Vasculature,300,0.6917,0.6283,0.0283
+white_floor0.001,B,Adipose,48,1.0000,1.0000,0.0208
+white_floor0.001,B,Adrenal gland,56,1.0000,0.9946,0.0357
+white_floor0.001,B,Bone / cartilage,36,0.9861,0.9000,0.0278
+white_floor0.001,B,Bone marrow,24,1.0000,0.9958,0.0000
+white_floor0.001,B,Brain / CNS,159,1.0000,0.9742,0.0818
+white_floor0.001,B,Breast / mammary,43,0.8953,0.6884,0.0233
+white_floor0.001,B,Cultured cells,18,0.0000,0.0000,0.2222
+white_floor0.001,B,Eye,72,1.0000,0.9944,0.0139
+white_floor0.001,B,Heart,89,1.0000,0.9921,0.0899
+white_floor0.001,B,Intestine,93,1.0000,0.9957,0.0323
+white_floor0.001,B,Kidney,264,1.0000,0.9947,0.1402
+white_floor0.001,B,Liver,392,0.9974,0.9954,0.1939
+white_floor0.001,B,Lung,86,0.9767,0.9628,0.0581
+white_floor0.001,B,Skeletal muscle,229,0.9694,0.8803,0.0895
+white_floor0.001,B,Skin,219,0.9909,0.8667,0.1279
+white_floor0.001,B,Spleen,131,0.9771,0.9656,0.0840
+white_floor0.001,B,Thymus,149,0.7606,0.6081,0.0526
+white_floor0.001,C,replicates,14085,0.2261,0.2037,
+white_floor0.0001,A,Adipose,300,0.7989,0.7517,0.0183
+white_floor0.0001,A,Adrenal gland,300,0.7783,0.7753,0.0333
+white_floor0.0001,A,Bladder,300,0.6070,0.5413,0.0217
+white_floor0.0001,A,Blood / immune,300,0.8756,0.8453,0.0400
+white_floor0.0001,A,Bone / cartilage,300,0.5800,0.4897,0.0517
+white_floor0.0001,A,Bone marrow,300,0.6894,0.6410,0.0200
+white_floor0.0001,A,Brain / CNS,300,0.8600,0.8113,0.0200
+white_floor0.0001,A,Breast / mammary,300,0.8006,0.7373,0.0100
+white_floor0.0001,A,Cell line,300,0.3100,0.3180,0.0167
+white_floor0.0001,A,Cultured cells,300,0.2400,0.2110,0.0250
+white_floor0.0001,A,Embryo / stem cell,300,0.8078,0.7327,0.0233
+white_floor0.0001,A,Esophagus,300,0.5533,0.4530,0.0467
+white_floor0.0001,A,Eye,300,0.8267,0.7750,0.0300
+white_floor0.0001,A,Heart,300,0.9183,0.8623,0.0400
+white_floor0.0001,A,Intestine,300,0.8342,0.7687,0.0217
+white_floor0.0001,A,Kidney,300,0.8900,0.8307,0.0217
+white_floor0.0001,A,Liver,300,0.8911,0.8633,0.0400
+white_floor0.0001,A,Lung,300,0.7683,0.7303,0.0267
+white_floor0.0001,A,Lymph node,300,0.2411,0.2313,0.0250
+white_floor0.0001,A,Nerve / spinal cord,300,0.5350,0.5413,0.0200
+white_floor0.0001,A,Ovary,300,0.7948,0.7147,0.0183
+white_floor0.0001,A,Pancreas,300,0.7383,0.6813,0.0283
+white_floor0.0001,A,Pituitary,300,0.6850,0.5900,0.0183
+white_floor0.0001,A,Placenta,300,0.8533,0.8083,0.0233
+white_floor0.0001,A,Prostate,300,0.8800,0.8143,0.0233
+white_floor0.0001,A,Reference RNA,300,0.3150,0.3127,0.0283
+white_floor0.0001,A,Salivary gland,300,0.6150,0.4577,0.0283
+white_floor0.0001,A,Skeletal muscle,300,0.9133,0.8607,0.0267
+white_floor0.0001,A,Skin,300,0.7083,0.6477,0.0267
+white_floor0.0001,A,Spleen,300,0.5267,0.4790,0.0117
+white_floor0.0001,A,Stomach,300,0.6219,0.5473,0.0300
+white_floor0.0001,A,Testis,300,0.8900,0.8377,0.0200
+white_floor0.0001,A,Thymus,300,0.6500,0.5553,0.0250
+white_floor0.0001,A,Thyroid,300,0.7436,0.6303,0.0333
+white_floor0.0001,A,Tumor / cancer,300,0.4944,0.4213,0.0233
+white_floor0.0001,A,Uterus,300,0.6956,0.6393,0.0300
+white_floor0.0001,A,Vasculature,300,0.7000,0.6363,0.0267
+white_floor0.0001,B,Adipose,48,1.0000,1.0000,0.0208
+white_floor0.0001,B,Adrenal gland,56,1.0000,1.0000,0.0357
+white_floor0.0001,B,Bone / cartilage,36,1.0000,0.9194,0.0278
+white_floor0.0001,B,Bone marrow,24,1.0000,0.9917,0.0000
+white_floor0.0001,B,Brain / CNS,159,1.0000,0.9912,0.0818
+white_floor0.0001,B,Breast / mammary,43,0.9302,0.7163,0.0233
+white_floor0.0001,B,Cultured cells,18,0.0000,0.0000,0.1944
+white_floor0.0001,B,Eye,72,1.0000,0.9931,0.0139
+white_floor0.0001,B,Heart,89,1.0000,0.9921,0.0899
+white_floor0.0001,B,Intestine,93,1.0000,0.9828,0.0323
+white_floor0.0001,B,Kidney,264,1.0000,0.9970,0.1402
+white_floor0.0001,B,Liver,392,0.9974,0.9941,0.1939
+white_floor0.0001,B,Lung,86,0.9767,0.9558,0.0581
+white_floor0.0001,B,Skeletal muscle,229,0.9913,0.9293,0.0917
+white_floor0.0001,B,Skin,219,1.0000,0.9155,0.1279
+white_floor0.0001,B,Spleen,131,0.9847,0.9550,0.0840
+white_floor0.0001,B,Thymus,149,0.8104,0.6497,0.0537
+white_floor0.0001,C,replicates,14085,0.2088,0.1863,
+white_top64,A,Adipose,300,0.8428,0.7500,0.0167
+white_top64,A,Adrenal gland,300,0.7450,0.7273,0.0333
+white_top64,A,Bladder,300,0.5617,0.4910,0.0333
+white_top64,A,Blood / immune,300,0.8750,0.8490,0.0417
+white_top64,A,Bone / cartilage,300,0.5278,0.4437,0.0467
+white_top64,A,Bone marrow,300,0.6517,0.5997,0.0183
+white_top64,A,Brain / CNS,300,0.8633,0.8037,0.0200
+white_top64,A,Breast / mammary,300,0.7817,0.7130,0.0100
+white_top64,A,Cell line,300,0.3400,0.3107,0.0217
+white_top64,A,Cultured cells,300,0.2258,0.1940,0.0233
+white_top64,A,Embryo / stem cell,300,0.8033,0.7347,0.0167
+white_top64,A,Esophagus,300,0.4761,0.3813,0.0200
+white_top64,A,Eye,300,0.7783,0.7320,0.0350
+white_top64,A,Heart,300,0.8917,0.8640,0.0433
+white_top64,A,Intestine,300,0.8128,0.7360,0.0233
+white_top64,A,Kidney,300,0.8867,0.8160,0.0194
+white_top64,A,Liver,300,0.8861,0.8537,0.0333
+white_top64,A,Lung,300,0.7733,0.7160,0.0317
+white_top64,A,Lymph node,300,0.2089,0.2010,0.0261
+white_top64,A,Nerve / spinal cord,300,0.5333,0.5327,0.0200
+white_top64,A,Ovary,300,0.7444,0.6760,0.0167
+white_top64,A,Pancreas,300,0.7350,0.6600,0.0407
+white_top64,A,Pituitary,300,0.6592,0.5543,0.0111
+white_top64,A,Placenta,300,0.8483,0.8037,0.0233
+white_top64,A,Prostate,300,0.8450,0.7870,0.0278
+white_top64,A,Reference RNA,300,0.3217,0.2870,0.0283
+white_top64,A,Salivary gland,300,0.5417,0.3673,0.0300
+white_top64,A,Skeletal muscle,300,0.9183,0.8630,0.0267
+white_top64,A,Skin,300,0.7117,0.6230,0.0267
+white_top64,A,Spleen,300,0.4883,0.4717,0.0128
+white_top64,A,Stomach,300,0.5228,0.4693,0.0225
+white_top64,A,Testis,300,0.8825,0.8250,0.0167
+white_top64,A,Thymus,300,0.6161,0.5147,0.0261
+white_top64,A,Thyroid,300,0.5833,0.4797,0.0308
+white_top64,A,Tumor / cancer,300,0.4917,0.4067,0.0183
+white_top64,A,Uterus,300,0.6406,0.5913,0.0200
+white_top64,A,Vasculature,300,0.6800,0.6037,0.0267
+white_top64,B,Adipose,48,1.0000,1.0000,0.0208
+white_top64,B,Adrenal gland,56,0.9911,0.9821,0.0357
+white_top64,B,Bone / cartilage,36,0.9722,0.8306,0.0278
+white_top64,B,Bone marrow,24,1.0000,0.9875,0.0000
+white_top64,B,Brain / CNS,159,0.9937,0.9371,0.0818
+white_top64,B,Breast / mammary,43,0.8140,0.5860,0.0233
+white_top64,B,Cultured cells,18,0.0000,0.0000,0.2222
+white_top64,B,Eye,72,1.0000,1.0000,0.0139
+white_top64,B,Heart,89,1.0000,0.9955,0.0899
+white_top64,B,Intestine,93,1.0000,0.9892,0.0323
+white_top64,B,Kidney,264,1.0000,0.9890,0.1402
+white_top64,B,Liver,392,0.9974,0.9939,0.1939
+white_top64,B,Lung,86,0.9767,0.9581,0.0581
+white_top64,B,Skeletal muscle,229,0.9760,0.8738,0.0873
+white_top64,B,Skin,219,0.9817,0.8192,0.1279
+white_top64,B,Spleen,131,0.9885,0.9588,0.0840
+white_top64,B,Thymus,149,0.7830,0.5993,0.0604
+white_top64,C,replicates,14085,0.2323,0.1997,
+white_top128,A,Adipose,300,0.8500,0.7427,0.0200
+white_top128,A,Adrenal gland,300,0.7583,0.7543,0.0333
+white_top128,A,Bladder,300,0.5823,0.5143,0.0278
+white_top128,A,Blood / immune,300,0.8828,0.8503,0.0433
+white_top128,A,Bone / cartilage,300,0.5733,0.4720,0.0583
+white_top128,A,Bone marrow,300,0.6828,0.6317,0.0200
+white_top128,A,Brain / CNS,300,0.8583,0.8040,0.0200
+white_top128,A,Breast / mammary,300,0.7883,0.7277,0.0133
+white_top128,A,Cell line,300,0.3200,0.3193,0.0167
+white_top128,A,Cultured cells,300,0.2092,0.1897,0.0258
+white_top128,A,Embryo / stem cell,300,0.8144,0.7260,0.0200
+white_top128,A,Esophagus,300,0.5186,0.4203,0.0367
+white_top128,A,Eye,300,0.7783,0.7383,0.0300
+white_top128,A,Heart,300,0.9017,0.8543,0.0433
+white_top128,A,Intestine,300,0.8300,0.7560,0.0167
+white_top128,A,Kidney,300,0.8683,0.8093,0.0200
+white_top128,A,Liver,300,0.8867,0.8617,0.0433
+white_top128,A,Lung,300,0.7850,0.7140,0.0300
+white_top128,A,Lymph node,300,0.2350,0.2160,0.0233
+white_top128,A,Nerve / spinal cord,300,0.5300,0.5247,0.0200
+white_top128,A,Ovary,300,0.7444,0.6877,0.0167
+white_top128,A,Pancreas,300,0.7433,0.6687,0.0367
+white_top128,A,Pituitary,300,0.6478,0.5650,0.0211
+white_top128,A,Placenta,300,0.8567,0.8057,0.0250
+white_top128,A,Prostate,300,0.8628,0.8073,0.0267
+white_top128,A,Reference RNA,300,0.4233,0.3243,0.0317
+white_top128,A,Salivary gland,300,0.5933,0.4177,0.0283
+white_top128,A,Skeletal muscle,300,0.9150,0.8637,0.0267
+white_top128,A,Skin,300,0.7100,0.6273,0.0300
+white_top128,A,Spleen,300,0.5094,0.4713,0.0150
+white_top128,A,Stomach,300,0.6067,0.5187,0.0267
+white_top128,A,Testis,300,0.8883,0.8327,0.0200
+white_top128,A,Thymus,300,0.6411,0.5493,0.0283
+white_top128,A,Thyroid,300,0.6383,0.5353,0.0242
+white_top128,A,Tumor / cancer,300,0.4989,0.4173,0.0233
+white_top128,A,Uterus,300,0.6600,0.6223,0.0294
+white_top128,A,Vasculature,300,0.6958,0.6170,0.0267
+white_top128,B,Adipose,48,1.0000,1.0000,0.0208
+white_top128,B,Adrenal gland,56,1.0000,0.9982,0.0357
+white_top128,B,Bone / cartilage,36,0.9861,0.9139,0.0278
+white_top128,B,Bone marrow,24,1.0000,0.9792,0.0000
+white_top128,B,Brain / CNS,159,0.9937,0.9541,0.0818
+white_top128,B,Breast / mammary,43,0.8256,0.6814,0.0233
+white_top128,B,Cultured cells,18,0.0000,0.0000,0.2222
+white_top128,B,Eye,72,1.0000,0.9986,0.0139
+white_top128,B,Heart,89,1.0000,0.9944,0.0899
+white_top128,B,Intestine,93,1.0000,0.9957,0.0323
+white_top128,B,Kidney,264,1.0000,0.9985,0.1402
+white_top128,B,Liver,392,0.9974,0.9934,0.1939
+white_top128,B,Lung,86,0.9767,0.9616,0.0581
+white_top128,B,Skeletal muscle,229,0.9782,0.8664,0.0917
+white_top128,B,Skin,219,1.0000,0.8493,0.1279
+white_top128,B,Spleen,131,0.9771,0.9573,0.0840
+white_top128,B,Thymus,149,0.7651,0.6409,0.0503
+white_top128,C,replicates,14085,0.2395,0.2080,
+white_top256,A,Adipose,300,0.7950,0.7563,0.0200
+white_top256,A,Adrenal gland,300,0.7767,0.7737,0.0333
+white_top256,A,Bladder,300,0.6033,0.5383,0.0217
+white_top256,A,Blood / immune,300,0.8767,0.8430,0.0400
+white_top256,A,Bone / cartilage,300,0.5608,0.4860,0.0575
+white_top256,A,Bone marrow,300,0.6978,0.6440,0.0183
+white_top256,A,Brain / CNS,300,0.8567,0.8073,0.0200
+white_top256,A,Breast / mammary,300,0.7994,0.7353,0.0083
+white_top256,A,Cell line,300,0.3483,0.3310,0.0183
+white_top256,A,Cultured cells,300,0.2450,0.2137,0.0244
+white_top256,A,Embryo / stem cell,300,0.8150,0.7313,0.0233
+white_top256,A,Esophagus,300,0.5522,0.4570,0.0428
+white_top256,A,Eye,300,0.8267,0.7760,0.0317
+white_top256,A,Heart,300,0.9117,0.8570,0.0367
+white_top256,A,Intestine,300,0.8244,0.7617,0.0217
+white_top256,A,Kidney,300,0.8933,0.8307,0.0200
+white_top256,A,Liver,300,0.8894,0.8647,0.0400
+white_top256,A,Lung,300,0.7644,0.7273,0.0267
+white_top256,A,Lymph node,300,0.2422,0.2283,0.0283
+white_top256,A,Nerve / spinal cord,300,0.5333,0.5360,0.0200
+white_top256,A,Ovary,300,0.7963,0.7207,0.0175
+white_top256,A,Pancreas,300,0.7394,0.6793,0.0283
+white_top256,A,Pituitary,300,0.6867,0.5920,0.0167
+white_top256,A,Placenta,300,0.8500,0.8057,0.0233
+white_top256,A,Prostate,300,0.8883,0.8157,0.0233
+white_top256,A,Reference RNA,300,0.3117,0.3137,0.0283
+white_top256,A,Salivary gland,300,0.6122,0.4467,0.0267
+white_top256,A,Skeletal muscle,300,0.9117,0.8590,0.0267
+white_top256,A,Skin,300,0.7028,0.6420,0.0267
+white_top256,A,Spleen,300,0.5200,0.4817,0.0117
+white_top256,A,Stomach,300,0.6142,0.5440,0.0283
+white_top256,A,Testis,300,0.8883,0.8373,0.0200
+white_top256,A,Thymus,300,0.6333,0.5423,0.0267
+white_top256,A,Thyroid,300,0.7467,0.6330,0.0367
+white_top256,A,Tumor / cancer,300,0.5017,0.4210,0.0217
+white_top256,A,Uterus,300,0.7050,0.6453,0.0267
+white_top256,A,Vasculature,300,0.7017,0.6390,0.0267
+white_top256,B,Adipose,48,1.0000,1.0000,0.0208
+white_top256,B,Adrenal gland,56,1.0000,1.0000,0.0357
+white_top256,B,Bone / cartilage,36,1.0000,0.9167,0.0278
+white_top256,B,Bone marrow,24,1.0000,0.9958,0.0000
+white_top256,B,Brain / CNS,159,1.0000,0.9918,0.0818
+white_top256,B,Breast / mammary,43,0.8721,0.6977,0.0233
+white_top256,B,Cultured cells,18,0.0000,0.0000,0.2222
+white_top256,B,Eye,72,1.0000,0.9903,0.0139
+white_top256,B,Heart,89,1.0000,0.9910,0.0899
+white_top256,B,Intestine,93,1.0000,0.9935,0.0323
+white_top256,B,Kidney,264,1.0000,0.9973,0.1402
+white_top256,B,Liver,392,0.9974,0.9949,0.1939
+white_top256,B,Lung,86,0.9767,0.9733,0.0581
+white_top256,B,Skeletal muscle,229,0.9869,0.9310,0.0917
+white_top256,B,Skin,219,1.0000,0.9105,0.1279
+white_top256,B,Spleen,131,0.9847,0.9527,0.0840
+white_top256,B,Thymus,149,0.8171,0.6644,0.0537
+white_top256,C,replicates,14085,0.2126,0.1831,
