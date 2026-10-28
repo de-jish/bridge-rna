@@ -649,7 +649,7 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # carries " · " between its facets, so strip the size suffix, not a split.
     named = re.sub(r"\s+·\s+\d+ samples.*$", "", cohort_label).strip()
     c.ok(bool(named) and named in summary
-         and "ranked by embedding cosine similarity" in summary,
+         and "ranked by cosine similarity of the embeddings" in summary,
          f"so does the summary over the table: {summary[:80]!r}")
     shot(page, "04-pooled-search")
 

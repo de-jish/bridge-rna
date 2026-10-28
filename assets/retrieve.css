@@ -1466,6 +1466,16 @@ summary:focus-visible,
   margin-bottom: var(--space-3);
 }
 .results-seg--plot { flex: none; }
+
+/* Matching: two equal halves under Number of matches. An unavailable option
+   (no cache/whitening.npz on this machine) stays visible and says so. */
+.matching-control { margin-top: var(--space-3); }
+.results-seg--matching .dash-options-list-option { flex: 1 1 0; }
+.results-seg .dash-options-list-option:has(input:disabled) {
+  cursor: not-allowed;
+  color: var(--action-disabled-text);
+  background: none;
+}
 .results-seg--plot .dash-options-list-option { flex: none; padding: 6px 14px; }
 .plot-caption { margin: 0; flex: 1 1 260px; }
 .plot-panel .graph-wrap { flex: none; min-height: 320px; }

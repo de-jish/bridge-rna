@@ -57,6 +57,17 @@ _COLUMN_NAMES = {
 # --- coercion ---------------------------------------------------------------
 
 
+# What a score is called, keyed by the scoring that produced it
+# (`bridge_rna/scoring.py`). Here rather than there so this module stays pure
+# stdlib; scoring imports the names from here. A result saved before whitening
+# existed has no scoring recorded and was plain cosine.
+SCORE_NAMES = {"whitened": "whitened similarity", "cosine": "cosine similarity"}
+
+
+def score_name(scoring: Any) -> str:
+    return SCORE_NAMES.get(str(scoring or "").strip().lower(), SCORE_NAMES["cosine"])
+
+
 def _text(value: Any) -> str:
     """A display string, with every spelling of "missing" folded to ""."""
     if value is None:
@@ -181,8 +192,9 @@ def build_results(
                 row = rows[key] = {
                     "gsm": gsm, "gse": "", "title": "", "source_name": "",
                     "tissue": "", "species": "", "archs4_index": None,
-                    "rank_a": None, "score_a": None,
-                    "rank_b": None, "score_b": None, "identical": [],
+                    "rank_a": None, "score_a": None, "cosine_a": None,
+                    "rank_b": None, "score_b": None, "cosine_b": None,
+                    "identical": [],
                 }
             # Metadata is a property of the sample, not of the query that found
             # it, so either side may fill a field the other left blank.
@@ -195,6 +207,8 @@ def build_results(
             # so list position is the rank among every reference sample.
             row[f"rank_{side}"] = position + 1
             row[f"score_{side}"] = _number(hit.get("score"))
+            cosine = hit.get("cosine")
+            row[f"cosine_{side}"] = _number(cosine if cosine is not None else hit.get("score"))
 
     ordered = sorted(rows.values(), key=_rank_key)
 
@@ -210,6 +224,7 @@ def build_results(
     query_b = comparison.get("query_b") if comparison else None
     return {
         "mode": _text(payload.get("mode")),
+        "scoring": _text(payload.get("scoring")) or "cosine",
         "k": max(len(hits_a), len(hits_b)),
         "comparison": comparison is not None,
         "label_a": _label(payload.get("query")) or _text(payload.get("sample_id")),
@@ -477,9 +492,13 @@ def to_csv(
                        f"Query B: {_text(results.get('label_b'))}"]
     else:
         provenance.append(f"Query: {_text(results.get('label_a'))}")
+    whitened = _text(results.get("scoring")) == "whitened"
     provenance += [
         f"Query ID: {_text(results.get('query_id'))}",
         f"Mode: {_text(results.get('mode'))}",
+        ("Scoring: whitened similarity (cosine after whitening the embedding); "
+         "each match's plain cosine is in the cosine column" if whitened
+         else "Scoring: cosine similarity"),
         f"Matches requested (k): {int(results.get('k') or 0)}"
         + (" per cohort" if comparison else ""),
         f"Reference collection: {reference:,} ARCHS4 samples",
@@ -491,12 +510,15 @@ def to_csv(
         f"Sort: {describe_sort(sort, results)}",
         f"Exported at: {_text(exported_at)}",
         f"Ranks are positions among all {reference:,} reference samples for the "
-        "query, not row numbers in this file. Cosine similarity between "
-        "embeddings is not biological equivalence.",
+        f"query, not row numbers in this file. {score_name(results.get('scoring')).capitalize()} "
+        "between embeddings is not biological equivalence.",
     ]
 
-    rank_columns = (["rank_a", "score_a", "rank_b", "score_b", "gsm"] if comparison
-                    else ["rank", "gsm", "score"])
+    if comparison:
+        rank_columns = (["rank_a", "score_a", "cosine_a", "rank_b", "score_b", "cosine_b", "gsm"]
+                        if whitened else ["rank_a", "score_a", "rank_b", "score_b", "gsm"])
+    else:
+        rank_columns = ["rank", "gsm", "score"] + (["cosine"] if whitened else [])
     header = rank_columns + ["gse", "title", "source_name", "characteristics",
                              "tissue_category", "species", "identical_profile_gsms",
                              "archs4_index"]
@@ -509,11 +531,18 @@ def to_csv(
     for row in rows:
         gsm = _text(row.get("gsm"))
         hit = hits_lookup.get(gsm) if gsm else None
-        if comparison:
+        if comparison and whitened:
+            lead = [_csv_int(row.get("rank_a")), _csv_score(row.get("score_a")),
+                    _csv_score(row.get("cosine_a")),
+                    _csv_int(row.get("rank_b")), _csv_score(row.get("score_b")),
+                    _csv_score(row.get("cosine_b")), gsm]
+        elif comparison:
             lead = [_csv_int(row.get("rank_a")), _csv_score(row.get("score_a")),
                     _csv_int(row.get("rank_b")), _csv_score(row.get("score_b")), gsm]
         else:
             lead = [_csv_int(row.get("rank_a")), gsm, _csv_score(row.get("score_a"))]
+            if whitened:
+                lead.append(_csv_score(row.get("cosine_a")))
         writer.writerow(lead + [
             _text(row.get("gse")),
             _text(row.get("title")),

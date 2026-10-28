@@ -114,8 +114,10 @@ def test_empty_or_missing_payload_builds_nothing():
 
 def test_single_query_contract_shape():
     res = single_results()
-    assert set(res) == {"mode", "k", "comparison", "label_a", "label_b", "query_id",
-                        "reference_count", "profile_a", "profile_b", "rows"}
+    assert set(res) == {"mode", "scoring", "k", "comparison", "label_a", "label_b",
+                        "query_id", "reference_count", "profile_a", "profile_b", "rows"}
+    # A payload with no scoring recorded predates whitening and was plain cosine.
+    assert res["scoring"] == "cosine"
     assert res["mode"] == "cached"
     assert res["k"] == 5
     assert res["comparison"] is False
@@ -127,8 +129,8 @@ def test_single_query_contract_shape():
     assert res["profile_b"] == []
     row = res["rows"][0]
     assert set(row) == {"gsm", "gse", "title", "source_name", "tissue", "species",
-                        "archs4_index", "rank_a", "score_a", "rank_b", "score_b",
-                        "identical"}
+                        "archs4_index", "rank_a", "score_a", "cosine_a",
+                        "rank_b", "score_b", "cosine_b", "identical"}
     # The long free-text fields stay in hits-store.
     assert "characteristics" not in row and "geo_summary" not in row
 

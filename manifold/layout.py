@@ -985,7 +985,7 @@ def _sample_detail(row: dict) -> html.Div:
         ("Study", str(row.get("gse") or "Not recorded")),
         ("Tissue", str(row.get("tissue") or "Not recorded")),
         ("Species", str(row.get("species") or "Not recorded")),
-        ("Cosine", score_text),
+        ("Whitened" if row.get("metric") == "whitened" else "Cosine", score_text),
     ]
     return html.Div(className="bm-neighborhood-detail", children=[
         html.Div(className="bm-neighborhood-detail-head", children=[

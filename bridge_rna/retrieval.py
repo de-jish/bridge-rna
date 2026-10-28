@@ -50,6 +50,7 @@ from .config import (
     ROOT,
     UPLOAD_EMBED_SCRIPT_PATH,
 )
+from . import scoring as _scoring
 from .geo import _enrich_hits_from_ncbi_eutils
 from .preflight import preflight_retrieval_requirements
 from .util import (
@@ -279,16 +280,36 @@ def _annotate_from_cache(idx: np.ndarray, scores: np.ndarray) -> pd.DataFrame:
     return out
 
 
-def run_cached_query_retrieval(sample_id: str, topk: int) -> pd.DataFrame:
+def run_cached_query_retrieval(sample_id: str, topk: int,
+                               scoring: str = _scoring.COSINE) -> pd.DataFrame:
     """The fast path: precomputed query vector, one memmap pass, local metadata."""
     q_vec = cached_query_vector(sample_id)
     if q_vec is None:
         raise RuntimeError(f"No precomputed embedding for {sample_id}.")
     index_vecs, _, _ = _load_archs4_index()
-    idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk)
+    idx, score = _topk_cosine_from_memmap(index_vecs=index_vecs, q_vec=q_vec, k=topk,
+                                          scoring=scoring)
     hits = _annotate_from_cache(idx, score)
     hits["archs4_index"] = idx.astype(int)
-    return _ordered(hits)
+    return _with_plain_cosine(_ordered(hits), q_vec, scoring)
+
+
+def _with_plain_cosine(ranked: pd.DataFrame, q_vec: np.ndarray,
+                       scoring: str) -> pd.DataFrame:
+    """Every match carries its plain cosine beside the score that ranked it.
+
+    Under plain cosine the two are the same number and are copied. Under
+    whitening the cosine is recomputed in float64 for the rows returned only
+    (at most 1,000, about a millisecond), so the inspector and the CSV can show
+    the familiar number while the ranking uses the whitened one.
+    """
+    if scoring != _scoring.WHITENED or ranked.empty:
+        ranked["cosine"] = ranked["score"].astype(float)
+        return ranked
+    q = np.asarray(q_vec, dtype=np.float64).reshape(-1)
+    q = q / max(float(np.linalg.norm(q)), 1e-12)
+    ranked["cosine"] = reference_vectors(ranked["archs4_index"].to_numpy()) @ q
+    return ranked
 
 
 # --- Shared machinery: the query vector sources and the cosine scan --------
@@ -422,6 +443,7 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
                         block_bytes: int = 200_000_000,
                         progress: Any = None, *,
                         preserve_matrix_product: bool = False,
+                        scoring: str = "cosine",
                         ) -> tuple[np.ndarray, np.ndarray]:
     """Top-k for `m` query vectors in **one** pass over the index.
 
@@ -443,6 +465,13 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
     and the validator now calls straight in here rather than keeping a second
     copy of it: `progress(rows_done, total)` is what lets a several-thousand
     query sweep still print where it has got to.
+
+    ``scoring="whitened"`` ranks by cosine after whitening instead
+    (`bridge_rna/scoring.py`). It is the same single pass: each block is
+    centred on the ARCHS4 mean, multiplied by the per-query operator `v` in
+    place of the query itself, and divided by the row norms stored at build
+    time. Ties stay exact, because identical rows still produce identical
+    scores, and the same tie rule then applies.
     """
     Q = np.asarray(q_mat, dtype=np.float32)
     if Q.ndim == 1:
@@ -459,7 +488,16 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
 
     m = Q.shape[0]
     k = max(1, min(int(k), n))
-    Qt = np.ascontiguousarray(Q.T)                      # (d, m)
+    whitening = None
+    if scoring == _scoring.WHITENED:
+        whitening = _scoring.load_whitening()
+        if whitening is None:
+            raise RetrievalError("Whitened matching was requested but cache/whitening.npz "
+                                 "is missing or does not match the index. "
+                                 + _scoring.BUILD_HINT)
+        Qt = _scoring.query_operator(Q, whitening)      # (d, m)
+    else:
+        Qt = np.ascontiguousarray(Q.T)                  # (d, m)
     if preserve_matrix_product and m == 1:
         Qt = np.column_stack((Qt, np.zeros((d, 1), dtype=Qt.dtype)))
 
@@ -475,7 +513,13 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
         end = min(start + chunk, n)
         x = np.asarray(index_vecs[start:end], dtype=np.float32)
         x /= (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)
-        block = (x @ Qt).T[:m]                          # (m, rows in block)
+        if whitening is None:
+            block = (x @ Qt).T[:m]                      # (m, rows in block)
+        else:
+            # Centre first: x and mu are close, so subtracting mu . v after
+            # the product would cancel away the digits that rank the rows.
+            x -= whitening.mu
+            block = (x @ Qt).T[:m] / whitening.row_norms[start:end]
 
         take = min(k, block.shape[1])
         part = _tie_exact_top(block, take)
@@ -503,14 +547,16 @@ def _topk_cosine_matrix(index_vecs: np.memmap, q_mat: np.ndarray, k: int,
 
 
 def _topk_cosine_from_memmap(index_vecs: np.memmap, q_vec: np.ndarray,
-                             k: int) -> tuple[np.ndarray, np.ndarray]:
+                             k: int, scoring: str = _scoring.COSINE,
+                             ) -> tuple[np.ndarray, np.ndarray]:
     """One query vector's top-k. A one-row call into `_topk_cosine_matrix`.
 
     Verified against the previous standalone implementation on the real corpus
     before it was replaced: identical top-30 in order, maximum score difference
     exactly 0.0.
     """
-    idx, score = _topk_cosine_matrix(index_vecs, np.asarray(q_vec).reshape(1, -1), k)
+    idx, score = _topk_cosine_matrix(index_vecs, np.asarray(q_vec).reshape(1, -1), k,
+                                     scoring=scoring)
     return idx[0], score[0]
 
 
@@ -809,14 +855,16 @@ def run_uploaded_retrieval_with_neighborhood(
     neighborhood_depth: int | None = None,
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
+    scoring: str = _scoring.COSINE,
 ) -> UploadRetrieval:
     """Return requested upload hits, evidence neighborhood and score curve."""
     q_vec = embed_uploaded_counts(counts_path, sample_column)
     index_vecs, _, _ = _load_archs4_index()
     scan_k = _scan_depth(topk, neighborhood_depth)
-    idx, score = _topk_cosine_from_memmap(index_vecs, q_vec, scan_k)
+    idx, score = _topk_cosine_from_memmap(index_vecs, q_vec, scan_k, scoring=scoring)
     ranked = _annotate_from_cache(idx, score)
     ranked["archs4_index"] = idx.astype(int)
+    ranked = _with_plain_cosine(ranked, q_vec, scoring)
     hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
     if enable_biopython_metadata and _safe_str(entrez_email):
         hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))
@@ -833,6 +881,7 @@ def run_cohort_retrieval_with_neighborhood(
     topk: int,
     *,
     neighborhood_depth: int | None = None,
+    scoring: str = _scoring.COSINE,
 ) -> CohortRetrieval:
     """Pool a cohort and return requested hits plus one evidence prefix.
 
@@ -869,10 +918,11 @@ def run_cohort_retrieval_with_neighborhood(
     scan_k = _scan_depth(topk, neighborhood_depth)
     idx, score = _topk_cosine_matrix(
         index_vecs=index_vecs, q_mat=q_mat, k=scan_k,
-        preserve_matrix_product=True)
+        preserve_matrix_product=True, scoring=scoring)
 
     ranked = _annotate_from_cache(idx[0], score[0])
     ranked["archs4_index"] = idx[0].astype(int)
+    ranked = _with_plain_cosine(ranked, q_mat[0], scoring)
     hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
 
     return CohortRetrieval(hits, neighborhood, rows, score_profile(ranked))
@@ -1038,6 +1088,7 @@ def search_hits_with_neighborhood(
     neighborhood_depth: int | None = None,
     entrez_email: str | None = None,
     enable_biopython_metadata: bool = True,
+    scoring: str = _scoring.COSINE,
 ) -> SampleRetrieval:
     """Retrieve requested hits, a locatable evidence prefix, and a score curve.
 
@@ -1050,7 +1101,7 @@ def search_hits_with_neighborhood(
 
     scan_k = _scan_depth(topk, neighborhood_depth)
     if cached_query_vector(sample_id) is not None:
-        ranked = run_cached_query_retrieval(sample_id, scan_k)
+        ranked = run_cached_query_retrieval(sample_id, scan_k, scoring=scoring)
         hits, neighborhood = split_ranked_hits(ranked, topk, neighborhood_depth)
         if enable_biopython_metadata and _safe_str(entrez_email):
             hits = _enrich_hits_from_ncbi_eutils(hits, _safe_str(entrez_email))

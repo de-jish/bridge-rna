@@ -27,6 +27,7 @@
   "bridge_rna/results.py",
   "bridge_rna/results_view.py",
   "bridge_rna/retrieval.py",
+  "bridge_rna/scoring.py",
   "bridge_rna/similarity.py",
   "bridge_rna/util.py",
   "manifold/__init__.py",

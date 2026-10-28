@@ -61,11 +61,13 @@ def _text(value: Any) -> str:
         return _safe_str(value)
 
 
-def build_payload(frame: pd.DataFrame | None, *, label: str = "") -> dict:
+def build_payload(frame: pd.DataFrame | None, *, label: str = "",
+                  metric: str = "cosine") -> dict:
     """Serialize ranked retrieval rows, every one of them, into a JSON-safe payload.
 
     Rank is the row's position, so `frame` must be in rank order, which stored
-    hits are.
+    hits are. `metric` is the scoring that produced the scores ("cosine" or
+    "whitened"); each row carries it so a detail view labels its own number.
     """
     rows = []
     source = frame if frame is not None else pd.DataFrame()
@@ -77,6 +79,7 @@ def build_payload(frame: pd.DataFrame | None, *, label: str = "") -> dict:
             "rank": rank,
             "score": None if pd.isna(score) or not np.isfinite(score) else float(score),
             "archs4_index": _index(raw.get("archs4_index")),
+            "metric": metric,
         })
         rows.append(row)
     return {
@@ -85,7 +88,7 @@ def build_payload(frame: pd.DataFrame | None, *, label: str = "") -> dict:
         "label": _safe_str(label),
         "depth_requested": len(rows),
         "depth_returned": len(rows),
-        "metric": "cosine",
+        "metric": metric,
         "space": "embedding-512d",
         "hits": rows,
     }

@@ -431,7 +431,7 @@ def test_comparison_callback_keeps_independent_matches_for_both_arms(
     monkeypatch.setattr(
         retrieval_callbacks,
         "run_cohort_retrieval_with_neighborhood",
-        lambda members, topk: results[tuple(members)],
+        lambda members, topk, scoring="cosine": results[tuple(members)],
     )
     payload, _status = _callback_for(app, "cohort-search-button")(
         1,

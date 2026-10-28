@@ -477,6 +477,7 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
     # inside a square stays emergent and cannot drift from the banner's count.
     facts: dict[int, list[str]] = {}
     map_ranks: list[list] = []
+    metric = "whitened" if retrieval.get("metric") == "whitened" else "cosine"
     for cohort, hits, members, _style_ in prepared:
         ranks = _map_ranks(coords, hits, members)
         map_ranks.append(ranks)
@@ -492,12 +493,12 @@ def _retrieval_traces(coords, is_3d, retrieval) -> list:
                 # Each arm carries its own map rank here, because a shared hit
                 # is one coordinate with two nearest members and two answers.
                 line = (f"<b>{name}</b>  ·  512-d rank {i + 1} of {len(hits)}"
-                        f"  ·  cosine {score}")
+                        f"  ·  {metric} {score}")
                 if mr is not None:
                     line += f"  ·  map rank {mr:,}"
             else:
                 line = (f"512-d rank {i + 1} of {len(hits)} retrieved"
-                        f"  ·  cosine {score}")
+                        f"  ·  {metric} {score}")
                 if mr is not None:
                     line += f"<br>map rank {mr:,} of {n:,}{origin}"
             facts.setdefault(point, []).append(line)

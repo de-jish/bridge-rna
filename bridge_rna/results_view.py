@@ -147,6 +147,33 @@ def _label_row(label: Any, info: str | None) -> Any:
                     children=[label, info_help.info(info)])
 
 
+def build_matching_control() -> Any:
+    """How matches are scored: whitened similarity or plain cosine.
+
+    One control for Sample, Cohort and Upload, because they are three ways of
+    building one query and should be compared like with like. Whitened is shown
+    disabled, never hidden, on a machine without `cache/whitening.npz`; what a
+    finished search actually used is recorded with its result, not read back
+    from here.
+    """
+    from . import scoring as S
+
+    return html.Div(
+        className="control matching-control",
+        role="group",
+        **{"aria-labelledby": "matching-label"},
+        children=[
+            _label_row(html.Div("Matching", id="matching-label",
+                                className="control-label"), "matching"),
+            dcc.RadioItems(
+                id="matching", options=S.control_options(),
+                value=S.default_scoring(), inline=True,
+                className="results-seg results-seg--matching",
+            ),
+        ],
+    )
+
+
 def _filter_group(label_id: str, label: str, *children: Any,
                   extra_class: str = "", info: str | None = None,
                   **attrs: Any) -> Any:
@@ -403,7 +430,7 @@ def render_table(rows: list[dict], results: dict, sort: dict,
     ]
     return html.Table(className="results-table" + (
         " results-table--comparison" if results.get("comparison") else ""), children=[
-        html.Caption("Matches, ranked by embedding cosine similarity",
+        html.Caption(f"Matches, ranked by {R.score_name(results.get('scoring'))} of the embeddings",
                      className="visually-hidden"),
         html.Thead(html.Tr([_header(key, label, kind, sort)
                             for key, label, kind in columns])),
@@ -469,7 +496,8 @@ def _summary(results: dict, shown: int, filtered: bool) -> str:
             text += f" Ranks are positions among all {ref:,} reference samples."
         return text
     label = _safe_str(results.get("label_a"))
-    ranked = "ranked by embedding cosine similarity, not biological equivalence."
+    ranked = (f"ranked by {R.score_name(results.get('scoring'))} of the embeddings, "
+              "not biological equivalence.")
     if results.get("comparison"):
         return f"{total:,} matches across both cohorts, {ranked}"
     return f"{total:,} matches" + (f" for {label}, " if label else ", ") + ranked
@@ -546,7 +574,7 @@ def build_plot(kind: str, results: dict | None, rows: list[dict],
 
     k = int(results.get("k") or 0)
     depth, lo, hi = P.score_window(results)
-    caption = (f"Cosine similarity at ranks 1 to {depth:,}, spanning "
+    caption = (f"{R.score_name(results.get('scoring')).capitalize()} at ranks 1 to {depth:,}, spanning "
                f"{lo:.4f} to {hi:.4f}. Points are the {k:,} retrieved matches"
                + ("; filtered-out matches are faded." if n < len(results["rows"]) else "."))
     return P.score_rank_figure(results, rows, selected_gsm), caption, ""

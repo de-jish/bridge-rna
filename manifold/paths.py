@@ -57,6 +57,11 @@ COORDS_TSNE3 = CACHE_DIR / "coords_tsne3.parquet"
 
 PROJECTION_STATS_JSON = CACHE_DIR / "projection_stats.json"
 
+# The whitening fitted on the ARCHS4 embedding, written by build_whitening.py
+# and read by bridge_rna/scoring.py. Optional: without it every search scores
+# by plain cosine, as it always did.
+WHITENING_NPZ = CACHE_DIR / "whitening.npz"
+
 
 # --- Bridge RNA source artifacts (read-only) -------------------------------
 CHECKPOINT = BRIDGE_RNA_ROOT / "checkpoints_performer" / "r7hnr92k" / "best_model.pt"

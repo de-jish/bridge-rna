@@ -62,10 +62,14 @@ def _format_osdr_query_text(query_row: pd.Series) -> str:
 def _format_hits_table_text(hits_df: pd.DataFrame) -> str:
     if hits_df.empty:
         return "No hits available."
+    # A whitened result arrives with its score renamed `whitened_score` and
+    # the plain `cosine` beside it, so the model never reads one as the other.
     cols = [
         "gsm",
         "gse",
         "score",
+        "whitened_score",
+        "cosine",
         "species",
         "title",
         "source_name",

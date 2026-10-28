@@ -161,9 +161,9 @@ def test_sample_search_keeps_top_250_in_the_same_scan(monkeypatch, corpus):
     calls = []
     real = retrieval._topk_cosine_from_memmap
 
-    def counted(index_vecs, q_vec, k):
+    def counted(index_vecs, q_vec, k, scoring="cosine"):
         calls.append(k)
-        return real(index_vecs, q_vec, k)
+        return real(index_vecs, q_vec, k, scoring=scoring)
 
     monkeypatch.setattr(retrieval, "_topk_cosine_from_memmap", counted)
     samples = _samples_frame(corpus)
@@ -186,7 +186,8 @@ def test_existing_search_interface_still_scans_only_requested_depth(monkeypatch,
     real = retrieval._topk_cosine_from_memmap
     monkeypatch.setattr(
         retrieval, "_topk_cosine_from_memmap",
-        lambda index_vecs, q_vec, k: (calls.append(k) or real(index_vecs, q_vec, k)))
+        lambda index_vecs, q_vec, k, scoring="cosine": (
+            calls.append(k) or real(index_vecs, q_vec, k, scoring=scoring)))
     samples = _samples_frame(corpus)
     hits, mode = retrieval.search_hits(
         samples, str(samples["sample_id"].iloc[0]), topk=4,
@@ -442,6 +443,7 @@ def test_cohort_results_match_the_legacy_pooled_row(corpus, size, topk):
     old_idx, old_score = retrieval._topk_cosine_matrix(vecs, old_queries, k=250)
     old_ranked = retrieval._annotate_from_cache(old_idx[0], old_score[0])
     old_ranked["archs4_index"] = old_idx[0].astype(int)
+    old_ranked = retrieval._with_plain_cosine(old_ranked, pooled, "cosine")
     # Since 2026-10-22 the evidence prefix is the matches themselves.
     expected_hits, expected_evidence = retrieval.split_ranked_hits(old_ranked, topk)
     pd.testing.assert_frame_equal(expected_evidence, expected_hits)

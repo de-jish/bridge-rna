@@ -29,6 +29,7 @@ from typing import Any, Iterable
 
 import plotly.graph_objects as go
 
+from . import results as R
 from .figures import GRAPH_THEME, _empty_network_figure
 
 #: The series view draws this many GEO series; `series_counts` returns them all
@@ -366,7 +367,8 @@ def score_rank_figure(results: dict[str, Any] | None,
                     title={"text": x_title, "font": _font(12), "standoff": 8}),
         yaxis=_axis(range=[lo - pad, hi + pad],
                     tickformat=f".{_decimals(span)}f", nticks=6,
-                    title={"text": "Cosine similarity", "font": _font(12), "standoff": 8}),
+                    title={"text": R.score_name(results.get("scoring")).capitalize(),
+                           "font": _font(12), "standoff": 8}),
         # Box zoom on the curve, to read a step at the cut more closely.
         dragmode="zoom",
     )

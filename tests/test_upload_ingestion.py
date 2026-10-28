@@ -107,9 +107,9 @@ def test_uploaded_search_keeps_top_250_in_the_same_scan(
     calls = []
     real = retrieval._topk_cosine_from_memmap
 
-    def counted(index_vecs, q_vec, k):
+    def counted(index_vecs, q_vec, k, scoring="cosine"):
         calls.append(k)
-        return real(index_vecs, q_vec, k)
+        return real(index_vecs, q_vec, k, scoring=scoring)
 
     monkeypatch.setattr(retrieval, "_topk_cosine_from_memmap", counted)
     hits, neighborhood, profile = retrieval.run_uploaded_retrieval_with_neighborhood(

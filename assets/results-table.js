@@ -49,6 +49,7 @@
           sample_id: hits.sample_id || "",
           query_b: comparison.query_b || null,
           entrez_email: hits.entrez_email || "",
+          scoring: hits.scoring || "cosine",
           selected: selected || null,
           rows: rows,
         };
@@ -83,6 +84,7 @@
           query: hits.query || null,
           sample_id: hits.sample_id || "",
           entrez_email: hits.entrez_email || "",
+          scoring: hits.scoring || "cosine",
           hits: order.slice(0, AI_SUMMARY_MAX_ROWS)
             .map(function (g) { return lookup[g]; })
             .filter(Boolean),

@@ -20,7 +20,8 @@ from . import help as info_help
 from .config import DEFAULT_ENTREZ_EMAIL, OSDR_METADATA_PATH
 from .osdr import _eligible_osdr_count, load_osdr_samples
 from .panels import build_gene_list_banner, build_setup_banner
-from .results_view import build_plot_panel, build_results_panel, build_topk_control
+from .results_view import (build_matching_control, build_plot_panel, build_results_panel,
+                           build_topk_control)
 from .retrieval import _archs4_sample_count
 from .util import _safe_str
 
@@ -404,6 +405,7 @@ def build_view() -> html.Div:
                                 className="control-group",
                                 children=[
                                     build_topk_control(),
+                                    build_matching_control(),
                                 ],
                             ),
                             html.Details(

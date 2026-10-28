@@ -95,7 +95,8 @@ def _detail_text_block(title: str, text: str, collapsible: bool = False, placeho
     )
 
 
-def _details_head(kicker: str, heading: str, score: float | None = None) -> Any:
+def _details_head(kicker: str, heading: str, score: float | None = None,
+                  scoring: str = "") -> Any:
     children: list[Any] = [
         html.Div(
             children=[
@@ -105,8 +106,11 @@ def _details_head(kicker: str, heading: str, score: float | None = None) -> Any:
         )
     ]
     if score is not None:
-        children.append(html.Span(f"Cosine {score:.4f}", className="score-badge",
-                                  title="Cosine similarity between query and sample embeddings"))
+        whitened = scoring == "whitened"
+        children.append(html.Span(
+            f"{'Whitened' if whitened else 'Cosine'} {score:.4f}", className="score-badge",
+            title=("Whitened similarity: cosine after whitening the embeddings" if whitened
+                   else "Cosine similarity between query and sample embeddings")))
     return html.Div(className="details-head", children=children)
 
 
@@ -528,12 +532,18 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
     pubmed_doi = _first_non_empty(r, ["pubmed_doi_biopython", "pubmed_doi_ncbi"])
 
     parts: list[Any] = [
-        _details_head("ARCHS4 hit · GSM", _safe_str(r.get("gsm")), score=float(r.get("score", 0.0))),
+        _details_head("ARCHS4 hit · GSM", _safe_str(r.get("gsm")),
+                      score=float(r.get("score", 0.0)), scoring=_safe_str(r.get("scoring"))),
         _detail_section(
             "Identity", info="match-details", rows=[
                 _accession_row("GSM", _safe_str(r.get("gsm"))),
                 _accession_row("GSE", gse),
                 _detail_row("Title", title),
+                # Under whitening the badge shows the score that ranked the
+                # match; the familiar plain cosine stays one line below.
+                (_detail_row("Plain cosine", f"{float(r.get('cosine')):.4f}", mono=True)
+                 if _safe_str(r.get("scoring")) == "whitened"
+                 and _safe_str(r.get("cosine")) else None),
             ],
         ),
         _detail_section(

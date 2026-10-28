@@ -149,7 +149,10 @@ def _retrieval_overlay(hits_payload: dict | None,
             # one origin, and any drawn member serves.
             "query_point": query_points[0] if query_points else None,
             "query_points": query_points,
-            "query_label": query_label}
+            "query_label": query_label,
+            # Which score the hover names; absent on results saved before
+            # whitening existed, which were plain cosine.
+            "metric": str(hits_payload.get("scoring") or "cosine")}
 
 
 def _neighborhood_payload_for_arm(hits_payload: dict | None,
@@ -173,8 +176,10 @@ def _neighborhood_payload_for_arm(hits_payload: dict | None,
         return None
     if not stored.get("available"):
         return stored
+    # A result saved before whitening existed records no scoring: plain cosine.
     return neighborhoods.build_payload(pd.DataFrame(list(hits or [])),
-                                       label=str(stored.get("label") or ""))
+                                       label=str(stored.get("label") or ""),
+                                       metric=str(hits_payload.get("scoring") or "cosine"))
 
 
 def next_neighborhood_open_state(trigger: str | None, previous: dict | None,

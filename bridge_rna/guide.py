@@ -57,8 +57,8 @@ CHAPTERS: tuple[Chapter, ...] = (
               "The number-of-matches control and the Search button."),
         Slide("retrieve-03-table",
               "Read the ranked matches",
-              "Each row is a GEO sample, ranked by the cosine similarity of its "
-              "embedding to yours. Rank 1 is the closest of all 940,455.",
+              "Each row is a GEO sample, ranked by how similar its embedding is "
+              "to yours. Rank 1 is the closest of all 940,455.",
               "The matches table with rank, score, GSM, series and tissue "
               "columns."),
         Slide("retrieve-04-filter",

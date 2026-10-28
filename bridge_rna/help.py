@@ -57,7 +57,7 @@ ENTRIES: dict[str, Entry] = {
         ("Three ways to ask the same question, \"which Earth samples look most "
          "like this?\": one OSDR sample, a whole experimental group pooled into "
          "one query, or a counts file you upload.",
-         "All three end in the same cosine scan over the 940,455 ARCHS4 samples, "
+         "All three end in the same scan over the 940,455 ARCHS4 samples, "
          "so their results share one format."),
     ),
     "osdr-study": Entry(
@@ -79,16 +79,31 @@ ENTRIES: dict[str, Entry] = {
     "number-of-matches": Entry(
         "Number of matches",
         ("How many of the 940,455 GEO samples to return, best first, from 3 "
-         "to 1,000. Each match's score is the cosine similarity between its "
-         "embedding and your sample's.",
+         "to 1,000. Each match's score says how similar its embedding is to "
+         "your sample's, measured as set under Matching.",
          "Ranks are positions among all 940,455 samples and never change when "
          "you filter. An exact tie goes to the lower reference row, so the "
          "same search always returns the same order."),
         (_x("bridge_rna/retrieval.py",
             "x /= (np.linalg.norm(x, axis=1, keepdims=True) + 1e-12)",
-            "block = (x @ Qt).T[:m]                          # (m, rows in block)",
+            "if whitening is None:",
+            "block = (x @ Qt).T[:m]                      # (m, rows in block)",
             "...",
             "order = np.lexsort((best_idx, -best_score), axis=-1)"),),
+    ),
+    "matching": Entry(
+        "Matching",
+        ("How matches are ranked. Plain cosine compares embeddings as they are. "
+         "Whitened first rescales the embedding space so that no single "
+         "direction dominates, which separates tissues that plain cosine "
+         "confuses: across 37 tissues it raised retrieval accuracy from 64% to "
+         "69%, and from 96% to 98% for OSDR samples.",
+         "Whitened scores spread out more and are not comparable with cosine "
+         "values; each match's plain cosine stays in the details panel and the "
+         "CSV."),
+        (_x("bridge_rna/retrieval.py",
+            "x -= whitening.mu",
+            "block = (x @ Qt).T[:m] / whitening.row_norms[start:end]"),),
     ),
     "metadata-options": Entry(
         "Metadata options",
@@ -162,8 +177,9 @@ ENTRIES: dict[str, Entry] = {
     # --- Retrieve: results ----------------------------------------------------
     "matches": Entry(
         "Matches",
-        ("The GEO samples most similar to your query, ranked by cosine "
-         "similarity of their embeddings. Similarity here means the model "
+        ("The GEO samples most similar to your query, ranked by the "
+         "similarity of their embeddings (whitened or plain cosine, as set "
+         "under Matching). Similarity here means the model "
          "places the two expression profiles close together, not that they "
          "are the same biology.",
          "Some GEO samples are the same data uploaded twice under two "
@@ -195,9 +211,9 @@ ENTRIES: dict[str, Entry] = {
     ),
     "filter-min-score": Entry(
         "Minimum score",
-        ("Hide matches whose cosine similarity is below this value. Scores at "
-         "the top of a 940,455-sample index are close together, so small "
-         "differences in this number matter."),
+        ("Hide matches whose score is below this value. The score is whitened "
+         "similarity or plain cosine, whichever ranked the matches, and the "
+         "two scales are not comparable."),
     ),
     "filter-text": Entry(
         "Text contains",
@@ -265,7 +281,7 @@ ENTRIES: dict[str, Entry] = {
          "3-D) map, by one of three methods fit on all 942,563 points: UMAP, "
          "t-SNE or PCA. Each vector is scaled to length 1 first.",
          "Nearby points tend to be similar, but distances on the map are not "
-         "the cosine scores used to rank matches."),
+         "the similarity scores used to rank matches."),
         (_x("precompute/build_projections.py",
             "reducer = umap.UMAP(",
             "n_components=n_components,",
@@ -326,7 +342,7 @@ ENTRIES: dict[str, Entry] = {
          "comparison, A and B switch between the two cohorts' matches."),
         (_x("manifold/callbacks.py",
             "return neighborhoods.build_payload(pd.DataFrame(list(hits or [])),",
-            "label=str(stored.get(\"label\") or \"\"))"),),
+            "label=str(stored.get(\"label\") or \"\"),"),),
     ),
     "reset-view": Entry(
         "Reset view",

@@ -101,7 +101,10 @@ def top_k(vecs, queries: np.ndarray, q_series: np.ndarray, series: np.ndarray,
             sub = s[masked]
             sub[same] = -np.inf
             s[masked] = sub
-        part = np.argpartition(-s, k - 1, axis=1)[:, :k]
+        # The app's own tie-exact selection: a plain argpartition keeps an
+        # arbitrary member of a tie at the cut, and tied rows (one profile filed
+        # under two accessions) can carry different tissue labels.
+        part = R._tie_exact_top(s, k)
         cand_s = np.concatenate([best_s, np.take_along_axis(s, part, 1)], axis=1)
         cand_i = np.concatenate([best_i, part + start], axis=1)
         order = np.lexsort((cand_i, -cand_s), axis=1)[:, :k]

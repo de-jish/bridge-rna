@@ -29,6 +29,7 @@ from .ai import (
     unavailable_reason,
 )
 from . import cohorts as C
+from . import scoring as S
 from .config import GENERIC_ENTREZ_EMAIL, MAX_UPLOAD_BYTES
 from .geo import _enrich_hits_from_ncbi_eutils
 from .layout import (
@@ -92,6 +93,27 @@ def _retrieval_phrase(mode: str) -> str:
                      "embeddings, scored against all "
                      f"{_format_count(ARCHS4_SAMPLE_COUNT)} ARCHS4 samples",
     }.get(mode, mode)
+
+
+def _scoring_fields(effective: str) -> dict[str, str]:
+    """What the payload records about the scoring that actually ran.
+
+    Recorded per result, never read from the Matching control afterwards:
+    switching the control must not relabel a result already on screen, and a
+    result saved before whitening existed carries no tag and stays plain cosine.
+    """
+    return {"scoring": effective,
+            "scoring_id": S.transform_id() if effective == S.WHITENED else ""}
+
+
+def _scoring_note(requested: str, effective: str) -> str:
+    """The banner's clause about ranking, so the interface says what ran."""
+    if effective == S.WHITENED:
+        return " Ranked by whitened similarity."
+    if requested == S.WHITENED:
+        return (" Ranked by plain cosine: whitening needs the precomputed "
+                "embedding, which this path does not use.")
+    return ""
 
 
 # --- Cohort mode -------------------------------------------------------------
@@ -472,6 +494,7 @@ def register(app) -> None:
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
+        State("matching", "value"),
         running=[
             (Output("search-button", "disabled"), True, False),
             (Output("query-running-indicator", "children"), "Finding related ARCHS4 samples...", ""),
@@ -484,6 +507,7 @@ def register(app) -> None:
         topk_position: float,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
+        matching: str | None = None,
     ):
         # Only a click searches. This callback also fires when the view mounts,
         # and it used to answer that call with `None` - which wiped the
@@ -498,6 +522,7 @@ def register(app) -> None:
         q_row = samples_df.loc[samples_df["sample_id"] == sample_id].iloc[0]
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
+        scoring = S.resolve(matching)
         try:
             hits_df, neighborhood_df, mode, profile = search_hits_with_neighborhood(
                 samples_df=samples_df,
@@ -505,6 +530,7 @@ def register(app) -> None:
                 topk=requested_match_count(topk, topk_position),
                 entrez_email=email_value,
                 enable_biopython_metadata=enable_biopython,
+                scoring=scoring,
             )
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
@@ -527,12 +553,17 @@ def register(app) -> None:
         # cached and demo paths run the NCBI fetch.
         enriched = (enable_biopython and _safe_str(entrez_email)
                     and mode in ("cached", "demo"))
+        # Only the cached path scans with the precomputed vector; the supplied
+        # table and the subprocess return cosine rankings, and say so.
+        effective = scoring if mode == "cached" else S.COSINE
         status_message = (
             f"Retrieved {len(hits_df):,} hits {how}"
             + (", plus GEO and PubMed enrichment." if enriched else ".")
+            + _scoring_note(scoring, effective)
         )
         status = build_status_banner(status_message, kind="good")
         payload = {
+            **_scoring_fields(effective),
             "sample_id": sample_id,
             "entrez_email": email_value,
             "biopython_enabled": bool(enable_biopython),
@@ -856,6 +887,7 @@ def register(app) -> None:
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
+        State("matching", "value"),
         running=[
             (Output("cohort-search-button", "disabled"), True, False),
             (Output("cohort-running-indicator", "children"),
@@ -873,6 +905,7 @@ def register(app) -> None:
         topk_position: float,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
+        matching: str | None = None,
     ):
         # Belt and braces against the remount case above: a search runs when
         # somebody clicks Search, and a click means n_clicks is at least one.
@@ -888,11 +921,13 @@ def register(app) -> None:
         excluded = [m for m in cohort.members if m not in set(members)]
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
+        scoring = S.resolve(matching)
 
         try:
             hits_df, neighborhood_df, rows, profile = (
                 run_cohort_retrieval_with_neighborhood(
-                    members, topk=requested_match_count(topk, topk_position))
+                    members, topk=requested_match_count(topk, topk_position),
+                    scoring=scoring)
             )
             geometry = C.cohort_geometry(members, rows)
             if enable_biopython and _safe_str(entrez_email):
@@ -906,8 +941,8 @@ def register(app) -> None:
             if other is not None:
                 other_hits, other_neighborhood, other_rows, other_profile = (
                     run_cohort_retrieval_with_neighborhood(
-                        list(other.members), topk=requested_match_count(topk, topk_position)
-                    )
+                        list(other.members), topk=requested_match_count(topk, topk_position),
+                        scoring=scoring)
                 )
                 other_geometry = C.cohort_geometry(list(other.members), other_rows)
         except Exception as exc:
@@ -923,6 +958,7 @@ def register(app) -> None:
 
         query = _cohort_query_series(cohort, geometry, excluded)
         payload: dict[str, Any] = {
+            **_scoring_fields(scoring),
             "sample_id": cohort.cohort_id,
             "entrez_email": email_value,
             "biopython_enabled": bool(enable_biopython),
@@ -948,6 +984,7 @@ def register(app) -> None:
                 f"samples ({cohort.describe()}) {how}."
                 + excluded_note
                 + (" Plus GEO and PubMed enrichment." if enriched else "")
+                + _scoring_note(scoring, scoring)
             )
             return payload, build_status_banner(message, kind="good")
 
@@ -1071,6 +1108,7 @@ def register(app) -> None:
         State("topk-slider", "value"),
         State("entrez-email-input", "value"),
         State("biopython-toggle", "value"),
+        State("matching", "value"),
         running=[
             (Output("upload-search-button", "disabled"), True, False),
             (Output("upload-running-indicator", "children"),
@@ -1086,6 +1124,7 @@ def register(app) -> None:
         topk_position: float,
         entrez_email: str | None,
         biopython_toggle: list[str] | None,
+        matching: str | None = None,
     ):
         # See run_cohort_search: this one was firing at page load too, and
         # announcing "Upload a counts file first" before anyone had done
@@ -1102,6 +1141,7 @@ def register(app) -> None:
         column = _safe_str(sample_column) or _safe_str(columns[0])
         enable_biopython = bool(biopython_toggle and "on" in biopython_toggle)
         email_value = _safe_str(entrez_email) or GENERIC_ENTREZ_EMAIL
+        scoring = S.resolve(matching)
 
         try:
             hits_df, neighborhood_df, profile = run_uploaded_retrieval_with_neighborhood(
@@ -1110,6 +1150,7 @@ def register(app) -> None:
                 topk=requested_match_count(topk, topk_position),
                 entrez_email=email_value,
                 enable_biopython_metadata=enable_biopython,
+                scoring=scoring,
             )
         except Exception as exc:
             detail = getattr(exc, "detail", "") or _safe_str(exc)
@@ -1127,9 +1168,11 @@ def register(app) -> None:
         status_message = (
             f"Retrieved {len(hits_df):,} hits {_retrieval_phrase(UPLOAD_MODE)}"
             + (", plus GEO and PubMed enrichment." if enriched else ".")
+            + _scoring_note(scoring, scoring)
         )
         status = build_status_banner(status_message, kind="good")
         payload = {
+            **_scoring_fields(scoring),
             "sample_id": _safe_str(query["sample_id"]),
             "entrez_email": email_value,
             "biopython_enabled": bool(enable_biopython),
@@ -1190,6 +1233,10 @@ def register(app) -> None:
             return blocked, ""
 
         hits_df = pd.DataFrame(request.get("hits", []))
+        if _safe_str(request.get("scoring")) == S.WHITENED and "score" in hits_df:
+            hits_df = hits_df.rename(columns={"score": "whitened_score"})
+        elif "cosine" in hits_df:
+            hits_df = hits_df.drop(columns=["cosine"])   # the same number as score
         email = _safe_str(request.get("entrez_email")) or GENERIC_ENTREZ_EMAIL
 
         # The study abstracts and overall-design text are the substance of what
@@ -1277,5 +1324,7 @@ def register(app) -> None:
                             hits_df[col] = ""
                         hits_df.loc[row_mask, col] = enriched_one.iloc[0][col]
 
+        if not hits_df.empty:
+            hits_df["scoring"] = _safe_str(context.get("scoring")) or "cosine"
         return build_details_panel(query=q_row, selected_payload=selected_node,
                                    hits_df=hits_df, query_b=q_row_b)

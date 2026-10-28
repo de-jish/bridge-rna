@@ -53,10 +53,13 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from bridge_rna import cohorts as C  # noqa: E402
+from bridge_rna import scoring as S  # noqa: E402
 from bridge_rna.retrieval import (  # noqa: E402
     _cached_osdr_embeddings,
     _load_archs4_index,
     _topk_cosine_matrix,
+    run_cached_query_retrieval,
+    run_cohort_retrieval_with_neighborhood,
 )
 
 # Deep enough that the agreement statistic is not dominated by ties, shallow
@@ -102,7 +105,8 @@ class QueryBatch:
     def __len__(self) -> int:
         return len(self._vectors)
 
-    def run(self, k: int = MAX_DEPTH, block_bytes: int = 200_000_000) -> None:
+    def run(self, k: int = MAX_DEPTH, block_bytes: int = 200_000_000,
+            scoring: str = S.COSINE) -> None:
         if not self._vectors:
             return
         Q = np.stack(self._vectors)
@@ -117,7 +121,8 @@ class QueryBatch:
                   end="", flush=True)
 
         best_idx, best_score = _topk_cosine_matrix(
-            index_vecs, Q, k=min(k, n), block_bytes=block_bytes, progress=tick)
+            index_vecs, Q, k=min(k, n), block_bytes=block_bytes, progress=tick,
+            scoring=scoring)
         print(f"\r  scanned {n:,} rows x {q} queries in {time.time() - t0:.1f} s")
 
         for i, name in enumerate(self._names):
@@ -141,7 +146,15 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--stability", action="store_true",
                     help="print only the stability-versus-k curve")
+    ap.add_argument("--scoring", choices=S.SCORINGS, default=S.COSINE,
+                    help="rank with plain cosine (default) or whitened similarity. "
+                         "Whitened becomes the app's default only if every check "
+                         "passes under it (docs/whitened-matching.md).")
     args = ap.parse_args()
+    if args.scoring == S.WHITENED and not S.available():
+        print(f"FAIL: whitened scoring requested but unavailable. {S.BUILD_HINT}")
+        return 2
+    print(f"Scoring: {S.score_name(args.scoring)}")
 
     rng = np.random.default_rng(args.seed)
 
@@ -240,10 +253,69 @@ def main() -> int:
                                  for j in range(k)]))
 
     print(f"Scoring {len(batch):,} query vectors in one memmap pass...")
-    batch.run()
+    batch.run(scoring=args.scoring)
     print()
 
     failures: list[str] = []
+
+    # The score precision each scoring can resolve, used by checks 1 and 1b.
+    # Plain cosine resolves float32 at magnitude 1. Whitening maps the query
+    # through a transform that stretches its weakest directions by up to
+    # sqrt(1 / floor) - 100x at the shipped 1e-4 - so a one-ulp change in the
+    # query (which pooling one sample makes) can move a whitened score by up
+    # to that factor more. Derived from the floor, not tuned to pass.
+    EPS32 = float(np.finfo(np.float32).eps)
+    score_tol = (max(1e-6, EPS32 * float(np.sqrt(1.0 / S.FLOOR)))
+                 if args.scoring == S.WHITENED else 1e-6)
+    print(f"Score tolerance for this scoring: {score_tol:.2e}\n")
+
+    def same_up_to_near_ties(app_idx, app_scores, name, depth) -> bool:
+        """The app's top-`depth` equals the batch's, except that rows whose
+        scores lie within `score_tol` of each other may swap places. A batched
+        matrix product and a single-query product round differently, so a
+        near-tie can resolve either way in either scoring; anything more than
+        that is a real disagreement."""
+        b_idx, b_scores = batch.results[name], batch.scores[name]
+        b_score_of = dict(zip(b_idx.tolist(), b_scores.tolist()))
+        for i in range(depth):
+            if app_idx[i] == b_idx[i]:
+                continue
+            got = b_score_of.get(int(app_idx[i]))
+            if got is None or abs(got - float(b_scores[i])) > score_tol:
+                return False
+        return float(np.abs(np.asarray(app_scores[:depth]) - b_scores[:depth]).max()) <= score_tol
+
+    # ---- check 1b: the batch is the app ------------------------------------
+    #
+    # Every check below reads rankings from one batched matrix product. The app
+    # runs a sample as a single query and a cohort as a padded one. The batch
+    # only speaks for the app if the three agree at the depth a reader sees,
+    # under whichever scoring is being judged - so this compares the batch with
+    # the app's own search functions rather than assuming it.
+    SERVING_DEPTH = 20
+    serving = [("sample", probe_key, identity_plain,
+                run_cached_query_retrieval(probe_key, MAX_DEPTH, scoring=args.scoring))]
+    for n_c, (c, full, _raw, _loo, _m) in enumerate(plan[:3]):
+        hits = run_cohort_retrieval_with_neighborhood(
+            list(c.members), topk=MAX_DEPTH, scoring=args.scoring).hits
+        serving.append(("cohort", c.cohort_id, full, hits))
+    serving_ok = True
+    print("1b. SERVING  the batch against the app's own search functions")
+    for kind, label, name, hits in serving:
+        app_idx = hits["archs4_index"].to_numpy()[:SERVING_DEPTH]
+        app_scores = hits["score"].to_numpy()[:SERVING_DEPTH]
+        same = np.array_equal(app_idx, batch.results[name][:SERVING_DEPTH])
+        diff = float(np.abs(app_scores - batch.scores[name][:SERVING_DEPTH]).max())
+        ok = same_up_to_near_ties(app_idx, app_scores, name, SERVING_DEPTH)
+        serving_ok &= ok
+        print(f"   {kind:<6} {label[:48]:<48} top-{SERVING_DEPTH} "
+              f"{'identical' if same else ('same up to near-ties' if ok else 'DIFFERS')}"
+              f", max score diff {diff:.1e}")
+    if not serving_ok:
+        failures.append("check 1b: the batched scan does not reproduce the app's "
+                        "sample or cohort search, so the other checks do not "
+                        "describe what users see")
+    print(f"   -> {'PASS' if serving_ok else 'FAIL'}\n")
 
     # ---- check 1: identity ------------------------------------------------
     #
@@ -275,7 +347,7 @@ def main() -> int:
                                   - batch.scores[identity_plain]).max())
     ordered_ok = np.array_equal(pooled_idx[:IDENTITY_ORDERED_DEPTH],
                                 plain_idx[:IDENTITY_ORDERED_DEPTH])
-    scores_ok = max_score_diff < 1e-6
+    scores_ok = max_score_diff < score_tol
     first_diff = next((i for i in range(len(pooled_idx))
                        if pooled_idx[i] != plain_idx[i]), None)
     tie_gap = (float(batch.scores[identity_plain][first_diff]
@@ -425,7 +497,12 @@ def main() -> int:
     else:
         print(f"   cohorts.LOW_N_THRESHOLD is {C.LOW_N_THRESHOLD}  "
               f"-> {'agrees' if knee == C.LOW_N_THRESHOLD else 'DISAGREES'}")
-        if knee is not None and knee != C.LOW_N_THRESHOLD:
+        if knee is None:
+            failures.append(
+                f"check 5: over all {len(all_cohorts)} cohorts no size bucket "
+                f"reaches {C.STABILITY_FLOOR:.2f} stability, so there is no "
+                "size at which a cohort's results usually hold up.")
+        elif knee != C.LOW_N_THRESHOLD:
             failures.append(
                 f"check 5: over all {len(all_cohorts)} cohorts the knee is "
                 f"k >= {knee}, but cohorts.LOW_N_THRESHOLD is "
@@ -462,7 +539,8 @@ def main() -> int:
         for f in failures:
             print(f"FAIL  {f}")
         return 1
-    print("All checks passed. Cohort pooling is doing what it claims.")
+    print(f"All checks passed under {S.score_name(args.scoring)}. "
+          "Cohort pooling is doing what it claims.")
     return 0
 
 
