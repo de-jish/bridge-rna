@@ -18,6 +18,8 @@ The two repositories were merged on 2026-07-22 and it now covers the whole produ
 
 **Verified.** 1,025 unit tests; browser suites 217, 69, 191, 70, 45, 33 and 3 checks; guide screenshots recaptured.
 
+**Shipped, not yet applied.** Code `20261028T091659Z-d1d53c16` (commit `cefbe4e`) transferred and read-back verified: 1 file added (`bridge_rna/scoring.py`), 30 changed, nothing removed, no server drift, no dependency changes. `cache/whitening.npz` staged separately in `.ship/incoming/data-20261028-whitening/` and verified by a read-only SSH checksum (`1614ca24...d950`), because the SFTP client's read allowlist does not cover cache data. On the server: copy the file into `cache/` first, so the apply's preflight verifies it against the memmap, then apply, restart Gunicorn, and commit and push to GitLab. Jamie's Drive folder already has the file.
+
 ## 2026-10-27 (in-app help: "i" explanations and a guided tour)
 
 **"i" explanations.** Thirty-two small "i" buttons across both views, beside the controls, filters, plot switch, inspector, AI summary, map rail and neighborhood explorer. Each opens a short plain explanation and, where it helps, the real lines of code behind the feature with the file they come from. Joshua asked for many so he can prune them; removing one is deleting one `info(...)` call. `tests/test_help.py` requires every quoted block to appear contiguously and in order in the cited file, so an explanation can never show code the app no longer runs. The explanations render once on the shell and `assets/info-popover.js` shows one in a body-level popover, which no scroll container can clip and which never rewrites a Dash node.
