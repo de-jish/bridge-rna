@@ -268,10 +268,15 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     c.ok(page.locator("#results-download-button").is_disabled(),
          "and there is nothing to download")
     page.locator("#filter-text").fill("")
-    page.locator("#filter-min-score").fill("0.99")
+    settle(page, 1200)
+    # A threshold taken from the scores on screen, not a constant: whitened
+    # and plain cosine scores live on different scales.
+    floor = f"{sorted(float(s) for s in column_text(page, 'Score'))[-10]:.4f}"
+    page.locator("#filter-min-score").fill(floor)
     settle(page, 1300)
     scores = [float(s) for s in column_text(page, "Score")]
-    c.ok(scores and min(scores) >= 0.99, "minimum score holds on every shown row")
+    c.ok(scores and min(scores) >= float(floor),
+         f"minimum score {floor} holds on every shown row ({len(scores)} rows)")
     page.locator("#filter-clear").click()
     settle(page)
 
@@ -342,6 +347,43 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     c.ok(summary(page).startswith("1,000 matches for"),
          "returning from the map repaints the same results")
 
+    print("\n[matching]")
+    # Whitened is the default where cache/whitening.npz exists (docs/whitened-
+    # matching.md). What a result was ranked by is recorded with it, so moving
+    # the control must not relabel the results already on screen.
+    c.ok(page.locator("#matching input[value='whitened']").is_checked(),
+         "Whitened is the default matching")
+    c.ok("ranked by whitened similarity" in summary(page),
+         f"the summary names the scoring that ran: {summary(page)[:90]!r}")
+    page.locator("#matching").get_by_text("Plain cosine", exact=True).click()
+    settle(page, 700)
+    c.ok("ranked by whitened similarity" in summary(page),
+         "moving the control does not relabel the results on screen")
+    search(page)
+    status = page.locator("#search-status").inner_text()
+    c.ok("ranked by cosine similarity" in summary(page) and "whitened" not in status.lower(),
+         "a plain-cosine search is labelled cosine, in the summary and the banner")
+    page.locator("#results-table-wrap tbody tr").first.locator("td").nth(4).click()
+    settle(page, 1500)
+    badge = page.locator(".score-badge").first.inner_text()
+    c.ok(badge.startswith("Cosine"), f"the inspector badge says Cosine: {badge!r}")
+    c.ok(page.locator("#details-panel").get_by_text("Plain cosine").count() == 0,
+         "and shows no second cosine line, since the score is the cosine")
+    page.locator("#matching").get_by_text("Whitened", exact=True).click()
+    settle(page, 500)
+    search(page)
+    c.ok("ranked by whitened similarity" in summary(page)
+         and "Ranked by whitened similarity" in page.locator("#search-status").inner_text(),
+         "a whitened search says so in the summary and the banner")
+    page.locator("#results-table-wrap tbody tr").first.locator("td").nth(4).click()
+    settle(page, 1500)
+    badge = page.locator(".score-badge").first.inner_text()
+    c.ok(badge.startswith("Whitened")
+         and page.locator("#details-panel").get_by_text("Plain cosine").count() == 1,
+         f"the inspector shows the whitened score and the plain cosine: {badge!r}")
+    y_title = page.evaluate("() => (document.querySelector('#results-plot .ytitle') || {}).textContent")
+    c.ok(y_title == "Whitened similarity", f"the plot axis names it: {y_title!r}")
+
     print("\n[narrow layout]")
     for width in (1180, 900, 390, 320):
         page.set_viewport_size({"width": width, "height": 900})
@@ -368,6 +410,8 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
          f"a comparison shows both cohorts' ranks: {headers}")
     c.ok(page.locator("#filter-retrieved-by-group").is_visible(),
          "Retrieved by appears for a comparison")
+    c.ok("ranked by whitened similarity" in summary(page),
+         "both cohorts of a comparison are ranked, and labelled, by the same scoring")
     page.locator("#filter-retrieved-by").get_by_text("Both", exact=True).click()
     settle(page)
     both_a = ranks(page, headers.index("Rank A"))

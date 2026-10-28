@@ -225,6 +225,7 @@ def build_results(
     return {
         "mode": _text(payload.get("mode")),
         "scoring": _text(payload.get("scoring")) or "cosine",
+        "scoring_id": _text(payload.get("scoring_id")),
         "k": max(len(hits_a), len(hits_b)),
         "comparison": comparison is not None,
         "label_a": _label(payload.get("query")) or _text(payload.get("sample_id")),
@@ -496,7 +497,8 @@ def to_csv(
     provenance += [
         f"Query ID: {_text(results.get('query_id'))}",
         f"Mode: {_text(results.get('mode'))}",
-        ("Scoring: whitened similarity (cosine after whitening the embedding); "
+        (f"Scoring: whitened similarity (cosine after whitening the embedding, "
+         f"transform {_text(results.get('scoring_id')) or 'unrecorded'}); "
          "each match's plain cosine is in the cosine column" if whitened
          else "Scoring: cosine similarity"),
         f"Matches requested (k): {int(results.get('k') or 0)}"

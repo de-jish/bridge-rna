@@ -47,6 +47,16 @@ def unit32(x: np.ndarray) -> np.ndarray:
     return x
 
 
+def file_sha256(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(16 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def fit(vecs) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     n, d = vecs.shape
     total = np.zeros(d)
@@ -149,6 +159,7 @@ def main() -> int:
         "method": "whitening", "floor": args.floor, "floored_directions": floored,
         "fitted_rows": n, "dimension": d, "index_bytes": int(vecs.nbytes),
         "index_fingerprint": scoring.index_fingerprint(vecs),
+        "index_sha256": file_sha256(paths.ARCHS4_MMAP),
         "normalisation": "float32 x/(|x|+1e-12), centred in float32",
         "pc1_share": float(lam[0] / lam.sum()),
         "transform_id": hashlib.sha256(mu32.tobytes() + W.tobytes()).hexdigest()[:12],

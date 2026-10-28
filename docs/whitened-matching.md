@@ -52,10 +52,38 @@ It is optional, like `archs4_metadata.parquet`: without it the app runs exactly 
 `precompute/validate_cohorts.py --scoring whitened` reruns all six checks with the whitened scan.
 Whitened becomes the default only if it passes.
 
+## What the build measured
+
+`precompute/build_whitening.py` on the real corpus, 2026-10-28: fitted on all 940,455 rows in 9 s, PC1 41.3% of variance, 343 of 512 directions at the floor; row norms median 14.05 (5.81 to 52.99).
+Against an explicit float64 transform over every row, for 8 real OSDR queries, the app's scan agrees to 1.7e-7 with identical top 100s, and the padded cohort-style scan has identical top 20s.
+
+The contract is the one plain cosine has always had: **the scan's float32 arithmetic defines the ranking**.
+Deeper near-ties can order differently between a float32 and a float64 computation, or between a single-query and a batched product, under either scoring; that is rounding, not disagreement.
+
+## Codex's review of the plan
+
+Ten findings; all were checked against the code and acted on.
+The two that changed the design: the stored norms must be computed from exactly the vector the scan multiplies (they were not, and fixing it cut the error eightfold), and the artifact needs a content identity, not a byte count (`index_fingerprint`).
+The rest: the gate's knee check passed when no bucket reached the floor; the gate never compared its batched scan with the app's searches; the fallback sample paths must report plain cosine; legacy results must stay cosine whatever the default; the map, the explorer and the AI prompt must name the scoring; per-arm plain cosines in a comparison; and the benchmark's own tie handling at the cut (fixed, and the key methods rerun).
+
+## The gate, run 2026-10-28
+
+| | plain cosine | whitened |
+| --- | --- | --- |
+| 1b batch reproduces the app's searches | pass (one near-tie) | pass |
+| 1 identity (one-sample pool) | pass | pass, identical through rank 100 |
+| 2 leave-one-out top-5, pooled | 0.747 | 0.799 |
+| 2 member against member | 0.158 | 0.221 |
+| 3 margin over structure-free null | +0.404 | +0.275 |
+| 4 margin over within-study null | +0.075 | +0.041 |
+| 5 knee | k >= 5 | k >= 5 |
+
+Whitened passes every check, so it is the default.
+
 ## Status
 
-- [ ] `bridge_rna/scoring.py`, `precompute/build_whitening.py`, artifact built and checked
-- [ ] Scan, all three search paths, payload, plain cosine beside each match
-- [ ] Matching control, banner phrase, inspector, CSV, plot axis, help entry
-- [ ] `validate_cohorts.py --scoring whitened`, then the default
-- [ ] Tests, browser suites, guide screenshots, Codex review, docs
+- [x] `bridge_rna/scoring.py`, `precompute/build_whitening.py`, artifact built and checked
+- [x] Scan, all three search paths, payload, plain cosine beside each match
+- [x] Matching control, banner phrase, inspector, CSV, plot axis, help entry
+- [x] `validate_cohorts.py --scoring whitened`, then the default
+- [ ] Browser suites, guide screenshots, deployment, the shared Drive folder

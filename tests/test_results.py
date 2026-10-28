@@ -114,7 +114,7 @@ def test_empty_or_missing_payload_builds_nothing():
 
 def test_single_query_contract_shape():
     res = single_results()
-    assert set(res) == {"mode", "scoring", "k", "comparison", "label_a", "label_b",
+    assert set(res) == {"mode", "scoring", "scoring_id", "k", "comparison", "label_a", "label_b",
                         "query_id", "reference_count", "profile_a", "profile_b", "rows"}
     # A payload with no scoring recorded predates whitening and was plain cosine.
     assert res["scoring"] == "cosine"

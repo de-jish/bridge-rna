@@ -111,6 +111,24 @@ Seven things about it are load-bearing.
 
 **No table library.** Dash DataTable is deprecated and removed in Dash 5.0, and Dash AG Grid would be a dependency the NASA server would have to install, which only Joshua can do there. The table is native HTML, rendered server-side, 50 rows a page.
 
+### Whitened matching is the default ranking (2026-10-28)
+
+Matches are ranked by **whitened similarity** unless the reader picks Plain cosine under Matching: the cosine between `W'(x - mu)` and `W'(q - mu)`, where `mu` and the covariance behind `W` are fitted on all 940,455 ARCHS4 rows and the eigenvalues are floored at 1e-4 of the largest.
+It was chosen by measurement, not taste: [`docs/matching-benchmark.md`](docs/matching-benchmark.md) scored 16 transforms against a label-shuffled null, and this one raised per-tissue retrieval accuracy from 0.644 to 0.693 within ARCHS4 (own GEO series excluded) and from 0.956 to 0.979 for OSDR queries, lowering no tissue by more than 1.5 points. ABTT ("all but the top") helped weak tissues and cost OSDR tissues up to 14 points; PR #3's floor of 1e-2 gave up half the gain.
+Design and decisions: [`docs/whitened-matching.md`](docs/whitened-matching.md). `bridge_rna/scoring.py` is the only module that knows what whitening is.
+
+Five things about it are load-bearing.
+
+**A whitened scan costs what a cosine scan costs, and must stay that way.** `score(x) = (x - mu) . v / r_x`, with `v` computed per query and `r_x = |W'(x - mu)|` stored per row in `cache/whitening.npz` (5.9 MB, built by `precompute/build_whitening.py` in about 30 s). It is the same single pass in `_topk_cosine_matrix`. **Centre the block before the product**: the normalised embeddings sit near their mean, so subtracting `mu . v` afterwards in float32 cancels away the digits that rank the rows. **The stored norms are computed from exactly the vector the scan multiplies** (float32 normalise, float32 centre); computing them from a float64 centring made each row's norm describe a slightly different vector, and fixing that took the agreement with an explicit float64 transform from 1.4e-6 to 1.7e-7. The build writes a candidate file, checks it through the app's own loader and scan (top 100 identical for 8 real queries, singly and padded), and only then replaces the live one.
+
+**The artifact is positional, so it is guarded by content, not size.** `meta.index_fingerprint` hashes the memmap's shape and 4,096 evenly spaced rows; a transform built for another index, or for these rows reordered, is refused and the app falls back to plain cosine. Without the file the Matching control shows Whitened disabled with the command that builds it, the same rule as every optional artifact.
+
+**A result records the scoring that ran; nothing reads it back from the control.** The payload carries `scoring` and `scoring_id` (the transform's hash). A result saved before whitening existed has no tag and **is plain cosine whatever the default is** - the fallback is never the current default. Only the cached sample path, the cohort path and the upload path can whiten; the supplied-table and subprocess paths rank by cosine and the banner says so.
+
+**Every number says what it is.** The badge reads "Whitened 0.9361" with "Plain cosine 0.9954" under Identity, the CSV gains a `cosine` column (`cosine_a`/`cosine_b` in a comparison, because a shared match has a different plain cosine against each cohort's query), and the plot axis, captions, summary sentence, map hover, explorer and AI prompt (`whitened_score` beside `cosine`) all name the scoring. "Same data as" still uses plain cosine distance below 1e-6, the threshold that was measured; cohort members' leave-one-out cosines stay in the raw embedding.
+
+**The default was earned by the gate, and the gate is now stricter.** Joshua's rule: whitened becomes the default only if `precompute/validate_cohorts.py --scoring whitened` passes. It did, all six checks over all 204 cohorts: leave-one-out top-5 0.799 (0.747 under cosine), +0.275 over the structure-free null, +0.041 over the within-study null, knee at k = 5. On Codex's review the gate gained check 1b (its batched scan must reproduce the app's own singleton and padded searches up to near-ties), now fails when no size bucket reaches the stability floor, and takes its score tolerance from each scoring's precision: float32 resolution for cosine, times `sqrt(1 / floor)` = 100 for whitening, because whitening stretches the weakest directions by up to that factor and pooling one sample moves the query by one ulp.
+
 ### Two retrieval tiers, not three
 
 `bridge_rna.retrieval.sample_tier` classifies every OSDR sample the picker lists. Measured on the shipped metadata with the cache built:

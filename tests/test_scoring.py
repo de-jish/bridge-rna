@@ -243,3 +243,120 @@ def test_the_map_and_explorer_name_the_score_that_ranked():
     whitened = neighborhoods.build_payload(frame, metric="whitened")
     assert whitened["metric"] == "whitened" and whitened["hits"][0]["metric"] == "whitened"
     assert neighborhoods.build_payload(frame)["metric"] == "cosine"
+
+
+# --- Codex's review of the build: guard, blocks, callbacks -------------------
+
+def _write_artifact(path, **arrays):
+    np.savez(path, **{k: v for k, v in arrays.items() if k != "meta"},
+             meta=np.array(json.dumps(arrays["meta"])))
+
+
+@pytest.mark.parametrize("damage", ["scalar_norms", "null_meta", "text_bytes",
+                                    "nan_matrix", "nan_mean"])
+def test_a_malformed_artifact_falls_back_instead_of_breaking(whitened, monkeypatch,
+                                                              tmp_path, damage):
+    from manifold import paths
+
+    w = whitened
+    arrays = {"mu": w.mu.copy(), "W": w.W.copy(), "row_norms": w.row_norms.copy(),
+              "meta": dict(w.meta)}
+    if damage == "scalar_norms":
+        arrays["row_norms"] = np.float32(1.0)
+    elif damage == "null_meta":
+        arrays["meta"] = None
+    elif damage == "text_bytes":
+        arrays["meta"]["index_bytes"] = "many"
+    elif damage == "nan_matrix":
+        arrays["W"][3, 4] = np.nan
+    else:
+        arrays["mu"][0] = np.inf
+    bad = tmp_path / f"{damage}.npz"
+    _write_artifact(bad, **arrays)
+    monkeypatch.setattr(paths, "WHITENING_NPZ", bad)
+    scoring.load_whitening.cache_clear()
+    assert scoring.load_whitening() is None
+    assert scoring.resolve(scoring.WHITENED) == scoring.COSINE
+
+
+def _explicit_top(vecs, w, Q, k):
+    out = []
+    for q in Q:
+        s = _explicit_scores(vecs, w, q)
+        out.append(np.lexsort((np.arange(len(s)), -s))[:k])
+    return np.array(out)
+
+
+def test_a_whitened_scan_across_many_blocks_matches_the_transform(whitened):
+    """Each block divides by its own rows' norms; a slicing slip would only
+    show past the first block, which the fixture's default block never leaves."""
+    vecs, _, _ = retrieval._load_archs4_index()
+    osdr, _ = retrieval._cached_osdr_embeddings()
+    Q = osdr[:6].astype(np.float32)
+    small = retrieval._topk_cosine_matrix(vecs, Q, 40, block_bytes=4 * 6 * 2000,
+                                          scoring=scoring.WHITENED)
+    one = retrieval._topk_cosine_matrix(vecs, Q, 40, scoring=scoring.WHITENED)
+    np.testing.assert_array_equal(small[0], one[0])
+    np.testing.assert_array_equal(small[0], _explicit_top(vecs, whitened, Q, 40))
+    for j in range(len(Q)):
+        single = retrieval._topk_cosine_matrix(vecs, Q[j:j + 1], 40, block_bytes=8000,
+                                               preserve_matrix_product=True,
+                                               scoring=scoring.WHITENED)
+        np.testing.assert_array_equal(single[0][0], one[0][j])
+
+
+def test_duplicate_rows_in_different_blocks_tie_and_the_lower_row_wins(whitened, monkeypatch):
+    vecs, _, _ = retrieval._load_archs4_index()
+    x = np.asarray(vecs, dtype=np.float32).copy()
+    n = len(x)
+    lo, hi = 50, n - 50                             # far apart: different blocks
+    x[hi] = x[lo]
+    norms = whitened.row_norms.copy()
+    norms[hi] = norms[lo]
+    w = scoring.Whitening(whitened.mu, whitened.W, norms, whitened.meta)
+    fake = lambda: w  # noqa: E731
+    fake.cache_clear = lambda: None
+    monkeypatch.setattr(scoring, "load_whitening", fake)
+    q = (x[lo] / np.linalg.norm(x[lo])).reshape(1, -1)
+    idx, score = retrieval._topk_cosine_matrix(x, q, 5, block_bytes=4 * 2000,
+                                               scoring=scoring.WHITENED)
+    assert list(idx[0][:2]) == [lo, hi] and score[0][0] == score[0][1]
+
+
+def test_each_search_records_the_scoring_that_actually_ran(monkeypatch, whitened):
+    """Sample, cohort and upload pass the choice through and store what ran;
+    a sample served by a path that cannot whiten is stored as plain cosine."""
+    import app as shell
+    import pandas as pd
+
+    from bridge_rna import callbacks as rc
+
+    built = shell.build_app()
+
+    def callback(button):
+        for key, entry in built.callback_map.items():
+            if any(i["id"] == button for i in entry["inputs"]):
+                return entry["callback"].__wrapped__
+        raise KeyError(button)
+
+    frame = pd.DataFrame([_hit("GSM1", 0.6, 0.99, 1)])
+    seen = {}
+
+    def sample(**kw):
+        seen["sample"] = kw["scoring"]
+        return frame, frame, seen.get("mode", "cached"), [0.6]
+
+    monkeypatch.setattr(rc, "search_hits_with_neighborhood", sample)
+    sid = rc.samples_df.iloc[0]["sample_id"]
+    payload, status = callback("search-button")(1, sid, 1, None, "", [], "whitened")
+    assert seen["sample"] == "whitened" and payload["scoring"] == "whitened"
+    assert payload["scoring_id"] == scoring.transform_id()
+
+    seen["mode"] = "demo"
+    payload, status = callback("search-button")(1, sid, 1, None, "", [], "whitened")
+    assert payload["scoring"] == "cosine" and payload["scoring_id"] == ""
+    assert "plain cosine" in str(status)
+
+    payload, _ = callback("search-button")(1, sid, 1, None, "", [], "cosine")
+    assert payload["scoring"] == "cosine"
+

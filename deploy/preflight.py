@@ -109,6 +109,21 @@ def validate():
     require(len(hits) == 5 and "archs4_index" in hits, "cached retrieval failed")
     cohort_hits, _ = run_cohort_retrieval(osdr.sample_key.iloc[:2].tolist(), 5)
     require(len(cohort_hits) == 5, "pooled retrieval failed")
+    # Whitened matching is optional; when its artifact is present it must load,
+    # describe exactly this memmap (whole-file hash, which the app's own
+    # sampled check cannot establish) and produce a finite ranking.
+    whitening = None
+    if paths.WHITENING_NPZ.exists():
+        from bridge_rna import scoring
+        scoring.load_whitening.cache_clear()
+        w = scoring.load_whitening()
+        require(w is not None, f"whitening artifact refused: {paths.WHITENING_NPZ}")
+        require(w.meta.get("index_sha256") == sha256(paths.ARCHS4_MMAP),
+                "whitening artifact was built for different embedding bytes")
+        whitened = run_cached_query_retrieval(sample.sample_key, 5, scoring=scoring.WHITENED)
+        require(len(whitened) == 5 and np.isfinite(whitened.score).all(),
+                "whitened retrieval failed")
+        whitening = scoring.transform_id(w)
     from wsgi import application, RELEASE_ID
     with application.test_client() as client:
         for path in ("/", "/map", "/_dash-layout", "/_dash-dependencies", "/assets/00-tokens.css", "/assets/find-suggest.js", "/__release"):
@@ -124,7 +139,8 @@ def validate():
                         f"missing or incorrect runtime asset: {name}")
     return {"archs4_samples": n, "osdr_samples": m, "upload_reference_cosine": cosine,
             "artifacts": {os.path.relpath(p, ROOT): {"path": str(p.resolve()), "sha256": sha256(p)} for p in required},
-            "counts_files_checked": len(counts), "tsne": paths.COORDS_TSNE2.exists()}
+            "counts_files_checked": len(counts), "tsne": paths.COORDS_TSNE2.exists(),
+            "whitening": whitening}
 
 
 def main():

@@ -648,8 +648,10 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     # The picker reads "<label> · N samples[ · low N]", and the label itself
     # carries " · " between its facets, so strip the size suffix, not a split.
     named = re.sub(r"\s+·\s+\d+ samples.*$", "", cohort_label).strip()
+    # The ranking is named by whichever scoring ran (whitened by default since
+    # 2026-10-28, plain cosine on a machine without cache/whitening.npz).
     c.ok(bool(named) and named in summary
-         and "ranked by cosine similarity of the embeddings" in summary,
+         and re.search(r"ranked by (whitened|cosine) similarity of the embeddings", summary),
          f"so does the summary over the table: {summary[:80]!r}")
     shot(page, "04-pooled-search")
 
@@ -1061,7 +1063,9 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
       const gd = document.querySelector('.js-plotly-plot');
       const hits = gd._fullData.filter(t => t.name === 'retrieved match');
       if (hits.length !== 2) return null;
-      const key = t => t.x.map((x, i) => x.toFixed(4) + ',' + t.y[i].toFixed(4));
+      // By accession, not by coordinate: two GEO accessions holding one
+      // deposited profile share a coordinate while being different matches.
+      const key = t => t.customdata.map(c => c[2]);
       const a = key(hits[0]), b = new Set(key(hits[1]));
       const i = a.findIndex(p => b.has(p));
       // [kind, rank, gsm, gse, score, tissue, species, role, facts]
@@ -1070,8 +1074,8 @@ def run_checks(page, c: "Checks", base: str, console_errors: list[str],
     if c.ok(shared_hover is not None, "a shared hit is locatable"):
         c.ok(shared_hover.count("512-d rank") == 2,
              f"its hover carries both arms' ranks: {shared_hover[:120]!r}")
-        c.ok(shared_hover.count("cosine") == 2,
-             "and both cosines, which is what the numerals gave up for")
+        c.ok(shared_hover.count("cosine") + shared_hover.count("whitened") == 2,
+             "and both scores, which is what the numerals gave up for")
 
     # ---- 8b. one tick per cohort -----------------------------------
     print("\n=== 8b. unticking an arm ===")

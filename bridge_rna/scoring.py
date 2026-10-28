@@ -104,22 +104,31 @@ def load_whitening() -> Whitening | None:
         n = int(vecs.shape[0])
     except Exception:  # noqa: BLE001 - no index means nothing to whiten against
         return None
-    if mu.shape != (d,) or W.shape != (d, d) or row_norms.shape != (n,):
-        print(f"[scoring] ignoring {path}: fitted for {row_norms.shape[0]} rows of "
-              f"dimension {mu.shape[0]}, but the index has {n} rows of {d}. "
-              "Re-run precompute/build_whitening.py.", file=sys.stderr, flush=True)
-        return None
-    if (int(meta.get("index_bytes", -1)) != int(vecs.nbytes)
-            or meta.get("index_fingerprint") != index_fingerprint(vecs)):
-        print(f"[scoring] ignoring {path}: built against a different embedding "
-              "memmap. Re-run precompute/build_whitening.py.",
-              file=sys.stderr, flush=True)
-        return None
-    if not (np.isfinite(row_norms).all() and (row_norms > 0).all()):
-        print(f"[scoring] ignoring {path}: non-finite or zero row norms.",
+    # Every check runs inside the guard: a malformed optional artifact must
+    # fall back to plain cosine, never stop the view from loading.
+    try:
+        _check(mu, W, row_norms, meta, vecs, n, d)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[scoring] ignoring {path}: {exc} Re-run precompute/build_whitening.py.",
               file=sys.stderr, flush=True)
         return None
     return Whitening(mu=mu, W=W, row_norms=row_norms, meta=meta)
+
+
+def _check(mu, W, row_norms, meta, vecs, n: int, d: int) -> None:
+    if not isinstance(meta, dict):
+        raise ValueError("its record is not a mapping.")
+    if mu.shape != (d,) or W.shape != (d, d) or row_norms.shape != (n,):
+        raise ValueError(f"shapes {mu.shape}, {W.shape}, {row_norms.shape} do not fit "
+                         f"an index of {n} rows of dimension {d}.")
+    if int(meta.get("index_bytes", -1)) != int(vecs.nbytes):
+        raise ValueError("it was built against an index of another size.")
+    if meta.get("index_fingerprint") != index_fingerprint(vecs):
+        raise ValueError("it was built against a different embedding memmap.")
+    if not (np.isfinite(mu).all() and np.isfinite(W).all()):
+        raise ValueError("its mean or matrix is not finite.")
+    if not (np.isfinite(row_norms).all() and (row_norms > 0).all()):
+        raise ValueError("it has non-finite or zero row norms.")
 
 
 FINGERPRINT_ROWS = 4096
@@ -127,6 +136,12 @@ FINGERPRINT_ROWS = 4096
 
 def index_fingerprint(vecs) -> str:
     """A content identity for the embedding memmap, cheap enough to check at load.
+
+    Sampled, so it catches a replaced, rebuilt or reordered index - the ways an
+    index actually changes - but not an edit confined to rows it skips. The
+    complete check is the whole-file SHA-256 recorded as `index_sha256`, which
+    `deploy/preflight.py` verifies on every apply; hashing 963 MB at every
+    process start is the cost this split avoids.
 
     The stored row norms are positional, so a transform built for one index and
     applied to another that merely has the same shape would divide each row's
