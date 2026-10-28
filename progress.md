@@ -6,6 +6,18 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-10-28 (whitened matching is the default ranking)
+
+**What changed.** Matches are now ranked by whitened similarity by default, with Plain cosine one click away under a new Matching control that drives Sample, Cohort and Upload. The transform is fitted on all 940,455 ARCHS4 rows with the eigenvalue floor at 1e-4 (`precompute/build_whitening.py`, about 30 s, writes the 5.9 MB `cache/whitening.npz`); a scan costs what a cosine scan costs. Every result records the scoring that ran and the transform's id, and every number on screen, in the CSV, on the map and in the AI prompt says which score it is, with the plain cosine kept beside each whitened score. Design: `docs/whitened-matching.md`; the measurement that chose it: `docs/matching-benchmark.md`.
+
+**Why it is the default.** Joshua's rule was that whitened becomes the default only if the cohort gate passes under it. It did, every check over all 204 cohorts: leave-one-out top-5 0.799 against 0.747 for cosine, +0.275 over the structure-free null, +0.041 over the within-study null, knee at k = 5. The benchmark (rerun with the tie fix) holds: per-tissue accuracy 0.694 within ARCHS4 and 0.979 for OSDR queries, against 0.644 and 0.956 for cosine, no tissue down more than 1.1 points.
+
+**Review.** Codex assessed the plan (10 findings) and the build (6 findings); every finding was checked against the code and fixed or answered, recorded in the design doc. The most consequential: the stored row norms must come from exactly the vector the scan multiplies (an eightfold error reduction), the artifact needs a content fingerprint (plus a whole-file hash checked by `deploy/preflight.py` on every apply), a malformed artifact must fall back to cosine rather than stop the view loading, and the gate itself was tightened (check 1b, a knee that never reaches the floor now fails, tolerances derived from each scoring's precision).
+
+**Found along the way.** The browser suite caught a latent inspector crash: select a match, then run a search that does not retrieve it, and the details callback failed on an empty frame. Cosine had happened to retrieve the same match in that suite; whitening did not. Fixed and pinned by a test. Three suites assumed the cosine scale and now test what they meant. A live-embedded upload differs from the precomputed vector by up to 8e-5 per coordinate; the ranking matches exactly, and whitening magnifies the score difference to the fourth decimal.
+
+**Verified.** 1,025 unit tests; browser suites 217, 69, 191, 70, 45, 33 and 3 checks; guide screenshots recaptured.
+
 ## 2026-10-27 (in-app help: "i" explanations and a guided tour)
 
 **"i" explanations.** Thirty-two small "i" buttons across both views, beside the controls, filters, plot switch, inspector, AI summary, map rail and neighborhood explorer. Each opens a short plain explanation and, where it helps, the real lines of code behind the feature with the file they come from. Joshua asked for many so he can prune them; removing one is deleting one `info(...)` call. `tests/test_help.py` requires every quoted block to appear contiguously and in order in the cited file, so an explanation can never show code the app no longer runs. The explanations render once on the shell and `assets/info-popover.js` shows one in a body-level popover, which no scroll container can clip and which never rewrites a Dash node.

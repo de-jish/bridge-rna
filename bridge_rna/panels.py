@@ -489,8 +489,10 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
         return _build_query_details(query_b, compact=False, role="b")
 
     if node_kind == "gse":
-        df = hits_df[hits_df["gse"] == node_id]
-        examples = ", ".join(df["gsm"].head(8).astype(str).tolist())
+        df = (hits_df[hits_df["gse"] == node_id] if "gse" in hits_df.columns
+              else hits_df.iloc[0:0])
+        examples = (", ".join(df["gsm"].head(8).astype(str).tolist())
+                    if "gsm" in df.columns else "")
         return [
             _details_head("GSE study", node_id),
             _accession_row("Study", node_id),
@@ -503,7 +505,11 @@ def _build_selected_details(query: pd.Series, selected_payload: dict[str, Any] |
             html.P("Click an individual GSM node for full GEO fields.", className="details-empty-hint"),
         ]
 
-    df = hits_df[hits_df["gsm"] == node_id]
+    # A selection can outlive the results it was made in: select a match, then
+    # run another search that does not retrieve it, and the inspector receives
+    # the selection with no rows at all - a frame without a `gsm` column.
+    df = (hits_df[hits_df["gsm"] == node_id] if "gsm" in hits_df.columns
+          else hits_df.iloc[0:0])
     if df.empty:
         return [
             _details_head("Details", "No metadata"),

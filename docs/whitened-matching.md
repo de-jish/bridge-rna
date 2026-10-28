@@ -86,4 +86,5 @@ Whitened passes every check, so it is the default.
 - [x] Scan, all three search paths, payload, plain cosine beside each match
 - [x] Matching control, banner phrase, inspector, CSV, plot axis, help entry
 - [x] `validate_cohorts.py --scoring whitened`, then the default
-- [ ] Browser suites, guide screenshots, deployment, the shared Drive folder
+- [x] Browser suites (all seven pass), guide screenshots recaptured, Codex's review of the build fixed
+- [ ] Deployment to the NASA server and the shared Drive folder

@@ -53,7 +53,8 @@ CHAPTERS: tuple[Chapter, ...] = (
         Slide("retrieve-02-search",
               "Choose how many matches, then search",
               "Ask for anywhere from 3 to 1,000 of the closest GEO samples. "
-              "Search compares your sample against all 940,455 of them.",
+              "Search compares your sample against all 940,455 of them, ranked "
+              "by whitened similarity unless you pick Plain cosine.",
               "The number-of-matches control and the Search button."),
         Slide("retrieve-03-table",
               "Read the ranked matches",

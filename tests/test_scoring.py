@@ -360,3 +360,21 @@ def test_each_search_records_the_scoring_that_actually_ran(monkeypatch, whitened
     payload, _ = callback("search-button")(1, sid, 1, None, "", [], "cosine")
     assert payload["scoring"] == "cosine"
 
+
+
+def test_a_selection_absent_from_new_results_does_not_break_the_inspector():
+    """Found by the browser suite under whitening: select a match, then run a
+    search that does not retrieve it, and the inspector got a selection with
+    no rows. Latent before; cosine happened to retrieve the same match."""
+    import app as shell
+
+    from bridge_rna import callbacks as rc
+
+    built = shell.build_app()
+    render = built.callback_map["details-panel.children"]["callback"].__wrapped__
+    q = rc._query_dict(rc.samples_df.iloc[0])
+    for kind in ("gsm", "gse"):
+        out = render({"query": q, "sample_id": "COHORT|x", "query_b": q,
+                      "entrez_email": "", "scoring": "whitened",
+                      "selected": {"kind": kind, "node_id": "GSM-NOT-HERE"}, "rows": []})
+        assert out
