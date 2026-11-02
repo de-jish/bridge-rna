@@ -6,6 +6,10 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-11-02 (UAT workbook)
+
+`Bridge_RNA_UAT.xlsx` (repository root, not committed) is the first User Acceptance Testing workbook, modelled on the EDA and RadLab sheets of the ENVVIZ example Joshua's mentor recommended: 61 tests in 10 sections (getting started, single-sample search, matches table, details and links, plots, export and AI summary, cohorts, upload, map, layout), with Instructions, a formula-driven Summary and Reviewer Notes recording how each expected result was established. 47 expected results were copied from the running application in a scripted walk-through on 2026-11-02, 6 from the automated browser suites, 5 from code, and 3 need confirmation. Open items for the mentor: the tester URL (placeholder), whether the AI summary is configured on the test deployment, and test 8.6, where a CSV with text instead of counts produces a raw Python error banner ("ValueError: could not convert string to float") rather than a plain message.
+
 ## 2026-10-28 (whitened matching is the default ranking)
 
 **What changed.** Matches are now ranked by whitened similarity by default, with Plain cosine one click away under a new Matching control that drives Sample, Cohort and Upload. The transform is fitted on all 940,455 ARCHS4 rows with the eigenvalue floor at 1e-4 (`precompute/build_whitening.py`, about 30 s, writes the 5.9 MB `cache/whitening.npz`); a scan costs what a cosine scan costs. Every result records the scoring that ran and the transform's id, and every number on screen, in the CSV, on the map and in the AI prompt says which score it is, with the plain cosine kept beside each whitened score. Design: `docs/whitened-matching.md`; the measurement that chose it: `docs/matching-benchmark.md`.
