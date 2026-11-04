@@ -117,12 +117,18 @@ def set_k(page, k: int) -> None:
 
 
 def search(page, button: str = "#search-button") -> float:
+    # The previous search's banner already reads "Retrieved ...", so waiting
+    # for that text alone returned before a slower search (a cohort
+    # comparison) had answered. Mark the banner on screen and wait for Dash to
+    # replace it: it re-renders the children even when the text is identical.
+    page.evaluate("() => { const s = document.querySelector('#search-status');"
+                  " if (s) [...s.children].forEach(n => n.setAttribute('data-e2e-old', '')); }")
     t0 = time.time()
     page.locator(button).click()
     page.wait_for_function(
-        "() => document.querySelector('#search-status')"
-        " && /Retrieved|Two pooled|failed/.test("
-        "document.querySelector('#search-status').innerText)",
+        "() => { const s = document.querySelector('#search-status');"
+        " return s && s.children.length && !s.querySelector('[data-e2e-old]')"
+        " && /Retrieved|Two pooled|failed/.test(s.innerText); }",
         timeout=180_000)
     page.wait_for_selector("#results-table-wrap tbody tr", timeout=60_000)
     settle(page, 1500)
@@ -330,7 +336,7 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     frame = pd.read_csv(io.StringIO(raw), comment="#")
     c.ok(len(frame) == expected, f"the CSV holds exactly the {expected} rows shown")
     c.ok(set(frame["gse"]) == {TWIN_SERIES[1]}, "and only the filtered series")
-    provenance = "\n".join(l for l in raw.splitlines() if l.startswith("#"))
+    provenance = "\n".join(line for line in raw.splitlines() if line.startswith("#"))
     c.ok(SAMPLE in provenance and TWIN_SERIES[1] in provenance,
          "the # header records the query and the filter")
     c.ok(dl.value.suggested_filename.endswith(".csv"), "it downloads as .csv")

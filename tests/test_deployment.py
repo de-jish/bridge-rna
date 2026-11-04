@@ -66,11 +66,13 @@ def _modules_the_app_loads(root):
         found|={m for m,p in mods.items()
                 if p.name in strings or str(p.relative_to(root)) in strings}
         return found&set(mods)
-    seen=set();stack=['app','wsgi']
+    seen=set()
+    stack=['app','wsgi']
     while stack:
         name=stack.pop()
         if name not in seen:
-            seen.add(name);stack.extend(deps(mods[name]))
+            seen.add(name)
+            stack.extend(deps(mods[name]))
     return {str(mods[m].relative_to(root)) for m in seen}
 
 
@@ -117,9 +119,11 @@ def test_sftp_never_writes_live_code():
 
 
 def test_sftp_lstat_stops_at_symlink_without_following_it():
-    s=SFTP.__new__(SFTP);calls=[]
+    s=SFTP.__new__(SFTP)
+    calls=[]
     def call(kind,data):
-        path=Packet(data).string().decode();calls.append((kind,path))
+        path=Packet(data).string().decode()
+        calls.append((kind,path))
         mode=stat.S_IFLNK if path.endswith('/data') else stat.S_IFDIR
         return Packet(u32(4)+u32(mode|0o755))
     s.call=call
@@ -138,12 +142,14 @@ def test_common_rejects_symlink_and_untracked_deletion(tmp_path):
 
 
 def fixture_stage(tmp_path):
-    root=tmp_path/'fm_viz_new';root.mkdir()
+    root=tmp_path/'fm_viz_new'
+    root.mkdir()
     payload=ship.build(tmp_path/'local')
     meta=json.loads((payload/'ship.json').read_text())
     stage=root/'.ship/incoming'/meta['id']
     import shutil
-    stage.parent.mkdir(parents=True);shutil.copytree(payload,stage)
+    stage.parent.mkdir(parents=True)
+    shutil.copytree(payload,stage)
     (root/'app.py').write_text('previous code')
     (root/'fm_viz_env').mkdir()
     (root/'fm_viz_env/marker').write_text('original environment')
@@ -161,7 +167,8 @@ def setup_apply(monkeypatch,root):
 
 
 def test_failed_preflight_never_stops_or_changes_production(tmp_path,monkeypatch):
-    root,stage,_=fixture_stage(tmp_path);setup_apply(monkeypatch,root)
+    root,stage,_=fixture_stage(tmp_path)
+    setup_apply(monkeypatch,root)
     monkeypatch.setattr(apply_tool,'preflight',lambda *a:(_ for _ in ()).throw(ValueError('bad data')))
     monkeypatch.setattr(apply_tool.processes,'stop',lambda *a:pytest.fail('must not stop'))
     with pytest.raises(ValueError,match='bad data'):
@@ -172,7 +179,8 @@ def test_failed_preflight_never_stops_or_changes_production(tmp_path,monkeypatch
 
 
 def test_apply_failure_has_prior_state_and_restores_code(tmp_path,monkeypatch):
-    root,stage,meta=fixture_stage(tmp_path);setup_apply(monkeypatch,root)
+    root,stage,meta=fixture_stage(tmp_path)
+    setup_apply(monkeypatch,root)
     monkeypatch.setattr(apply_tool,'preflight',lambda *a:None)
     running=[True]
     monkeypatch.setattr(apply_tool,'find_master',lambda *a:{'pid':123} if running[0] else None)
@@ -198,7 +206,8 @@ def test_apply_failure_has_prior_state_and_restores_code(tmp_path,monkeypatch):
 
 
 def test_drift_fails_before_preparation(tmp_path,monkeypatch):
-    root,stage,_=fixture_stage(tmp_path);setup_apply(monkeypatch,root)
+    root,stage,_=fixture_stage(tmp_path)
+    setup_apply(monkeypatch,root)
     (root/'app.py').write_text('server edit since transfer')
     monkeypatch.setattr(apply_tool,'prepare_environment',lambda *a:pytest.fail('must fail before preparation'))
     with pytest.raises(ValueError,match='changed since transfer'):
@@ -206,8 +215,10 @@ def test_drift_fails_before_preparation(tmp_path,monkeypatch):
 
 
 def test_success_preserves_untracked_files_and_removes_only_tracked_code(tmp_path,monkeypatch):
-    root,stage,meta=fixture_stage(tmp_path);setup_apply(monkeypatch,root)
-    (root/'bridge_rna').mkdir();(root/'bridge_rna/obsolete.py').write_text('old')
+    root,stage,meta=fixture_stage(tmp_path)
+    setup_apply(monkeypatch,root)
+    (root/'bridge_rna').mkdir()
+    (root/'bridge_rna/obsolete.py').write_text('old')
     common.atomic_json(root/'ship.json',{'id':'old','files':{'bridge_rna/obsolete.py':common.sha256(root/'bridge_rna/obsolete.py')}})
     meta['previous_manifest_sha256']=common.sha256(root/'ship.json')
     meta['removed']=['bridge_rna/obsolete.py']
@@ -234,7 +245,8 @@ def test_pid_reuse_is_never_signalled(monkeypatch):
 
 
 def test_environment_install_failure_restores_original_environment(tmp_path,monkeypatch):
-    root,stage,_=fixture_stage(tmp_path);setup_apply(monkeypatch,root)
+    root,stage,_=fixture_stage(tmp_path)
+    setup_apply(monkeypatch,root)
     monkeypatch.setattr(apply_tool,'preflight',lambda *a:None)
     monkeypatch.setattr(apply_tool,'find_master',lambda *a:None)
     monkeypatch.setattr(apply_tool,'prepare_environment',lambda *a:(tmp_path/'candidate',True))
@@ -249,7 +261,8 @@ def test_environment_install_failure_restores_original_environment(tmp_path,monk
 
 def test_untracked_code_cannot_be_deleted(tmp_path):
     root,stage,meta=fixture_stage(tmp_path)
-    (root/'bridge_rna').mkdir();(root/'bridge_rna/untracked.py').write_text('preserve')
+    (root/'bridge_rna').mkdir()
+    (root/'bridge_rna/untracked.py').write_text('preserve')
     meta['removed']=['bridge_rna/untracked.py']
     meta['server_before']['bridge_rna/untracked.py']=common.sha256(root/'bridge_rna/untracked.py')
     with pytest.raises(ValueError,match='not a tracked'):
@@ -257,7 +270,8 @@ def test_untracked_code_cannot_be_deleted(tmp_path):
 
 
 def test_bad_transfer_readback_does_not_advance_baseline(tmp_path):
-    dest=ship.build(tmp_path);meta=json.loads((dest/'ship.json').read_text())
+    dest=ship.build(tmp_path)
+    meta=json.loads((dest/'ship.json').read_text())
     common.atomic_json(dest.parent/'validated.json',{'files':meta['files']})
     class FakeSFTP:
         def checked(self,*a,**k):return None

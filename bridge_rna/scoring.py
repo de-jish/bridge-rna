@@ -46,10 +46,6 @@ SCORINGS = (WHITENED, COSINE)
 
 LABELS = {WHITENED: "Whitened", COSINE: "Plain cosine"}
 
-# What the score is called wherever a number is shown. Defined in
-# `results.py`, which must stay pure stdlib, and re-exported here.
-from .results import SCORE_NAMES, score_name  # noqa: E402
-
 # The eigenvalue floor, relative to the largest eigenvalue. Measured, not
 # chosen: below 1e-4 accuracy plateaus, above it the gain shrinks (1e-2, the
 # value PR #3 used, gave up half of it).

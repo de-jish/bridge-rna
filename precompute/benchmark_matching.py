@@ -122,8 +122,8 @@ def label_metrics(q_tissue: np.ndarray, hits: np.ndarray, ref_tissue: np.ndarray
     prec = np.zeros(len(q_tissue))
     for i, (t, row) in enumerate(zip(q_tissue, hits)):
         labels = [ref_tissue[j] for j in row]
-        prec[i] = sum(l == t for l in labels) / len(labels)
-        voted = [l for l in labels if l not in UNLABELLED]
+        prec[i] = sum(label == t for label in labels) / len(labels)
+        voted = [label for label in labels if label not in UNLABELLED]
         if voted:
             vals, counts = np.unique(voted, return_counts=True)
             winners = set(vals[counts == counts.max()])

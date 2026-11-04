@@ -16,6 +16,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from manifold import colorby, data, render, sampling, theme
+
 
 # --- The retrieval overlay ---------------------------------------------------
 
@@ -239,8 +241,6 @@ def test_the_overlay_ignores_out_of_range_points():
     assert matches is not None and len(matches.x) == 1
     assert not any(t.name == "query" for t in traces), "an out-of-range query was drawn"
 
-
-from manifold import colorby, data, render, sampling, theme
 
 
 # --- Stratified sampling ---------------------------------------------------
