@@ -22,6 +22,7 @@ Codex's review found three real gaps and all three are fixed with tests.
 A multi-line cell broke the banner's first line, so the quoted example is now one short line.
 And, predating this change, `counts.tsv.gz` was staged as `.gz` and parsed with commas (`callbacks._upload_suffix` keeps `.tsv.gz`; `util.counts_separator` is the one rule, used by the loader and the embed script).
 Its fourth point, that the reason runs to two sentences, was rejected: it matches the existing "No sample columns found. Expected ..." message.
+**Deployed** as `20261104T231836Z-08e42aba` (commit `3c9e7e9`; 5 runtime files changed, no drift, no dependency changes), applied over SSH at Joshua's request and confirmed running on 2026-11-04; Gunicorn started detached as on 2026-10-23. The deployed loader was checked on the server against the words-only CSV and refused it with the plain sentence. The GitLab commit and push from the server checkout were left to Joshua, because the agent's remote-shell write was blocked.
 The repository's 32 standing lint warnings (semicolon statements, `l` as a name, a late import, and an unused re-export in `scoring.py`) were cleared at the same time.
 
 ## 2026-11-02 (UAT workbook)
