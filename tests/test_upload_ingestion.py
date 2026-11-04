@@ -387,3 +387,119 @@ def test_gene_digest_gate_aborts_a_shuffled_gene_order(tmp_path):
     assert proc.returncode != 0
     assert "digest mismatch" in (proc.stdout + proc.stderr).lower()
     assert not out.exists()
+
+
+# --- A file whose cells are words is refused in plain language ---------------
+# Found in the UAT walk-through on 2026-11-02: a CSV of words passed the header
+# check, reached the embed subprocess, and the banner showed its raw traceback
+# line ("ValueError: could not convert string to float: 'with'").
+
+_TEXT_CSV = "not,a,counts\nfile,with,text\n"
+
+
+def test_a_column_of_text_is_named_in_a_plain_sentence():
+    from bridge_rna.util import text_counts_reason
+
+    df = pd.read_csv(pd.io.common.StringIO(_TEXT_CSV), index_col=0)
+    reason = text_counts_reason("a", df["a"])
+    assert "'a'" in reason and "'with'" in reason
+    assert "Error" not in reason
+
+    assert text_counts_reason("S1", pd.Series([5, 9, None])) == ""
+    assert text_counts_reason("S1", pd.Series(["5", "9.5", "1e3"])) == ""
+
+
+def test_the_upload_is_refused_when_it_is_loaded_not_when_it_is_searched(tmp_path):
+    """The loader refuses the file, so Embed & search never becomes clickable for it."""
+    from bridge_rna import callbacks
+
+    bad = tmp_path / "words.csv"
+    bad.write_text(_TEXT_CSV)
+    with pytest.raises(ValueError, match="holds text where counts were expected"):
+        callbacks._upload_columns(bad, ",")
+
+    good = tmp_path / "counts.csv"
+    good.write_text("gene,S1,S2\nENSMUSG00000000001,5,1\nENSMUSG00000000002,9,0\n")
+    assert callbacks._upload_columns(good, ",") == ["S1", "S2"]
+
+    annotated = tmp_path / "annotated.csv"
+    annotated.write_text("gene,symbol,S1\nENSMUSG00000000001,Gnai3,5\nENSMUSG00000000002,Pbsn,9\n")
+    assert callbacks._upload_columns(annotated, ",") == ["S1"]
+
+
+def test_an_unexpected_embed_failure_never_shows_a_traceback_line(monkeypatch, tmp_path):
+    """Only the script's own ABORT reasons are shown; anything else reads as a plain failure."""
+    counts = tmp_path / "counts.csv"
+    counts.write_text("gene,S1\nENSMUSG00000000001,5\n")
+    monkeypatch.setattr(retrieval, "preflight_retrieval_requirements", lambda: (
+        [], {k: tmp_path for k in ("checkpoint", "orthologs", "canonical_genes",
+                                   "mouse_exon_lengths")}))
+    trace = ("Traceback (most recent call last):\n  File \"x.py\", line 1\n"
+             "ValueError: could not convert string to float: 'with'\n")
+    monkeypatch.setattr(retrieval.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 1, stdout="", stderr=trace))
+    with pytest.raises(RetrievalError) as err:
+        retrieval.embed_uploaded_counts(counts, "S1")
+    assert "ValueError" not in str(err.value)
+    assert str(err.value).startswith("Embedding the uploaded sample failed")
+    assert "ValueError" in err.value.detail  # the full error stays behind Show details
+
+
+@pytest.mark.skipif(not _HAVE_STACK, reason="canonical genes / torch stack not available")
+def test_the_embed_script_refuses_text_counts_with_its_own_reason(tmp_path):
+    _, resolved = preflight_retrieval_requirements()
+    counts = tmp_path / "words.csv"
+    counts.write_text(_TEXT_CSV)
+    out = tmp_path / "vec.npy"
+    cmd = [
+        sys.executable, str(REPO / "precompute" / "embed_upload.py"),
+        "--counts", str(counts), "--out", str(out), "--sample", "a",
+        "--checkpoint", str(resolved["checkpoint"]),
+        "--orthologs", str(resolved["orthologs"]),
+        "--canonical-genes", str(resolved["canonical_genes"]),
+        "--mouse-exon-lengths", str(resolved["mouse_exon_lengths"]),
+        "--device", "cpu",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    assert proc.returncode != 0
+    last = [ln for ln in (proc.stderr + proc.stdout).splitlines() if ln.strip()][-1]
+    assert last.startswith("ABORT: ") and "holds text where counts were expected" in last
+    assert not out.exists()
+
+
+def test_true_and_false_are_words_not_counts():
+    """pandas reads True/False as booleans, which would otherwise pass as 1 and 0."""
+    from bridge_rna.util import text_counts_reason
+
+    assert "'True'" in text_counts_reason("S1", pd.Series([True, False]))
+
+
+def test_a_multiline_cell_is_quoted_on_one_short_line():
+    """The banner shows the reason's first line, so the quoted cell must not break it."""
+    from bridge_rna.util import text_counts_reason
+
+    reason = text_counts_reason("S1", pd.Series(["bad\nvalue " + "x" * 200]))
+    assert "\n" not in reason
+    assert "'bad value" in reason and len(reason) < 260
+
+
+def test_a_gzipped_tsv_is_read_as_tab_separated(tmp_path):
+    """`counts.tsv.gz` used to be staged as `.gz` and parsed with commas."""
+    import gzip
+
+    from bridge_rna import callbacks
+    from bridge_rna.util import counts_separator
+
+    assert callbacks._upload_suffix("counts.tsv.gz") == ".tsv.gz"
+    assert callbacks._upload_suffix("counts.csv.gz") == ".csv.gz"
+    assert callbacks._upload_suffix("GLDS-100.counts.tsv") == ".tsv"
+    assert callbacks._upload_suffix("noextension") == ".csv"
+    assert counts_separator("upload_ab12.tsv.gz") == "\t"
+    assert counts_separator("upload_ab12.csv.gz") == ","
+
+    raw = gzip.compress(b"gene\tS1\tS2\nENSMUSG00000000001\t5\t1\n")
+    staged = Path(callbacks._stage_upload(raw, callbacks._upload_suffix("counts.tsv.gz")))
+    try:
+        assert callbacks._upload_columns(staged, counts_separator(staged)) == ["S1", "S2"]
+    finally:
+        callbacks._discard_upload({"path": str(staged)})

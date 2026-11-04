@@ -812,8 +812,16 @@ def embed_uploaded_counts(
             )
             # The script raises SystemExit("ABORT: ...") for the expected failures,
             # so the last non-empty line is the actionable reason, not a stack trace.
-            reason = _last_nonempty_line(msg) or "Embedding the uploaded sample failed."
-            reason = reason.replace("ABORT: ", "")
+            # The script raises SystemExit("ABORT: ...") for every failure it
+            # expects, and that line is the banner's sentence (an ABORT may run on
+            # over several lines; the rest stays in the detail). Anything else is
+            # an unexpected error whose last line is a traceback line such as
+            # "ValueError: ...", which is not a sentence for the banner.
+            aborts = [ln.strip() for ln in msg.splitlines() if ln.strip().startswith("ABORT: ")]
+            if aborts:
+                reason = aborts[-1][len("ABORT: "):]
+            else:
+                reason = "Embedding the uploaded sample failed. Show details has the full error."
             raise RetrievalError(reason, detail=msg)
 
         vec = np.load(out_path).astype(np.float32).reshape(-1)

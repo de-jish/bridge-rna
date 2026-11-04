@@ -7,6 +7,7 @@ this one imports nothing from the package.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -39,6 +40,35 @@ def _last_nonempty_line(text: str) -> str:
         if stripped:
             return stripped
     return ""
+
+
+def counts_separator(path: str | Path) -> str:
+    """Tab for a `.tsv` or `.txt` counts file, gzipped or not; comma otherwise."""
+    suffixes = {x.lower() for x in Path(path).suffixes}
+    return "\t" if suffixes & {".tsv", ".txt"} else ","
+
+
+def text_counts_reason(column: str, values: pd.Series) -> str:
+    """One plain sentence if a sample column holds text where counts belong, else "".
+
+    Empty cells are not text and are left to the preprocessing. True and False
+    are words, although pandas reads them as booleans that would pass as 1 and 0.
+    Shared by the upload loader and `precompute/embed_upload.py`, so the two can
+    never describe the same bad file differently.
+    """
+    if pd.api.types.is_bool_dtype(values):
+        text = values
+    else:
+        text = values[values.notna() & pd.to_numeric(values, errors="coerce").isna()]
+    if not len(text):
+        return ""
+    # Quoted on one short line: the banner shows the reason's first line.
+    example = " ".join(str(text.iloc[0]).split())
+    if len(example) > 40:
+        example = example[:40] + "..."
+    return (f"Column '{column}' holds text where counts were expected (for example "
+            f"'{example}'). Expected mouse Ensembl gene IDs in the first column "
+            "and numeric counts in each sample column.")
 
 
 class RetrievalError(RuntimeError):

@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from manifold import paths  # noqa: E402
 from manifold.bridge_rna import load_bridge_rna_symbols  # noqa: E402
+from bridge_rna.util import counts_separator, text_counts_reason  # noqa: E402
 
 
 def _assert_gene_digest(canonical_genes: list[str], sym: dict) -> str:
@@ -62,8 +63,7 @@ def _assert_gene_digest(canonical_genes: list[str], sym: dict) -> str:
 
 def _read_counts(counts_path: Path) -> pd.DataFrame:
     """Read a counts matrix, tolerating CSV, TSV, and gzip, gene IDs in column 0."""
-    suffixes = {s.lower() for s in counts_path.suffixes}
-    sep = "\t" if (".tsv" in suffixes or ".txt" in suffixes) else ","
+    sep = counts_separator(counts_path)
     try:
         df = pd.read_csv(counts_path, sep=sep, index_col=0)
     except Exception as exc:  # noqa: BLE001 - surfaced as a clean one-liner upstream
@@ -108,6 +108,9 @@ def preprocess_counts(
             f"Available columns include: {preview}"
         )
 
+    reason = text_counts_reason(sample_column, counts_df[sample_column])
+    if reason:
+        raise SystemExit(f"ABORT: {reason}")
     counts = counts_df[sample_column].astype(np.float32)
     mapped_human = pd.Series(counts.index, index=counts.index).map(ensembl_to_human)
     keep = mapped_human.notna()

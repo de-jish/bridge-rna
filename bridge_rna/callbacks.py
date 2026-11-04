@@ -60,7 +60,7 @@ from .retrieval import (
     sample_tier,
     search_hits_with_neighborhood,
 )
-from .util import _format_count, _last_nonempty_line, _safe_str
+from .util import _format_count, _last_nonempty_line, _safe_str, counts_separator, text_counts_reason
 
 
 def _evidence_payload(frame: pd.DataFrame | None, label: str = "", *,
@@ -291,6 +291,44 @@ def _stage_upload(raw: bytes, suffix: str) -> str:
     finally:
         fh.close()
     return fh.name
+
+
+def _upload_suffix(filename: str) -> str:
+    """The suffix a staged upload keeps: `.tsv.gz` stays `.tsv.gz`, not `.gz`.
+
+    The separator is read from the staged name, here and in the embed script, so
+    dropping the inner suffix parsed a gzipped TSV with commas.
+    """
+    suffixes = [x.lower() for x in Path(filename).suffixes]
+    if len(suffixes) >= 2 and suffixes[-1] == ".gz" and suffixes[-2] in (".csv", ".tsv", ".txt"):
+        return "".join(suffixes[-2:])
+    return suffixes[-1] if suffixes else ".csv"
+
+
+UPLOAD_PREVIEW_ROWS = 200
+
+
+def _upload_columns(path: str | Path, sep: str) -> list[str]:
+    """The sample columns of a staged counts file, or ValueError with a plain reason.
+
+    Reads the header and the first rows only, so a file of words is refused as
+    it is loaded and Embed & search never becomes clickable for it. The embed
+    script repeats the check over the whole chosen column with the same sentence.
+    """
+    try:
+        head = pd.read_csv(path, sep=sep, index_col=0, nrows=UPLOAD_PREVIEW_ROWS)
+    except Exception as exc:  # noqa: BLE001 - surfaced as one sentence
+        raise ValueError(f"Could not read the counts file: {exc}") from exc
+    if not len(head.columns):
+        raise ValueError("No sample columns found. Expected mouse Ensembl gene IDs in the "
+                         "first column and one or more sample columns.")
+    # A text column (gene symbols beside the counts, say) is not a sample, so it
+    # is left out of the picker; a file with no numeric column at all is refused.
+    reasons = {str(c): text_counts_reason(str(c), head[c]) for c in head.columns}
+    cols = [c for c, reason in reasons.items() if not reason]
+    if not cols:
+        raise ValueError(next(iter(reasons.values())))
+    return cols
 
 
 def _discard_upload(previous: dict[str, Any] | None) -> None:
@@ -1067,8 +1105,7 @@ def register(app) -> None:
             return None, build_status_banner(msg, kind="error"), [], None, hidden, True
 
         name = _safe_str(filename) or "uploaded_counts.csv"
-        suffix = Path(name).suffix or ".csv"
-        staged = _stage_upload(raw, suffix)
+        staged = _stage_upload(raw, _upload_suffix(name))
 
         def _reject(message: str):
             """Report the reason and take the unusable file back off disk."""
@@ -1076,15 +1113,10 @@ def register(app) -> None:
             return (None, build_status_banner(message, kind="error"),
                     [], None, hidden, True)
 
-        sep = "\t" if suffix.lower() in (".tsv", ".txt") else ","
         try:
-            cols = list(map(str, pd.read_csv(staged, sep=sep, index_col=0, nrows=0).columns))
-        except Exception as exc:
-            return _reject(f"Could not read the counts file: {exc}")
-        if not cols:
-            return _reject(
-                "No sample columns found. Expected mouse Ensembl gene IDs in the "
-                "first column and one or more sample columns.")
+            cols = _upload_columns(staged, counts_separator(staged))
+        except ValueError as exc:
+            return _reject(str(exc))
 
         options = [{"label": c, "value": c} for c in cols]
         preview = html.Div(className="upload-loaded", children=[

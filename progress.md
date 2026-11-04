@@ -6,6 +6,24 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-11-04 (UAT workbook simplified; text uploads refused in plain language)
+
+Joshua found the first workbook too complicated.
+The ENVVIZ example's four tabs are four different applications, each one self-contained sheet, so `Bridge_RNA_UAT.xlsx` is now one sheet cloned from the example's EDA sheet: the same title band, header fields (plus one for the build), "Enter X for Pass or Fail", the same eight columns and "APPLICATION N:" rows, and 46 short tests in 7 applications.
+The Instructions, Summary and Reviewer Notes tabs are gone; the expected results are still the ones established in the 2026-11-02 walk-through.
+
+The defect the first workbook flagged (its test 8.6) is fixed.
+A CSV of words passed the header-only check at load time, reached `precompute/embed_upload.py`, and the banner showed the subprocess's traceback line.
+`bridge_rna.util.text_counts_reason` is now the one sentence for it, used by the loader (`callbacks._upload_columns`, which reads the first 200 rows, leaves text columns out of the picker and refuses a file with no numeric column, so Embed & search never enables) and by the embed script for the chosen column.
+`embed_uploaded_counts` now shows only the script's own `ABORT:` line and never a traceback line; anything unexpected reads "Embedding the uploaded sample failed." with the full error behind Show details.
+Four unit tests and an upload browser-suite case pin it.
+Codex's review found three real gaps and all three are fixed with tests.
+`True`/`False` cells were read as booleans and passed as 1 and 0.
+A multi-line cell broke the banner's first line, so the quoted example is now one short line.
+And, predating this change, `counts.tsv.gz` was staged as `.gz` and parsed with commas (`callbacks._upload_suffix` keeps `.tsv.gz`; `util.counts_separator` is the one rule, used by the loader and the embed script).
+Its fourth point, that the reason runs to two sentences, was rejected: it matches the existing "No sample columns found. Expected ..." message.
+The repository's 32 standing lint warnings (semicolon statements, `l` as a name, a late import, and an unused re-export in `scoring.py`) were cleared at the same time.
+
 ## 2026-11-02 (UAT workbook)
 
 `Bridge_RNA_UAT.xlsx` (repository root, not committed) is the first User Acceptance Testing workbook, modelled on the EDA and RadLab sheets of the ENVVIZ example Joshua's mentor recommended: 61 tests in 10 sections (getting started, single-sample search, matches table, details and links, plots, export and AI summary, cohorts, upload, map, layout), with Instructions, a formula-driven Summary and Reviewer Notes recording how each expected result was established. 47 expected results were copied from the running application in a scripted walk-through on 2026-11-02, 6 from the automated browser suites, 5 from code, and 3 need confirmation. Open items for the mentor: the tester URL (placeholder), whether the AI summary is configured on the test deployment, and test 8.6, where a CSV with text instead of counts produces a raw Python error banner ("ValueError: could not convert string to float") rather than a plain message.

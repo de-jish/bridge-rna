@@ -94,8 +94,8 @@ def build_fixtures(dest: Path) -> dict[str, Path]:
     """Every accepted variation and every rejected one, from the shipped example.
 
     Generated rather than committed: the repo carries one example file, and the
-    seven variants below are mechanical transforms of it, so committing them
-    would be seven more things to keep in sync with a format that has one
+    nine variants below are mechanical transforms of it, so committing them
+    would be nine more things to keep in sync with a format that has one
     source of truth.
     """
     dest.mkdir(parents=True, exist_ok=True)
@@ -124,6 +124,12 @@ def build_fixtures(dest: Path) -> dict[str, Path]:
         one.to_csv(fh)
     paths["gzip"] = p
 
+    # Until 2026-11-04 staging kept only ".gz", so this was parsed with commas.
+    p = dest / "tab_separated.tsv.gz"
+    with gzip.open(p, "wt") as fh:
+        one.to_csv(fh, sep="\t")
+    paths["tsv_gzip"] = p
+
     # Rejections. Human Ensembl IDs are the realistic mistake: a well-formed
     # matrix of the right shape that maps zero orthologs.
     p = dest / "human_ids.csv"
@@ -143,6 +149,13 @@ def build_fixtures(dest: Path) -> dict[str, Path]:
     p = dest / "no_sample_columns.csv"
     p.write_text("gene_id\nENSMUSG00000000001\nENSMUSG00000000003\n")
     paths["nocols"] = p
+
+    # Words where counts belong. Until 2026-11-04 this passed the header check
+    # and the banner showed the embed script's traceback line ("ValueError:
+    # could not convert string to float"); found in the UAT walk-through.
+    p = dest / "text_cells.csv"
+    p.write_text("not,a,counts\nfile,with,text\n")
+    paths["text"] = p
 
     return paths
 
@@ -449,7 +462,7 @@ def main() -> int:
 
                 # 2. every accepted variation must give the FLT answer exactly.
                 print("\n--- 2. accepted format variations ---")
-                for name in ("single", "versioned", "tsv", "gzip"):
+                for name in ("single", "versioned", "tsv", "gzip", "tsv_gzip"):
                     upload(page, fx[name])
                     if name == "single":
                         c.ok(not page.locator("#upload-column-control").is_visible(),
@@ -464,14 +477,17 @@ def main() -> int:
                 print("\n--- 3. rejections ---")
                 for name, expect in (("human", "ortholog"),
                                      ("symbols", "ortholog"),
-                                     ("nocols", "sample columns")):
+                                     ("nocols", "sample columns"),
+                                     ("text", "holds text where counts were expected")):
                     upload(page, fx[name])
-                    if name == "nocols":
+                    if name in ("nocols", "text"):
                         # Rejected before any search: the notice is in the rail's
                         # upload slot, not in the search-status banner.
                         msg, kind = upload_notice(page)
                         c.ok("status-error" in kind and expect in msg.lower(),
                              f"{name}: rejected at upload time: {msg[:80]}")
+                        c.ok("Error" not in msg and "Traceback" not in msg,
+                             f"{name}: the reason is a sentence, not a Python error")
                         c.ok(page.locator("#upload-search-button").is_disabled(),
                              f"{name}: the search button stays disabled")
                         c.ok(not page.locator("#upload-column-control").is_visible(),
