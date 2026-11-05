@@ -48,3 +48,66 @@ Whether that argument is good enough to reopen the box is Josh's product decisio
 Because placement A is the strongest fit, **samples -> text on samples whose own metadata is hidden** is the criterion that matters most, and within it the OSDR spaceflight samples (the out-of-distribution, mouse, curated-tissue test) matter more than held-out ARCHS4.
 So the samples -> text criterion weights OSDR at 0.6 and held-out ARCHS4 at 0.4 (the brief required at least half).
 Text -> samples stays the largest single criterion (35%), because placements B and C both need it and it is the harder, more novel half.
+
+## Setup and fixed procedure
+
+The experiment clock started at **12:04 EST on 2026-11-05** (Step 0 not counted).
+The budget is 4 hours of wall clock, so the deadline is 16:04 EST, with the last 30 minutes reserved for final re-evaluation, the write-up and pushing.
+On 2026-11-05 Josh asked to finish the experiment in a cloud session.
+The clock keeps running from 12:04 and is not restarted by the move.
+
+### Data the experiment reads
+
+- The ARCHS4 index, `archs4_sample_embeddings_full/sample_embeddings.float16.mmap` (940,455 x 512 float16, row = global index), and `sample_locations.parquet` (species: 0 human 510,709, 1 mouse 429,746). Both are Git LFS objects, which GitHub serves for this public repository.
+- Snapshots of four gitignored cache files in `experiments/text_search/data/`, committed to this branch with Josh's approval on 2026-11-05 so a cloud session can run without the Mac: `archs4_metadata.parquet`, `osdr_sample_embeddings.float32.npy`, `osdr_metadata.parquet` (rows align with the embeddings), `whitening.npz`. Checksums in `data/SHA256SUMS`.
+- CellWhisperer's curated captions, read once with HTTP range requests from `full_data.h5ad` (163 GB) by `fetch_cellwhisperer_captions.py`: only `obs/geo_id`, `obs/organism` and `obs/natural_language_annotation`, 197 MB transferred in 67 s. 705,430 samples, all human (32 "human semen metagenome"), 428,353 distinct captions, median 111 characters; **381,018 join our ARCHS4 index by GSM**.
+  The site states no data license. The code repository is GPL-3.0. Treat the captions as research-use only until the license is confirmed with the authors (cellwhisperer at bocklab.org); they are not committed.
+
+### Split and leakage control (`prep.py`, fixed)
+
+- Split by GEO `series_id`: a series is held out when `md5(f"{seed}:{series_id}")` falls in the lowest 15%. The 839 rows with no series are train-only. No `series_id` holds more than one series.
+- Gallery: 40,000 held-out samples drawn at random (seed) from held-out rows whose tissue bucket is not Other or Unknown.
+- A gallery sample whose plain cosine distance to **any** training sample is below 1e-6 is dropped (exact float64 recheck of every candidate within 1e-4).
+- Caption pool: up to 5,000 gallery samples, one per series, with text unique in the gallery.
+- OSDR: all 2,108 samples, curated tissue through `manifold/tissue.canonical_tissue`. Their max cosine to any ARCHS4 training sample is recorded, because GeneLab studies are also deposited in GEO.
+- Sample text is `title. source_name. characteristics` from the metadata parquet. At test time a held-out sample is represented only by its L2-normalised expression vector.
+
+### Free-text queries
+
+`queries.py` holds 32 free-text queries with their relevance definition (tissue bucket set, optional species), written at 12:05 before any result existed. Do not edit them.
+Bucket queries use each of the 37 named buckets as text (`bucket_query_text`).
+
+### Scoring Z (fixed in the baseline round, never changed after)
+
+Raw metrics, all reported:
+
+- **T2S** (text -> sample), gallery = held-out pool expression vectors. AP@100 per query = sum over the top 100 of precision@k at each relevant rank, divided by min(R, 100). Macro mAP over bucket queries with at least 20 relevant gallery samples, and separately over the free-text queries. Null: the same rankings scored against 3 label permutations of the gallery.
+  Per species: bucket queries re-run inside the human-only and mouse-only gallery.
+  Species collapse: for each species-agnostic bucket query, |human share of the top 100 - human share of its relevant set|.
+- **S2T** (sample -> text), classification over the 37 named buckets as candidate labels. Balanced accuracy (mean per-class recall over classes with at least 20 samples) on the held-out ARCHS4 gallery, per species too, and on all 2,108 OSDR samples (every class present). Chance = 1/37.
+- **CAP** (caption retrieval), within the caption pool: each sample's own GEO text as the query; recall@10 and median rank in both directions (text -> sample, sample -> text). Random recall@10 = 10/N.
+- **Serving**: torch needed at query time; text-encoder kind; measured CPU latency of one text query against all 940,455 rows (encode plus every full scan it needs); added artifact size.
+
+Criterion scores (each 0-100) and the overall:
+
+- T2S = 100 x (0.5 mAP_bucket + 0.5 mAP_free)
+- S2T = 100 x (0.4 BA_archs4 + 0.6 BA_osdr)
+- CAP = 100 x (0.5 mean(R@10 both directions) + 0.5 mean over directions of max(0, 1 - median_rank / (N/2)))
+- SERV = 0 if torch is needed at serving; else 100 x (0.5 latency + 0.3 dependency + 0.2 size), latency 1 if under 1 s, 0.5 if under 2 s, else 0; dependency 1 numpy-only (model2vec or precomputed vocabulary), 0.7 onnxruntime, 0.5 the configured LLM endpoint; size 1 if at most 100 MB added, 0.5 if at most 500 MB, else 0
+- HON = 0 if the leakage check fails; else 100 x mean of (margin = min, clipped to [0, 1], of (mAP_bucket - null)/(1 - null) and (BA - chance)/(1 - chance) for ARCHS4 and OSDR; species balance = mean of min/max per-species ratios of S2T BA and T2S bucket mAP; anti-collapse = 1 - mean species-collapse gap)
+- **Overall = 0.35 T2S + 0.30 S2T + 0.15 CAP + 0.10 SERV + 0.10 HON**
+
+A metadata-only text search (encode the held-out samples' own GEO text) is measured with the same harness as a reference ceiling; it is not eligible as an artifact by itself.
+
+### Baseline B0 (not yet run)
+
+Frozen `minishlab/potion-base-32M` (model2vec, 512-d, numpy-only at query time) over each training sample's GEO text, plus a ridge map (lambda 100, fit on training series only) from text space to L2-normalised expression space.
+T2S scores a mapped query against the gallery by cosine; S2T maps the 37 bucket texts and takes the argmax cosine; CAP uses the same similarity matrix in both directions.
+
+## Status at the move to the cloud (2026-11-05, about 12:40 EST)
+
+- [x] Placement walkthrough, committed
+- [x] Fixed queries, `prep.py`, CellWhisperer caption fetch (captions in gitignored `exp_data/`, not committed; re-run the fetch, about 70 s)
+- [x] Cache snapshots committed in `experiments/text_search/data/`
+- [ ] `prep.py --seed 0` has not finished a run (the Mac session ended mid-run); no gallery exists yet
+- [ ] Text embedding cache (`encode_texts.py`, not yet written), evaluation harness, Codex harness review, rounds, write-up

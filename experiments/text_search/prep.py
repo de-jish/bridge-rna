@@ -26,8 +26,18 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-ROOT = Path("/Users/josh/Bridge-RNA")
+import os
+
+# The repository root that holds the LFS embedding index. On Josh's Mac the
+# worktree's index is not checked out, so it defaults to the main checkout;
+# in a fresh clone (the cloud) set BRIDGE_RNA_ROOT to the clone itself.
+ROOT = Path(os.environ.get("BRIDGE_RNA_ROOT", "/Users/josh/Bridge-RNA"))
 MMAP = ROOT / "archs4_sample_embeddings_full/sample_embeddings.float16.mmap"
+LOCATIONS = ROOT / "archs4_sample_embeddings_full/sample_locations.parquet"
+# Snapshots of the gitignored cache files this experiment reads, committed to
+# the experiment branch on 2026-11-05 with Josh's approval so a cloud session
+# can run it. Copied byte for byte from /Users/josh/Bridge-RNA/cache/.
+DATA = Path(__file__).resolve().parent / "data"
 N, D = 940_455, 512
 EXP = Path(__file__).resolve().parents[2] / "exp_data"
 TEST_PCT = 15
@@ -70,11 +80,12 @@ def held_out(series: pd.Series, seed: int) -> np.ndarray:
 def max_cos_to_train(q: np.ndarray, train_idx: np.ndarray) -> np.ndarray:
     """Max plain cosine of each query row to any training row, exact near the top.
 
-    One MPS float32 pass over all training rows finds the best candidate per
-    query; candidates within 1e-4 are recomputed in float64.
+    One float32 GPU pass (CUDA, else MPS, else CPU) over all training rows finds
+    the best candidate per query; candidates within 1e-4 are recomputed in float64.
     """
     import torch
-    dev = torch.device("mps")
+    dev = torch.device("cuda" if torch.cuda.is_available()
+                       else "mps" if torch.backends.mps.is_available() else "cpu")
     qt = torch.from_numpy(q).to(dev)
     best = torch.full((len(q),), -2.0, device=dev)
     arg = torch.zeros((len(q),), dtype=torch.long, device=dev)
@@ -110,15 +121,15 @@ def main() -> None:
     out = EXP / f"split_s{args.seed}"
     out.mkdir(parents=True, exist_ok=True)
 
-    m = pd.read_parquet(ROOT / "cache/archs4_metadata.parquet")
-    pm = pd.read_parquet(ROOT / "cache/points_meta.parquet")
-    pm = pm[pm.dataset == 0].sort_values("src_index")
-    assert (pm.src_index.to_numpy() == np.arange(N)).all()
+    m = pd.read_parquet(DATA / "archs4_metadata.parquet")
+    loc = pd.read_parquet(LOCATIONS)
+    assert (loc.global_index.to_numpy() == np.arange(N)).all()
     assert (m.global_index.to_numpy() == np.arange(N)).all()
+    assert (loc.geo_accession.to_numpy() == m.geo_accession.to_numpy()).all()
     meta = pd.DataFrame({
         "global_index": np.arange(N, dtype=np.int32),
         "series_id": m.series_id.fillna("").astype(str),
-        "species": pm.species_id.to_numpy().astype(np.int8),
+        "species": loc.species_id.to_numpy().astype(np.int8),  # 0 human, 1 mouse
         "tissue": m.tissue.astype(str),
         "text": sample_text(m),
     })
@@ -138,7 +149,7 @@ def main() -> None:
     np.save(out / "gallery.npy", gallery)
 
     # OSDR against ARCHS4 train: report, and drop exact duplicates from the OSDR test.
-    osdr = np.load(ROOT / "cache/osdr_sample_embeddings.float32.npy").astype(np.float32)
+    osdr = np.load(DATA / "osdr_sample_embeddings.float32.npy").astype(np.float32)
     osdr /= np.linalg.norm(osdr, axis=1, keepdims=True)
     obest = max_cos_to_train(osdr, np.nonzero(~test)[0])
     np.save(out / "osdr_max_cos_train.npy", obest)
