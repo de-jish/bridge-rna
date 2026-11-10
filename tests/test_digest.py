@@ -234,6 +234,24 @@ def test_a_missing_or_foreign_artifact_reads_as_unavailable(tmp_path, monkeypatc
         D.load_term_table.cache_clear()
 
 
+def test_the_ai_prompt_receives_the_words_labelled_as_metadata():
+    template = (ROOT / "prompts" / "ai_summary_prompt.txt").read_text()
+    assert "{shared_terms}" in template
+    assert "not the samples' biology" in template
+    hits = [hit("1", "GSE1", title="spleen"), hit("2", "GSE2", title="spleen"),
+            hit("3", "GSE3", title="liver")]
+    text = D.prompt_text(D.shared_terms(hits, table(spleen=10, liver=10)))
+    assert text.startswith("- spleen: used by 2 of the hits' 3 series")
+    assert D.prompt_text(D.shared_terms(hits, None)).startswith(
+        "The GEO word counts are not built")
+    # every placeholder the template names is one the callback fills
+    import re
+    named = set(re.findall(r"\{([a-z_]+)\}", template))
+    assert named == {"osdr_metadata", "retrieved_hits_table", "geo_summaries",
+                     "shared_terms"}
+    assert "used by 2" in template.format(**{k: "" for k in named} | {"shared_terms": text})
+
+
 def test_the_help_entry_exists_for_the_row():
     from bridge_rna import help as H
     assert "shared-terms" in H.ENTRIES

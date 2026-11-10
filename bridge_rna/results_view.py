@@ -511,18 +511,7 @@ def _summary(results: dict, shown: int, filtered: bool) -> str:
 
 def _digest_message(description: dict) -> str:
     """The sentence for a result set that has no word to show."""
-    status = description.get("status")
-    m = description.get("series_count") or 0
-    if status == "none":
-        return (f"No word is shared by two or more of these {m:,} series "
-                f"at {DG.MIN_RATIO:.0f}x its GEO rate.")
-    if status == "one_series":
-        return "Every match is from one GEO series, so there is nothing to compare across series."
-    if status == "no_text":
-        return "These matches have no GEO title or source name."
-    if status == "unavailable":
-        return f"The GEO word counts are not built on this machine. Run {DG.BUILD_COMMAND}."
-    return ""
+    return DG.message(description)
 
 
 def _digest_row(description: dict, active_text: str, *, side: str = "",

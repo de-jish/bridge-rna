@@ -240,6 +240,33 @@ def shared_terms(hits: Sequence[Mapping[str, Any]] | None,
     return {**base, "status": "ok" if terms else "none", "terms": terms}
 
 
+def message(description: Mapping[str, Any]) -> str:
+    """The sentence for a result set with no word to show; empty when there are words."""
+    status = description.get("status")
+    m = description.get("series_count") or 0
+    if status == "none":
+        return (f"No word is shared by two or more of these {m:,} series "
+                f"at {MIN_RATIO:.0f}x its GEO rate.")
+    if status == "one_series":
+        return "Every match is from one GEO series, so there is nothing to compare across series."
+    if status == "no_text":
+        return "These matches have no GEO title or source name."
+    if status == "unavailable":
+        return f"The GEO word counts are not built on this machine. Run {BUILD_COMMAND}."
+    return ""
+
+
+def prompt_text(description: Mapping[str, Any]) -> str:
+    """The shared terms as plain lines for the AI summary prompt."""
+    terms = description.get("terms") or []
+    if not terms:
+        return message(description) or "No matches."
+    return "\n".join(
+        f"- {t['term']}: used by {t['series']} of the hits' {t['of']} series, "
+        f"{format_ratio(t['ratio'])} its share of all GEO series"
+        for t in terms)
+
+
 def format_ratio(ratio: float, *, exact: bool = False) -> str:
     """`20x`, `7.4x`, `>100x`: never a false decimal.
 

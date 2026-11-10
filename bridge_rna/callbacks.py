@@ -29,6 +29,7 @@ from .ai import (
     unavailable_reason,
 )
 from . import cohorts as C
+from . import digest
 from . import scoring as S
 from .config import GENERIC_ENTREZ_EMAIL, MAX_UPLOAD_BYTES
 from .geo import _enrich_hits_from_ncbi_eutils
@@ -1289,6 +1290,10 @@ def register(app) -> None:
             osdr_metadata=_format_osdr_query_text(query_row),
             retrieved_hits_table=_format_hits_table_text(hits_df),
             geo_summaries=_format_geo_context_text(hits_df),
+            # Counted by the results view's own rules, over the matches being
+            # summarized (the first rows in view, not every retrieved match).
+            shared_terms=digest.prompt_text(digest.shared_terms(
+                hits_df.to_dict(orient="records"), digest.load_term_table())),
         )
 
         summary = _call_ai_summary(prompt)
