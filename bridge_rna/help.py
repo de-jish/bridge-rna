@@ -349,7 +349,8 @@ ENTRIES: dict[str, Entry] = {
         ("Undo any zoom, whether from Fit study, Fit results or your own "
          "scrolling, and show the whole map again."),
         (_x("manifold/callbacks.py",
-            "return {\"xaxis\": dict(autorange=True), \"yaxis\": dict(autorange=True)}"),),
+            "return {\"xaxis\": dict(autorange=True, **pin),",
+            "\"yaxis\": dict(autorange=True, **pin)}"),),
     ),
 }
 
