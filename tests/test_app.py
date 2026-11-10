@@ -252,11 +252,97 @@ def test_a_failed_summary_never_carries_a_summary_status(app, monkeypatch):
     assert summary == "A real summary." and status == "Summary of the 1 matches shown."
 
 
+def test_the_precheck_never_blocks_a_setup_that_might_work(monkeypatch):
+    """Found in review: only an explicit empty list means "no models"."""
+    import requests
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "AI_SUMMARY_PROVIDER", "ollama")
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    class Unnamed(_Tags):
+        def json(self):
+            return {"models": [{}, {"model": "working:latest"}]}
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: Unnamed([]))
+    assert ai.unavailable_reason() is None
+
+    def slow(*_a, **_k):
+        raise requests.exceptions.ReadTimeout("busy")
+    monkeypatch.setattr(ai.requests, "get", slow)
+    assert ai.unavailable_reason() is None, "a busy Ollama is not an absent one"
+
+    def no_route(*_a, **_k):
+        raise requests.exceptions.ConnectTimeout("no route")
+    monkeypatch.setattr(ai.requests, "get", no_route)
+    assert "Could not reach Ollama" in (ai.unavailable_reason() or "")
+
+
+class _Reply:
+    def __init__(self, text, status=200):
+        self.status_code = status
+        self.text = text
+
+    def json(self):
+        import json
+        return json.loads(self.text)
+
+
+@pytest.mark.parametrize("body", ['{"response": "", "done": true}',
+                                  '{"error": "model failed to load"}', ""])
+def test_an_ollama_reply_without_text_is_a_failure_not_a_summary(monkeypatch, body):
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags([ai.OLLAMA_MODEL]))
+    monkeypatch.setattr(ai.requests, "post", lambda *a, **k: _Reply(body))
+    out = ai._call_ollama_summary("p")
+    assert isinstance(out, ai.SummaryFailure)
+    if "error" in body:
+        assert "model failed to load" in out
+
+    monkeypatch.setattr(ai.requests, "post",
+                        lambda *a, **k: _Reply('{"response": "A summary."}'))
+    out = ai._call_ollama_summary("p")
+    assert out == "A summary." and not isinstance(out, ai.SummaryFailure)
+
+
+def test_the_ollama_fallback_model_is_held_to_the_same_rule(monkeypatch):
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags(["llama3:8b"]))
+    replies = iter([_Reply('{"error": "model not found"}', status=404),
+                    _Reply('{"response": ""}')])
+    monkeypatch.setattr(ai.requests, "post", lambda *a, **k: next(replies))
+    out = ai._call_ollama_summary("p")
+    assert isinstance(out, ai.SummaryFailure) and "fallback model: llama3:8b" in out
+
+    replies = iter([_Reply('{"error": "model not found"}', status=404),
+                    _Reply('{"response": "Fine."}')])
+    out = ai._call_ollama_summary("p")
+    assert out == "[Using fallback model: llama3:8b]\n\nFine."
+    assert not isinstance(out, ai.SummaryFailure)
+
+
+@pytest.mark.parametrize("body,ok", [('{"summary": "Text."}', True),
+                                     ('{"message": "Internal error"}', False),
+                                     ("plain text summary", True), ("", False)])
+def test_a_bedrock_reply_without_text_is_a_failure_not_a_summary(monkeypatch, body, ok):
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "BEDROCK_API_URL", "https://example.invalid/q")
+    monkeypatch.setattr(ai.requests, "post", lambda *a, **k: _Reply(body))
+    out = ai._call_bedrock_summary("p")
+    assert isinstance(out, ai.SummaryFailure) is (not ok)
+
+
 def test_every_provider_failure_is_marked(monkeypatch):
     import requests
     from bridge_rna import ai
 
     monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    # No real request: model discovery is answered here, not by a local Ollama.
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags([ai.OLLAMA_MODEL]))
 
     def refused(*_a, **_k):
         raise requests.exceptions.ConnectionError("refused")

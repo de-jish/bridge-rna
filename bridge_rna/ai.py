@@ -43,6 +43,15 @@ def _failure(text: str) -> SummaryFailure:
     return SummaryFailure(text)
 
 
+def _no_summary_text(raw: str = "", *, prefix: str = "") -> SummaryFailure:
+    """A reply that arrived but held no summary, with what it did hold."""
+    raw = _safe_str(raw)
+    if len(raw) > 400:
+        raw = raw[:400] + "..."
+    detail = f"\n\nThe service replied: {raw}" if raw else ""
+    return _failure(f"{prefix}AI Summary returned no text.{detail}")
+
+
 def _load_ai_prompt_template() -> str:
     if AI_PROMPT_PATH.exists():
         return AI_PROMPT_PATH.read_text(encoding="utf-8")
@@ -140,8 +149,9 @@ def _call_bedrock_summary(prompt: str) -> str:
     def _extract_text_response(resp: requests.Response) -> str:
         try:
             data = resp.json() if resp.text else {}
+            structured = isinstance(data, (dict, list))
         except Exception:
-            data = {}
+            data, structured = {}, False
 
         if isinstance(data, dict):
             # Legacy widget format: {"answer": [{"text": "..."}], "source_urls": [...]}
@@ -172,7 +182,12 @@ def _call_bedrock_summary(prompt: str) -> str:
                         return body.strip()
 
         txt = _safe_str(resp.text)
-        return txt or _failure("AI Summary returned no text.")
+        # A JSON reply with none of the fields above is an envelope with no
+        # summary in it (an error, an empty completion), not a summary to show
+        # under "Summary of the N matches". A plain-text reply is the summary.
+        if structured or not txt:
+            return _no_summary_text(txt)
+        return txt
 
     payload_key = BEDROCK_PAYLOAD_KEY
     primary_text = prompt if payload_key != "query" else _sanitize_query_text(prompt)
@@ -252,8 +267,12 @@ def _ollama_models(timeout: float = 5) -> list[str] | None:
     models = data.get("models") if isinstance(data, dict) else None
     if not isinstance(models, list):
         return None
-    return [_safe_str(m.get("name")) for m in models
-            if isinstance(m, dict) and _safe_str(m.get("name"))]
+    names = [_safe_str(m.get("name")) for m in models
+             if isinstance(m, dict) and _safe_str(m.get("name"))]
+    # Entries we cannot name are still models: only an empty list says "none".
+    if models and not names:
+        return None
+    return names
 
 
 def unavailable_reason() -> str | None:
@@ -285,6 +304,12 @@ def unavailable_reason() -> str | None:
             return _failure("AI Summary call failed: OLLAMA_BASE_URL is not configured.")
         try:
             models = _ollama_models(timeout=5)
+        except requests.exceptions.ReadTimeout:
+            # Connected but slow: a busy Ollama is not an absent one. The call
+            # itself waits OLLAMA_TIMEOUT_SECONDS and says so if it gives up.
+            # (ConnectTimeout is not caught here: it is a ConnectionError too,
+            # and a host that cannot be connected to is unreachable.)
+            return None
         except requests.exceptions.RequestException:
             return _ollama_unreachable_message()
         if models == []:
@@ -358,32 +383,37 @@ def _call_ollama_summary(prompt: str) -> str:
                     try:
                         retry = _generate(fallback)
                         if retry.status_code < 400:
-                            data = retry.json() if retry.text else {}
-                            if isinstance(data, dict):
-                                response_text = _safe_str(data.get("response"))
-                                if response_text:
-                                    return f"[Using fallback model: {fallback}]\n\n{response_text}"
-                            fallback_text = _safe_str(retry.text)
-                            if not fallback_text:
-                                return _failure(f"[Using fallback model: {fallback}]\n\n"
-                                                "AI Summary returned no text.")
-                            return f"[Using fallback model: {fallback}]\n\n{fallback_text}"
+                            label = f"[Using fallback model: {fallback}]\n\n"
+                            text = _ollama_response_text(retry, prefix=label)
+                            return text if isinstance(text, SummaryFailure) else label + text
                     except Exception as retry_exc:
                         return _failure(
                             f"AI Summary call failed (Ollama fallback): {_safe_str(retry_exc)}")
         return _failure(f"AI Summary call failed (Ollama): HTTP {resp.status_code}: {err}")
 
+    return _ollama_response_text(resp)
+
+
+def _ollama_response_text(resp: requests.Response, *, prefix: str = "") -> str:
+    """The `response` field of an `/api/generate` reply, or why there is none.
+
+    Ollama always answers that endpoint with JSON. A reply whose `response` is
+    empty or missing - an empty completion, or `{"error": ...}` with HTTP 200 -
+    is not a summary, and used to be shown as one, raw JSON and all, under
+    "Summary of the N matches shown".
+    """
     try:
-        data = resp.json() if resp.text else {}
+        data = resp.json() if resp.text else None
     except Exception:
-        data = {}
-
+        data = None
     if isinstance(data, dict):
-        response_text = _safe_str(data.get("response"))
-        if response_text:
-            return response_text
-
-    return _safe_str(resp.text) or _failure("AI Summary returned no text.")
+        text = _safe_str(data.get("response"))
+        if text:
+            return text
+        error = _safe_str(data.get("error"))
+        if error:
+            return _failure(f"{prefix}AI Summary call failed (Ollama): {error}")
+    return _no_summary_text(resp.text, prefix=prefix)
 
 
 def _call_ai_summary(prompt: str) -> str:
