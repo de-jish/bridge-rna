@@ -167,6 +167,111 @@ def test_an_ai_request_with_nothing_in_view_says_so(app, monkeypatch):
     assert status == "No matches pass the current filters."
 
 
+class _Tags:
+    """A stand-in for Ollama's `/api/tags` answer."""
+
+    def __init__(self, names, status=200):
+        self.status_code = status
+        self._names = names
+        self.text = "{}"
+
+    def json(self):
+        return {"models": [{"name": n} for n in self._names]}
+
+
+def _ai_request():
+    return {"query": {"sample_id": "OSD-100|eye", "study_id": "OSD-100"},
+            "hits": [{"gsm": "GSM1", "gse": "GSE1", "title": "retina",
+                      "geo_summary": ""}],
+            "total": 1}
+
+
+def test_ollama_running_with_no_model_is_answered_before_any_work(app, monkeypatch):
+    """Reproduced on 2026-11-10: Ollama running with nothing pulled, which is a
+    fresh install, made the click fetch GEO abstracts for 30 to 90 s and only
+    then say "no models are installed", beside a status line claiming a
+    summary of the matches. The precondition is one local request away."""
+    from types import SimpleNamespace
+    from bridge_rna import ai
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    monkeypatch.setattr(ai, "AI_SUMMARY_PROVIDER", "ollama")
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags([]))
+    monkeypatch.setattr(retrieval_callbacks, "ctx",
+                        SimpleNamespace(triggered_id="ai-request-store"))
+
+    def no_network(*_a, **_k):
+        pytest.fail("a summary that cannot be sent must not fetch anything")
+    monkeypatch.setattr(retrieval_callbacks, "_enrich_hits_from_ncbi_eutils", no_network)
+    monkeypatch.setattr(ai, "_fetch_osdr_study_summary", no_network)
+    monkeypatch.setattr(ai.requests, "post", no_network)
+
+    callback = _callback_for(app, "ai-request-store")
+    summary, status = callback(_ai_request(), 1, ["GSM1"])
+    assert "no models are installed" in summary
+    assert f"ollama pull {ai.OLLAMA_MODEL}" in summary
+    assert status == "", "no summary was produced, so no status may claim one"
+
+
+def test_ollama_with_a_model_installed_is_not_blocked(monkeypatch):
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "AI_SUMMARY_PROVIDER", "ollama")
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags([ai.OLLAMA_MODEL]))
+    assert ai.unavailable_reason() is None
+    # Another model is enough: the call falls back to it, as it always has.
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags(["llama3:8b"]))
+    assert ai.unavailable_reason() is None
+    # An answer that cannot be read is not evidence of "no models".
+    monkeypatch.setattr(ai.requests, "get", lambda *a, **k: _Tags([], status=500))
+    assert ai.unavailable_reason() is None
+
+
+def test_a_failed_summary_never_carries_a_summary_status(app, monkeypatch):
+    """Every failure the provider reports is a SummaryFailure, and the status
+    line beside it stays empty."""
+    from types import SimpleNamespace
+    from bridge_rna import ai
+    from bridge_rna import callbacks as retrieval_callbacks
+
+    monkeypatch.setattr(retrieval_callbacks, "ctx",
+                        SimpleNamespace(triggered_id="ai-request-store"))
+    monkeypatch.setattr(retrieval_callbacks, "unavailable_reason", lambda: None)
+    monkeypatch.setattr(ai, "_fetch_osdr_study_summary", lambda _sid: {})
+    callback = _callback_for(app, "ai-request-store")
+
+    monkeypatch.setattr(retrieval_callbacks, "_call_ai_summary",
+                        lambda _p: ai.SummaryFailure("AI Summary call failed: HTTP 500"))
+    summary, status = callback(_ai_request(), 1, ["GSM1"])
+    assert summary.startswith("AI Summary call failed") and status == ""
+
+    monkeypatch.setattr(retrieval_callbacks, "_call_ai_summary", lambda _p: "A real summary.")
+    summary, status = callback(_ai_request(), 1, ["GSM1"])
+    assert summary == "A real summary." and status == "Summary of the 1 matches shown."
+
+
+def test_every_provider_failure_is_marked(monkeypatch):
+    import requests
+    from bridge_rna import ai
+
+    monkeypatch.setattr(ai, "OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    def refused(*_a, **_k):
+        raise requests.exceptions.ConnectionError("refused")
+    monkeypatch.setattr(ai.requests, "post", refused)
+    assert isinstance(ai._call_ollama_summary("p"), ai.SummaryFailure)
+
+    monkeypatch.setattr(ai, "BEDROCK_API_URL", "")
+    assert isinstance(ai._call_bedrock_summary("p"), ai.SummaryFailure)
+    monkeypatch.setattr(ai, "BEDROCK_API_URL", "https://example.invalid/q")
+    assert isinstance(ai._call_bedrock_summary("p"), ai.SummaryFailure)
+
+    monkeypatch.setattr(ai, "AI_SUMMARY_PROVIDER", "nonsense")
+    assert isinstance(ai._call_ai_summary("p"), ai.SummaryFailure)
+
+
 def test_source_identifiers_link_to_the_record_without_changing_metadata(monkeypatch):
     import pandas as pd
     from bridge_rna import panels

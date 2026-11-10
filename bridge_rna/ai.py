@@ -29,6 +29,20 @@ from .osdr import _fetch_osdr_study_summary
 from .util import _safe_str
 
 
+class SummaryFailure(str):
+    """A provider's answer that is not a summary: an error or a setup instruction.
+
+    It is still the text to show, so it subclasses `str` and every message
+    reads exactly as before. What it adds is a type the caller can test, so the
+    status line beside it never says "Summary of the N matches shown" when no
+    summary was produced, which it used to do.
+    """
+
+
+def _failure(text: str) -> SummaryFailure:
+    return SummaryFailure(text)
+
+
 def _load_ai_prompt_template() -> str:
     if AI_PROMPT_PATH.exists():
         return AI_PROMPT_PATH.read_text(encoding="utf-8")
@@ -97,7 +111,7 @@ def _format_geo_context_text(hits_df: pd.DataFrame) -> str:
 def _call_bedrock_summary(prompt: str) -> str:
     """Call Bedrock-compatible endpoint. URL/API key intentionally user-configured."""
     if not BEDROCK_API_URL:
-        return (
+        return _failure(
             "AI Summary endpoint not configured. Set BEDROCK_API_URL (and optionally BEDROCK_API_KEY) "
             "in your environment, then rerun."
         )
@@ -158,7 +172,7 @@ def _call_bedrock_summary(prompt: str) -> str:
                         return body.strip()
 
         txt = _safe_str(resp.text)
-        return txt or "AI Summary returned no text."
+        return txt or _failure("AI Summary returned no text.")
 
     payload_key = BEDROCK_PAYLOAD_KEY
     primary_text = prompt if payload_key != "query" else _sanitize_query_text(prompt)
@@ -167,7 +181,7 @@ def _call_bedrock_summary(prompt: str) -> str:
     try:
         resp = requests.post(BEDROCK_API_URL, headers=headers, json=payload, timeout=120)
     except Exception as exc:
-        return f"AI Summary call failed: {_safe_str(exc)}"
+        return _failure(f"AI Summary call failed: {_safe_str(exc)}")
 
     if resp.status_code >= 400:
         err_text = _safe_str(resp.text)
@@ -185,19 +199,21 @@ def _call_bedrock_summary(prompt: str) -> str:
                 retry_err = _safe_str(retry_resp.text)
                 if len(retry_err) > 800:
                     retry_err = retry_err[:800] + "..."
-                return (
+                return _failure(
                     f"AI Summary call failed: HTTP {retry_resp.status_code} after sanitize+shorten retry with payload key '{retry_key}': "
                     f"{retry_err}"
                 )
             except Exception as retry_exc:
-                return f"AI Summary call failed during sanitize+shorten retry: {_safe_str(retry_exc)}"
+                return _failure(
+                    f"AI Summary call failed during sanitize+shorten retry: {_safe_str(retry_exc)}")
 
-        return f"AI Summary call failed: HTTP {resp.status_code} using payload key '{payload_key}': {err_text}"
+        return _failure(
+            f"AI Summary call failed: HTTP {resp.status_code} using payload key '{payload_key}': {err_text}")
     return _extract_text_response(resp)
 
 
-def _ollama_unreachable_message() -> str:
-    return (
+def _ollama_unreachable_message() -> SummaryFailure:
+    return _failure(
         f"Could not reach Ollama at {OLLAMA_BASE_URL}.\n\n"
         "AI summaries are optional. Retrieval, the network graph, and all metadata "
         "on this page work without them.\n\n"
@@ -206,6 +222,38 @@ def _ollama_unreachable_message() -> str:
         f"    ollama pull {OLLAMA_MODEL}\n\n"
         "To use AWS Bedrock instead, set AI_SUMMARY_PROVIDER=bedrock and BEDROCK_API_URL."
     )
+
+
+def _ollama_no_model_message() -> SummaryFailure:
+    return _failure(
+        f"Ollama is running at {OLLAMA_BASE_URL}, but no models are installed.\n\n"
+        "AI summaries are optional. Retrieval and all metadata on this page work "
+        "without them.\n\n"
+        "Pull one first:\n"
+        f"    ollama pull {OLLAMA_MODEL}"
+    )
+
+
+def _ollama_models(timeout: float = 5) -> list[str] | None:
+    """The names of the models Ollama has installed, or None if it did not say.
+
+    Raises `requests.exceptions.RequestException` when Ollama cannot be reached,
+    so the caller can tell "not running" from "running with nothing pulled".
+    An answer that cannot be read is None, never an empty list: only an
+    explicit empty list is evidence that no model is installed.
+    """
+    resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=timeout)
+    try:
+        if resp is None or resp.status_code >= 400:
+            return None
+        data = resp.json() if resp.text else None
+    except Exception:
+        return None
+    models = data.get("models") if isinstance(data, dict) else None
+    if not isinstance(models, list):
+        return None
+    return [_safe_str(m.get("name")) for m in models
+            if isinstance(m, dict) and _safe_str(m.get("name"))]
 
 
 def unavailable_reason() -> str | None:
@@ -219,43 +267,42 @@ def unavailable_reason() -> str | None:
     starts in. The precondition is knowable in a few milliseconds, so it is
     checked first.
 
+    "Knowable" has two halves for Ollama, and until 2026-11-10 only the first
+    was checked: whether it answers, and whether it has any model to run. A
+    running Ollama with nothing pulled - a fresh install, and this project's
+    demo machine - passed the check, so the click spent 30 to 90 s fetching
+    abstracts before the call itself said "no models are installed". Both
+    halves come from the same local `/api/tags` request.
+
     Returns None when there is nothing to report, which includes the case where
     the answer is not cheaply knowable: Bedrock has no probe short of a real
     request, so a configured endpoint is taken at its word and any failure
-    surfaces through the normal path.
+    surfaces through the normal path. An Ollama answer that cannot be read is
+    treated the same way rather than as "no models".
     """
     if AI_SUMMARY_PROVIDER == "ollama":
         if not OLLAMA_BASE_URL:
-            return "AI Summary call failed: OLLAMA_BASE_URL is not configured."
+            return _failure("AI Summary call failed: OLLAMA_BASE_URL is not configured.")
         try:
-            requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+            models = _ollama_models(timeout=5)
         except requests.exceptions.RequestException:
             return _ollama_unreachable_message()
+        if models == []:
+            return _ollama_no_model_message()
         return None
     if AI_SUMMARY_PROVIDER == "bedrock" and not BEDROCK_API_URL:
-        return ("AI Summary call failed: AI_SUMMARY_PROVIDER is 'bedrock' but "
-                "BEDROCK_API_URL is not set.")
+        return _failure("AI Summary call failed: AI_SUMMARY_PROVIDER is 'bedrock' but "
+                        "BEDROCK_API_URL is not set.")
     return None
 
 
 def _call_ollama_summary(prompt: str) -> str:
     if not OLLAMA_BASE_URL:
-        return "AI Summary call failed: OLLAMA_BASE_URL is not configured."
+        return _failure("AI Summary call failed: OLLAMA_BASE_URL is not configured.")
 
     def _get_available_models() -> list[str]:
         try:
-            resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=20)
-            if resp.status_code >= 400:
-                return []
-            data = resp.json() if resp.text else {}
-            models = data.get("models", []) if isinstance(data, dict) else []
-            names = []
-            for model in models:
-                if isinstance(model, dict):
-                    name = _safe_str(model.get("name"))
-                    if name:
-                        names.append(name)
-            return names
+            return _ollama_models(timeout=20) or []
         except Exception:
             return []
 
@@ -289,13 +336,13 @@ def _call_ollama_summary(prompt: str) -> str:
     except requests.exceptions.ConnectionError:
         return _ollama_unreachable_message()
     except requests.exceptions.Timeout:
-        return (
+        return _failure(
             f"Ollama did not respond within {OLLAMA_TIMEOUT_SECONDS} seconds.\n\n"
             "A local model is usually slowest on its first call, while the weights load "
             "into memory. Try again, or set OLLAMA_MODEL to a smaller model."
         )
     except Exception as exc:
-        return f"AI Summary call failed (Ollama): {_safe_str(exc)}"
+        return _failure(f"AI Summary call failed (Ollama): {_safe_str(exc)}")
 
     if resp.status_code >= 400:
         err = _safe_str(resp.text)
@@ -304,11 +351,7 @@ def _call_ollama_summary(prompt: str) -> str:
         if resp.status_code == 404 and "not found" in err.lower():
             available = _get_available_models()
             if not available:
-                return (
-                    f"Ollama is running at {OLLAMA_BASE_URL}, but no models are installed.\n\n"
-                    "Pull one first:\n"
-                    f"    ollama pull {OLLAMA_MODEL}"
-                )
+                return _ollama_no_model_message()
             if available:
                 fallback = _pick_model()
                 if fallback != OLLAMA_MODEL:
@@ -320,10 +363,15 @@ def _call_ollama_summary(prompt: str) -> str:
                                 response_text = _safe_str(data.get("response"))
                                 if response_text:
                                     return f"[Using fallback model: {fallback}]\n\n{response_text}"
-                            return f"[Using fallback model: {fallback}]\n\n" + (_safe_str(retry.text) or "AI Summary returned no text.")
+                            fallback_text = _safe_str(retry.text)
+                            if not fallback_text:
+                                return _failure(f"[Using fallback model: {fallback}]\n\n"
+                                                "AI Summary returned no text.")
+                            return f"[Using fallback model: {fallback}]\n\n{fallback_text}"
                     except Exception as retry_exc:
-                        return f"AI Summary call failed (Ollama fallback): {_safe_str(retry_exc)}"
-        return f"AI Summary call failed (Ollama): HTTP {resp.status_code}: {err}"
+                        return _failure(
+                            f"AI Summary call failed (Ollama fallback): {_safe_str(retry_exc)}")
+        return _failure(f"AI Summary call failed (Ollama): HTTP {resp.status_code}: {err}")
 
     try:
         data = resp.json() if resp.text else {}
@@ -335,16 +383,17 @@ def _call_ollama_summary(prompt: str) -> str:
         if response_text:
             return response_text
 
-    return _safe_str(resp.text) or "AI Summary returned no text."
+    return _safe_str(resp.text) or _failure("AI Summary returned no text.")
 
 
 def _call_ai_summary(prompt: str) -> str:
+    """The summary text, or a `SummaryFailure` saying why there is none."""
     provider = AI_SUMMARY_PROVIDER
     if provider == "bedrock":
         return _call_bedrock_summary(prompt)
     if provider == "ollama":
         return _call_ollama_summary(prompt)
-    return (
+    return _failure(
         f"AI Summary provider '{provider}' is not supported. "
         "Use AI_SUMMARY_PROVIDER=ollama or AI_SUMMARY_PROVIDER=bedrock."
     )

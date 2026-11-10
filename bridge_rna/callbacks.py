@@ -26,6 +26,7 @@ from .ai import (
     _format_hits_table_text,
     _format_osdr_query_text,
     _load_ai_prompt_template,
+    SummaryFailure,
     unavailable_reason,
 )
 from . import cohorts as C
@@ -1297,6 +1298,11 @@ def register(app) -> None:
         )
 
         summary = _call_ai_summary(prompt)
+        # An error or a setup instruction is shown as it is, with no status
+        # beside it: "Summary of the 8 matches shown" next to "no models are
+        # installed" claimed a summary that was never produced.
+        if isinstance(summary, SummaryFailure):
+            return summary, ""
         total = int(request.get("total") or len(hits_df))
         scope = (f"Summary of the first {len(hits_df):,} of {total:,} matches shown."
                  if total > len(hits_df) else
