@@ -1577,3 +1577,102 @@ summary:focus-visible,
   .results-seg--plot .dash-options-list-option { flex: 1 1 auto; padding: 6px 8px; }
   .results-actions { flex-wrap: wrap; }
 }
+
+/* --- Shared terms: words the matches' GEO metadata has in common ----------
+   One compact row between the filters and the table. Each word is a toggle
+   button that writes the Text contains filter; its counts are data, so they
+   are set in the mono numerals the table uses. bridge_rna/digest.py. */
+.results-digest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+}
+.digest-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+}
+.digest-head .control-label { margin: 0; white-space: nowrap; }
+.digest-rows {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.digest-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+.digest-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.digest-term {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color var(--interaction-duration) ease-out,
+              border-color var(--interaction-duration) ease-out;
+}
+.digest-term:hover { background: var(--control-hover-fill); border-color: var(--control-hover); }
+.digest-term:active { transform: translateY(1px); }
+.digest-term:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.digest-term.is-active {
+  background: var(--control-selected-fill);
+  border-color: var(--control-ink);
+}
+.digest-word { font-weight: 600; }
+.digest-count,
+.digest-ratio {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.digest-empty {
+  margin: 0;
+  padding: 5px 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.digest-role-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-teal);
+}
+.digest-role-dot.is-b { background: var(--accent-warm); }
+.digest-cohort-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .digest-term { transition: none; }
+  .digest-term:active { transform: none; }
+}

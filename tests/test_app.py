@@ -105,6 +105,15 @@ def mounted_ids(app):
     trees.append(html.Div(results_view.render_table(
         [row], {"k": 1, "comparison": False, "rows": [row]},
         results_view.DEFAULT_SORT)))
+    # The Shared terms row exists only once a search returns: each word is a
+    # button whose id carries the word, so it is mounted through its builder.
+    from bridge_rna import digest
+
+    children, _style = results_view.render_digest(results_view.describe_payload(
+        {"hits": [{"gsm": "GSM1", "gse": "GSE1", "title": "retina"},
+                  {"gsm": "GSM2", "gse": "GSE2", "title": "retina"}]},
+        digest.TermTable({"retina": 2}, 1000)))
+    trees.append(html.Div(children))
     # The shell itself, built outside a request so it takes the default route.
     trees.append(app.layout() if callable(app.layout) else app.layout)
     for tree in trees:

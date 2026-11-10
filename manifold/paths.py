@@ -87,6 +87,12 @@ CANONICAL_GENES_CSV = (
 # species only, and the app says so rather than showing a grey cloud.
 ARCHS4_METADATA_PARQUET = CACHE_DIR / "archs4_metadata.parquet"
 
+# How many GEO series use each word of a sample's title or source name, built
+# from the metadata above by precompute/build_term_index.py and read by
+# bridge_rna/digest.py for the results view's "Shared terms" row. Optional:
+# without it that row names the command that builds it.
+ARCHS4_TERMS_PARQUET = CACHE_DIR / "archs4_terms.parquet"
+
 
 def ensure_cache_dirs() -> None:
     """Create the writable cache directory if it does not yet exist."""

@@ -18,6 +18,7 @@ from typing import Any
 import pandas as pd
 from dash import ALL, ClientsideFunction, Input, Output, State, ctx, dcc, html, no_update
 
+from . import digest as DG
 from . import result_plots as P
 from . import help as info_help
 from . import results as R
@@ -264,6 +265,10 @@ def build_results_panel() -> Any:
                     extra_class="results-filter--wide",
                 ),
             ]),
+            # What the matches' GEO metadata has in common, counted by series.
+            # Hidden until a search returns; bridge_rna/digest.py does the work.
+            html.Div(id="results-digest", className="results-digest",
+                     style={"display": "none"}),
             html.Div(id="results-table-wrap", className="results-table-wrap",
                      tabIndex="-1",
                      children=empty_table_message(
@@ -278,6 +283,7 @@ def build_results_panel() -> Any:
                                      disabled=True, className="btn-ghost btn-compact"),
                      ]),
             dcc.Store(id="results-store"),
+            dcc.Store(id="digest-store"),
             dcc.Store(id="results-sort-store", data=DEFAULT_SORT),
             dcc.Store(id="results-page-store", data=0),
             dcc.Store(id="inspector-store"),
@@ -503,6 +509,90 @@ def _summary(results: dict, shown: int, filtered: bool) -> str:
     return f"{total:,} matches" + (f" for {label}, " if label else ", ") + ranked
 
 
+def _digest_message(description: dict) -> str:
+    """The sentence for a result set that has no word to show."""
+    status = description.get("status")
+    m = description.get("series_count") or 0
+    if status == "none":
+        return (f"No word is shared by two or more of these {m:,} series "
+                f"at {DG.MIN_RATIO:.0f}x its GEO rate.")
+    if status == "one_series":
+        return "Every match is from one GEO series, so there is nothing to compare across series."
+    if status == "no_text":
+        return "These matches have no GEO title or source name."
+    if status == "unavailable":
+        return f"The GEO word counts are not built on this machine. Run {DG.BUILD_COMMAND}."
+    return ""
+
+
+def _digest_row(description: dict, active_text: str, *, side: str = "",
+                name: str = "") -> Any:
+    """One result set's words as buttons, or the sentence saying why there are none."""
+    head: list[Any] = []
+    if side:
+        head = [html.Span(className=f"digest-role-dot is-{side}", **{"aria-hidden": "true"}),
+                html.Span(name, className="digest-cohort-name")]
+    terms = description.get("terms") or []
+    if not terms:
+        body: Any = html.P(_digest_message(description), className="digest-empty")
+    else:
+        corpus = description.get("corpus_series") or 0
+        active = (active_text or "").strip().casefold()
+        body = html.Ul(className="digest-terms", children=[
+            html.Li(html.Button(
+                id={"type": "digest-term", "term": t["term"], "side": side or "a"},
+                type="button", n_clicks=0,
+                className="digest-term" + (" is-active" if t["term"] == active else ""),
+                title=DG.term_title(t, corpus),
+                **{"aria-pressed": "true" if t["term"] == active else "false"},
+                children=[
+                    html.Span(t["term"], className="digest-word"),
+                    html.Span(f"{t['series']}/{t['of']}", className="digest-count"),
+                    html.Span(DG.format_ratio(t["ratio"]), className="digest-ratio"),
+                ],
+            ))
+            for t in terms
+        ])
+    return html.Div(className="digest-row", children=[*head, body])
+
+
+def describe_payload(payload: dict | None, table: Any = None) -> dict | None:
+    """The `digest-store` dict for a hits-store payload, or None with no matches.
+
+    Computed once per result so a keystroke in the text filter never uploads
+    the hits-store again: at k=1,000 that payload is about half a megabyte.
+    """
+    hits_a, _hits_b = DG.hits_of(payload)
+    comparison = isinstance(payload, dict) and isinstance(payload.get("comparison"), dict)
+    if not hits_a and not comparison:
+        return None
+    names = ["", ""]
+    if comparison:
+        names = [R._label(payload.get("query")) or "Cohort A",
+                 R._label(payload["comparison"].get("query_b")) or "Cohort B"]
+    return {"comparison": comparison, "names": names,
+            "descriptions": DG.describe_all(payload, table)}
+
+
+def render_digest(stored: dict | None, active_text: str = "") -> tuple[list[Any], dict]:
+    """The Shared terms block for a `digest-store` dict, and its style."""
+    if not isinstance(stored, dict) or not stored.get("descriptions"):
+        return [], {"display": "none"}
+    descriptions = stored["descriptions"]
+    head = html.Div(className="digest-head", children=[
+        html.Span("Shared terms", id="digest-label", className="control-label"),
+        info_help.info("shared-terms"),
+    ])
+    if stored.get("comparison"):
+        names = stored.get("names") or ["Cohort A", "Cohort B"]
+        rows = [_digest_row(d, active_text, side=s, name=n)
+                for d, s, n in zip(descriptions, ("a", "b"), names)]
+    else:
+        rows = [_digest_row(descriptions[0], active_text)]
+    return ([head, html.Div(rows, className="digest-rows", role="group",
+                            **{"aria-labelledby": "digest-label"})], {})
+
+
 def _option_list(pairs: list[tuple[str, int]]) -> list[dict]:
     return [{"label": f"{value} ({count:,})", "value": value} for value, count in pairs]
 
@@ -662,6 +752,46 @@ def register(app) -> None:  # noqa: C901 - one callback per concern, registered 
             {} if locatable else {"display": "none"},
             "View results on map" if locatable else "",
         )
+
+    @app.callback(
+        Output("digest-store", "data"),
+        Input("hits-store", "data"),
+        # Remounted with the view, for the reason derive_results gives.
+        Input("results-panel", "id"),
+    )
+    def describe_matches(payload, _mounted):
+        return describe_payload(payload)
+
+    @app.callback(
+        Output("results-digest", "children"),
+        Output("results-digest", "style"),
+        Input("digest-store", "data"),
+        Input("filter-text", "value"),
+    )
+    def show_digest(stored, text):
+        return render_digest(stored, text or "")
+
+    @app.callback(
+        Output("filter-text", "value", allow_duplicate=True),
+        Input({"type": "digest-term", "term": ALL, "side": ALL}, "n_clicks"),
+        State("filter-text", "value"),
+        prevent_initial_call=True,
+    )
+    def apply_digest_term(_clicks, current):
+        """A pressed word becomes the text filter; pressing it again clears it.
+
+        The word buttons are re-rendered whenever the filter text changes, and a
+        pattern-matching input fires when its family is re-rendered, so only a
+        real click (a positive n_clicks on the trigger) may write the filter.
+        """
+        trigger = ctx.triggered_id
+        fired = ctx.triggered[0].get("value") if ctx.triggered else None
+        if not isinstance(trigger, dict) or not fired:
+            return no_update
+        term = _safe_str(trigger.get("term"))
+        if not term:
+            return no_update
+        return "" if _safe_str(current).casefold() == term.casefold() else term
 
     @app.callback(
         Output("results-table-wrap", "children"),

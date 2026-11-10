@@ -16,6 +16,7 @@
   "bridge_rna/callbacks.py",
   "bridge_rna/cohorts.py",
   "bridge_rna/config.py",
+  "bridge_rna/digest.py",
   "bridge_rna/figures.py",
   "bridge_rna/geo.py",
   "bridge_rna/layout.py",

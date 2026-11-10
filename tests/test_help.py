@@ -153,6 +153,15 @@ def test_every_entry_is_placed_somewhere_and_every_placement_is_known():
     import re
     placed |= set(re.findall(r'info="([a-z-]+)"',
                              (ROOT / "bridge_rna" / "panels.py").read_text()))
+    # The Shared terms row is drawn by a callback once a search returns, so it
+    # is rendered through its own builder.
+    from bridge_rna import digest
+    from dash import html
+    children, _style = results_view.render_digest(results_view.describe_payload(
+        {"hits": [{"gsm": "GSM1", "gse": "GSE1", "title": "retina"},
+                  {"gsm": "GSM2", "gse": "GSE2", "title": "retina"}]},
+        digest.TermTable({"retina": 2}, 1000)))
+    placed |= set(_info_keys(html.Div(children)))
     assert placed <= set(info_help.ENTRIES)
     assert set(info_help.ENTRIES) <= placed, sorted(set(info_help.ENTRIES) - placed)
 
