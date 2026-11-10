@@ -382,15 +382,15 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     page.wait_for_selector("#manifold-graph .js-plotly-plot", timeout=120_000)
     page.wait_for_function(
         "() => { const gd = document.querySelector('#manifold-graph .js-plotly-plot');"
-        " return gd && (gd.data || []).some(t => t.name === 'retrieved hit'); }",
+        " return gd && (gd.data || []).some(t => t.name === 'retrieved match'); }",
         timeout=120_000)
     settle(page, 2000)
     # `_fullData`, not `data`: Plotly 6 ships coordinates as base64 typed
     # arrays, which only the full data has decoded into something with a length.
     rings = page.evaluate(
         "() => document.querySelector('#manifold-graph .js-plotly-plot')._fullData"
-        ".filter(t => t.name === 'retrieved hit').reduce((n, t) => n + t.x.length, 0)")
-    c.ok(rings == 1000, f"the map draws all 1,000 matches as rings ({rings})")
+        ".filter(t => t.name === 'retrieved match').reduce((n, t) => n + t.x.length, 0)")
+    c.ok(rings == 1000, f"the map draws all 1,000 matches ({rings})")
     arrived = list(posts)
     readers = [p for p in arrived if "hits-store.data" in p["heavy"]]
     c.ok(len(readers) == 1 and "map-overlay-store" in readers[0]["output"],
