@@ -33,6 +33,8 @@ from pathlib import Path
 import pandas as pd
 from playwright.sync_api import sync_playwright
 
+from server_output import drain_server_output
+
 REPO = Path(__file__).resolve().parent.parent
 PY = os.environ.get("MANIFOLD_PYTHON", sys.executable)
 CHROME = os.environ.get("MANIFOLD_CHROME")
@@ -537,6 +539,9 @@ def main() -> int:
         else:
             print("server never announced itself")
             return 1
+        # The server logs every request to this pipe; stop reading it and it
+        # blocks once the pipe fills, and every later request hangs.
+        drain_server_output(server)
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed, executable_path=CHROME)
             page = browser.new_page(viewport={"width": 1680, "height": 1010},
