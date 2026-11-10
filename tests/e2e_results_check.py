@@ -214,6 +214,15 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
     pos = float(page.locator("#topk-slider [role=slider]").first.get_attribute(
         "aria-valuenow"))
     c.ok(abs(pos - 3.0) < 1e-3, f"typing 1000 moves the log slider to its end ({pos})")
+    # At the desktop rail the box shrank until "120" read "12(" (2026-11-10).
+    fit = page.locator("#topk-input").evaluate(
+        "el => { const i = el.tagName === 'INPUT' ? el : el.querySelector('input');"
+        " const b = [...i.parentElement.querySelectorAll('button')];"
+        " return {scroll: i.scrollWidth, client: i.clientWidth,"
+        " steppers: b.filter(x => getComputedStyle(x).display !== 'none').length}; }")
+    c.ok(fit["scroll"] <= fit["client"],
+         f"all four digits of 1000 are visible in the box ({fit})")
+    c.ok(fit["steppers"] == 2, "the - and + buttons stay visible beside them")
     set_k(page, 5000)
     c.ok(page.locator("#topk-input").input_value() == "1000",
          "a k above the maximum is clamped to 1,000")

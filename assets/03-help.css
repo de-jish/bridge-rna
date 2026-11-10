@@ -21,9 +21,15 @@
 .details-section-head > .details-section-title.details-section-title { margin-bottom: 0; }
 .results-heading .control-label-row { margin-bottom: 0; }
 /* The rail is 247 px here: label, "i" and a 128 px stepper do not fit, so the
-   label keeps its width and the stepper gives a little up. */
+   label keeps its width and the stepper gives a little up, to 104 px and no
+   further. Dash hides the - and + buttons below a 100 px inner width
+   (`@container (max-width: 99px)`), and 104 - 2 border - 2 x 28 px buttons
+   leaves the 46 px retrieve.css needs to show "1000". */
 .topk-head .control-label-row { margin: 0; flex: none; }
 .sidebar .topk-head .topk-input { flex: 0 1 128px; width: auto; min-width: 104px; }
+/* Label (138.5 px) + gap + the 104 px floor must fit the 247 px row: at the
+   8 px gap the box ran 3.5 px past the rail's content edge. */
+.sidebar .topk-head { gap: var(--space-1); }
 .ai-panel .control-label-row { margin: 0 0 var(--space-2); }
 
 .bm-group-label-row {

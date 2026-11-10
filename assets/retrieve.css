@@ -1507,12 +1507,19 @@ summary:focus-visible,
 .topk-head .topk-input { flex: none; width: 128px; }
 .sidebar .topk-input .dash-input-element {
   width: 100%;
-  padding: 5px 8px;
+  /* The largest k is 1000. In DM Mono one `ch` is exactly one digit, so the
+     field always shows four digits plus its padding and border. At the
+     desktop rail the box used to shrink to 104 px with two 32 px steppers,
+     which left 36 px and clipped "120" to "12" (found 2026-11-10). */
+  min-width: calc(4ch + 14px);
+  padding: 5px 6px;
   font-family: var(--font-mono);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+/* 28 px wide by the full control height is still a comfortable target. */
+.sidebar .topk-input .dash-input-stepper { flex: none; width: 28px; min-width: 28px; }
 
 /* Between the stacked layout and a wide screen the table is the column that
    runs short: at 1,400 px the centre was 644 px, the fixed columns took 570
