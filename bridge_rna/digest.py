@@ -254,6 +254,13 @@ def format_ratio(ratio: float, *, exact: bool = False) -> str:
     return f"{ratio:.1f}x"
 
 
+def term_label(term: Mapping[str, Any]) -> str:
+    """The spoken name of a word's button: the three visible parts, in words."""
+    ratio = format_ratio(term["ratio"]).replace(">", "more than ").replace("x", " times")
+    return (f"{term['term']}: {term['series']} of {term['of']} series, "
+            f"{ratio} its GEO rate. Filter the table to it.")
+
+
 def term_title(term: Mapping[str, Any], corpus_series: int) -> str:
     """The hover text for one word: every number behind the chip."""
     share = term["corpus_series"] / max(1, corpus_series)

@@ -148,6 +148,14 @@ def test_the_hover_text_states_every_number_behind_the_chip():
         assert part in text
 
 
+def test_the_button_name_reads_as_words():
+    t = {"term": "rpe", "series": 7, "of": 23, "ratio": 222.0}
+    assert D.term_label(t) == ("rpe: 7 of 23 series, more than 100 times its GEO "
+                               "rate. Filter the table to it.")
+    t["ratio"] = 18.6
+    assert "19 times its GEO rate" in D.term_label(t)
+
+
 def _flatten(node):
     out = [node]
     children = getattr(node, "children", None)
