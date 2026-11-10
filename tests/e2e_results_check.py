@@ -234,6 +234,38 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
          "Download is enabled once there are rows")
     shot(page, "01-results-k1000")
 
+    print("\n[shared terms]")
+    digest = page.locator("#results-digest")
+    c.ok(digest.is_visible(), "the Shared terms row appears once there are matches")
+    words = [w.strip() for w in digest.locator(".digest-word").all_inner_texts()]
+    c.ok(0 < len(words) <= 8, f"it lists between 1 and 8 words ({words})")
+    c.ok(any(w in {"eye", "retina", "rpe", "retinal"} for w in words),
+         f"an eye sample's matches are described in eye words ({words})")
+    counts = digest.locator(".digest-count").all_inner_texts()
+    shared = [int(t.split("/")[0]) for t in counts]
+    of = {int(t.split("/")[1]) for t in counts}
+    c.ok(len(of) == 1 and shared == sorted(shared, reverse=True),
+         f"every count is out of the same series total, most-shared first ({counts})")
+    first_word = digest.locator(".digest-term").first
+    label = first_word.get_attribute("aria-label") or ""
+    c.ok(label.startswith(words[0] + ":") and "series" in label,
+         f"each word button has a spoken name ({label!r})")
+    first_word.click()
+    settle(page)
+    c.ok(page.locator("#filter-text").input_value() == words[0],
+         "pressing a word puts it in the Text contains filter")
+    shown = summary(page)
+    c.ok(shown.startswith(f"{shared[0]:,} of") or int(shown.split(" of")[0].replace(",", ""))
+         >= shared[0], f"the table keeps at least the rows the word was counted in ({shown!r})")
+    c.ok(digest.locator(".digest-term[aria-pressed=true]").count() == 1,
+         "the pressed word is marked")
+    digest.locator(".digest-term[aria-pressed=true]").click()
+    settle(page)
+    c.ok(page.locator("#filter-text").input_value() == "",
+         "pressing it again clears the filter")
+    c.ok(summary(page).startswith("1,000 matches for"), "and every match is back")
+    shot(page, "01b-shared-terms")
+
     print("\n[paging and sorting]")
     page.locator("#results-next").click()
     settle(page)
