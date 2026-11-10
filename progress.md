@@ -6,6 +6,25 @@ Update after each meaningful change so another session can resume without losing
 This file used to track Bridge Manifold alone.
 The two repositories were merged on 2026-07-22 and it now covers the whole product; entries before that date describe the map half.
 
+## 2026-11-10 (the 2026-10-21 fixes reach the deploy line)
+
+Four branches from 2026-10-21 held fixes the deployed line lacked: the map framing race (`cc/quirky-dhawan-626f46`), network labels clear of every edge and the inspector disclosure gap (`cc/nifty-lamport-bf8f08`), the map no longer posting hits-store on every zoom (`cc/intelligent-gould-15bb63`), and the test scripts draining the dev server's output (`cc/hungry-cori-9e3447`).
+They were cherry-picked onto `feature/retrieval-table` on `ship/fixes-2026-11-10`; features and reverts (`feature/matching-correction`, `feature/result-metadata`, `feature/reviewed-comparisons`) and the text-search experiment were left out.
+
+Carrying them across exposed four things, each fixed with its own commit.
+The ship manifest did not list the two runtime files the fixes added (`assets/map-frame.js`, `bridge_rna/network_labels.py`), so a shipment would have left the server without them; `test_the_payload_is_exactly_what_the_app_needs` caught it.
+The Reset view help quoted a line the framing fix rewrote.
+`e2e_results_check.py`, written after the drain fix, still read the server's output only until start-up.
+And the hits-store cuts were written before "the matches are the neighborhood" (2026-10-22), which builds the explorer's rows from the hits: 35 unit tests failed on the merge.
+The cuts were re-derived from what the map now reads: a zoom posts six short fields per hit (index, GSM, score, study, tissue, species) and the scoring, never the long GEO text, and the drawer gets both arms' hits in full (`docs/map-overlay-stores.md`, last section).
+Measured on a 1,000-match search, a zoom posts 140 KB of retrieval data against the 426 KB payload, and every other map callback at most 774 B.
+
+Validation on 143ba7f: 1,126 pytest tests; browser suites `e2e_check.py` 217, `e2e_cohort_check.py` 196, `e2e_upload_check.py` 82, `e2e_results_check.py` 74, `e2e_help_check.py` 45, `e2e_network_style.py` 44, `e2e_cleanup_check.py` 3, all passing.
+
+**Shipped, not yet applied.** `20261110T170537Z-3ec9d788` (commit `143ba7f`) transferred and read-back verified: 2 files added, 6 changed, nothing removed, no server drift, no dependency changes; preflight passed (940,455 ARCHS4, 2,108 OSDR, upload/reference cosine 1.00000000).
+The manifest records `dirty: true` only because the untracked `Bridge_RNA_UAT.xlsx` sits in the shipping checkout; nothing outside the runtime list ships.
+On the server: `python3 ~/fm_viz_new/.ship/incoming/20261110T170537Z-3ec9d788/deploy/apply.py apply`, restart Gunicorn, then commit and push to GitLab from the server checkout (this Mac has no GitLab remote).
+
 ## 2026-11-04 (UAT workbook simplified; text uploads refused in plain language)
 
 Joshua found the first workbook too complicated.
