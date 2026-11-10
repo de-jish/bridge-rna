@@ -1,7 +1,7 @@
 """Shared terms: the words a set of matches has in common, counted by series.
 
 A result set is described by the words its GEO submitters used, compared with
-how often those words appear across all of GEO. It is a string match over
+how often they appear across the ARCHS4 reference's GEO series. It is a string match over
 metadata, never a claim about biology, and it is counted once per **series**
 because one series often deposits dozens of samples with near-identical
 titles. Design and measurements: docs/match-digest.md.
@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
+
+from .results import _text  # the table's own missing-value folding
 
 # The fields a word may come from: the free-text ones the text filter searches.
 TEXT_FIELDS = ("title", "source_name")
@@ -69,8 +71,14 @@ RATIO_DISPLAY_CAP = 100.0
 
 
 def words(text: Any) -> set[str]:
-    """The distinct countable words in one string, lowercased."""
-    if not isinstance(text, str) or not text:
+    """The distinct countable words in one string, lowercased.
+
+    Missing values are folded exactly as the table folds them (`results._text`),
+    so a title stored as "NaT" or "None" is no title here either: a word the
+    table cannot show must never be offered as a filter.
+    """
+    text = _text(text)
+    if not text:
         return set()
     out = set()
     for token in _TOKEN.findall(text.casefold()):
@@ -225,10 +233,12 @@ def shared_terms(hits: Sequence[Mapping[str, Any]] | None,
     for word, c in tally.items():
         if c < MIN_SERIES:
             continue
-        # A word the corpus table pruned (used by one series) can still be in
-        # two matched series only if the table is from another release; count
-        # it as the rarest a kept word can be rather than as zero.
-        s = max(table.counts.get(word, MIN_SERIES), MIN_SERIES)
+        # A word in two matched series is in at least two corpus series, so a
+        # table that lacks it was built from other metadata. Its rate was never
+        # measured, and inventing one would print a ratio from nothing.
+        s = table.counts.get(word)
+        if not s:
+            continue
         expected = m * s / n
         ratio = c / expected
         if ratio < MIN_RATIO:
@@ -246,7 +256,7 @@ def message(description: Mapping[str, Any]) -> str:
     m = description.get("series_count") or 0
     if status == "none":
         return (f"No word is shared by two or more of these {m:,} series "
-                f"at {MIN_RATIO:.0f}x its GEO rate.")
+                f"at {MIN_RATIO:.0f}x its reference rate.")
     if status == "one_series":
         return "Every match is from one GEO series, so there is nothing to compare across series."
     if status == "no_text":
@@ -263,7 +273,7 @@ def prompt_text(description: Mapping[str, Any]) -> str:
         return message(description) or "No matches."
     return "\n".join(
         f"- {t['term']}: used by {t['series']} of the hits' {t['of']} series, "
-        f"{format_ratio(t['ratio'])} its share of all GEO series"
+        f"{format_ratio(t['ratio'])} its share of the ARCHS4 reference's series"
         for t in terms)
 
 
@@ -285,26 +295,19 @@ def term_label(term: Mapping[str, Any]) -> str:
     """The spoken name of a word's button: the three visible parts, in words."""
     ratio = format_ratio(term["ratio"]).replace(">", "more than ").replace("x", " times")
     return (f"{term['term']}: {term['series']} of {term['of']} series, "
-            f"{ratio} its GEO rate. Filter the table to it.")
+            f"{ratio} its reference rate. Filter the table to it.")
 
 
 def term_title(term: Mapping[str, Any], corpus_series: int) -> str:
     """The hover text for one word: every number behind the chip."""
     share = term["corpus_series"] / max(1, corpus_series)
     return (f"\"{term['term']}\" is in the title or source name of matches from "
-            f"{term['series']} of their {term['of']} series. Across all "
-            f"{corpus_series:,} GEO series it is used by {term['corpus_series']:,} "
+            f"{term['series']} of their {term['of']} series. Of the "
+            f"{corpus_series:,} series in the ARCHS4 reference (a sample with no "
+            f"series counts as its own), {term['corpus_series']:,} use it "
             f"({share:.2%}), so {term['expected']:.2f} would be expected: "
             f"{format_ratio(term['ratio'], exact=True)}. Press to filter the table to it.")
 
-
-def _text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float) and math.isnan(value):
-        return ""
-    text = str(value).strip()
-    return "" if text.lower() in {"nan", "none", "<na>"} else text
 
 
 def hits_of(payload: Mapping[str, Any] | None) -> tuple[list[dict], list[dict]]:

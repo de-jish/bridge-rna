@@ -19,7 +19,8 @@ This feature describes a result set with counts a reader can check, and needs no
 ## What it shows
 
 A "Shared terms" row sits between the filters and the match table.
-It lists up to eight words that appear in the GEO titles and source names of the matches much more often than across all of GEO.
+It lists up to eight words that appear in the GEO titles and source names of the matches much more often than across the ARCHS4 reference.
+The reference is the 52,122 GEO series of the 940,455 ARCHS4 samples, with a sample deposited without a series counted as its own; it is not the whole GEO archive.
 Each word shows how many of the matches' series use it (for example `eye 10/22`) and the ratio to its corpus rate (for example `20x`).
 Pressing a word puts it in the "Text contains" filter, so the table shows the rows behind the count.
 In a comparison there is one row per cohort, each named and marked with its cohort dot, because the two result sets are independent searches.
@@ -34,7 +35,8 @@ In a comparison there is one row per cohort, each named and marked with its coho
    A match with no series counts as its own series.
 2. **Only the fields the text filter searches: title and source name.**
    `results._TEXT_SEARCH_FIELDS` is GSM, series, title and source name.
-   Using the same text means pressing a word always shows at least the rows it was counted in.
+   Using the same text, with missing values folded by the table's own `results._text`, means that with no other filter set, pressing a word shows at least the rows it was counted in.
+   Pressing a word adds it as the text filter and leaves the other filters alone, because filters compose everywhere else in the table; with a series, tissue or retrieved-by filter set, the table can show fewer rows than the count, and that is the other filter working.
    `characteristics` carries more signal, but a word found only there would filter the table to nothing, which reads as a broken claim.
 3. **A word must appear in at least 2 of the matches' series and be at least 3x its corpus rate.**
    The ratio is `observed series / expected series`, where expected is `m * S_t / N`.
@@ -106,6 +108,20 @@ Whether it reflects thymic involution, dissection or batch is a question for a b
 The AI summary prompt gains a "Words Shared by the Hits' GEO Titles and Source Names" section, filled by `digest.prompt_text` over the matches being summarized.
 The prompt tells the model that the words describe what submitters wrote, not biology, and to cite them only as metadata.
 It could not be exercised end to end on the demo machine, because Ollama has no model installed there; a test checks that the template's placeholders are exactly the ones the callback fills.
+
+## Independent review (Codex, 2026-11-10)
+
+Codex reviewed the change read-only. Every finding was checked against the code before acting on it.
+
+| Finding | Verdict | Resolution |
+| --- | --- | --- |
+| With another filter set, pressing a word can show fewer rows than its count | Real, in the claim | Filters compose by design; the claim is now "with no other filter set" here and in CLAUDE.md |
+| Missing-value spellings ("NaT", "NONE") became words that filter to zero rows | Real | `digest.words` folds missing values with the table's own `results._text`; tested for five spellings |
+| A word absent from the corpus table was given an invented count of 2 | Real | Such a word has no measured rate and is no longer listed; tested |
+| The ratio is not guaranteed conservative | Real | Already corrected in 5c027a3: the ratio is described as a description, not a test |
+| "All GEO" misnames the reference | Real | Every string now names the ARCHS4 reference and its series convention; a test forbids "all GEO" and "GEO rate" |
+
+Codex found no defect in the `allow_duplicate` wiring, the re-render guard or the store split, and confirmed no torch import and no rank or score change.
 
 ## Not done here
 

@@ -23,7 +23,7 @@ Analyze the following:
 {geo_summaries}
 
 ### Words Shared by the Hits' GEO Titles and Source Names
-These are counted once per GEO series and compared with how often each word appears across all of GEO. They describe what submitters wrote, not the samples' biology; cite a word only as metadata.
+These are counted once per GEO series and compared with how often each word appears across the GEO series of the ARCHS4 reference. They describe what submitters wrote, not the samples' biology; cite a word only as metadata.
 {shared_terms}
 
 Please provide the following sections:

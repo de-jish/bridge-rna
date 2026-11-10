@@ -223,13 +223,13 @@ ENTRIES: dict[str, Entry] = {
     "shared-terms": Entry(
         "Shared terms",
         ("Words in these matches' GEO titles and source names that are much "
-         "more common here than across all of GEO. It is a string match over "
-         "what submitters wrote, not a statement about biology.",
+         "more common here than across the ARCHS4 reference. It is a string "
+         "match over what submitters wrote, not a statement about biology.",
          "Each word counts once per GEO series, because one series often "
          "deposits many samples with the same wording. \"8/22\" means matches "
          "from 8 of their 22 series use it; \"18x\" compares that with the "
-         "share of all GEO series using it. A word needs 2 series and 3x to be "
-         "listed. Press a word to filter the table to it.",
+         "share of the reference's series using it. A word needs 2 series and "
+         "3x to be listed. Press a word to add it as the text filter.",
          "In a comparison each cohort is described separately."),
         (_x("bridge_rna/digest.py",
             "expected = m * s / n",

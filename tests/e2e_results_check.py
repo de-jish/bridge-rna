@@ -256,7 +256,8 @@ def run_checks(page, c: Checks, base: str, console_errors: list[str]) -> None:
          "pressing a word puts it in the Text contains filter")
     shown = summary(page)
     c.ok(shown.startswith(f"{shared[0]:,} of") or int(shown.split(" of")[0].replace(",", ""))
-         >= shared[0], f"the table keeps at least the rows the word was counted in ({shown!r})")
+         >= shared[0], "with no other filter set, the table keeps at least the rows "
+                       f"the word was counted in ({shown!r})")
     c.ok(digest.locator(".digest-term[aria-pressed=true]").count() == 1,
          "the pressed word is marked")
     digest.locator(".digest-term[aria-pressed=true]").click()

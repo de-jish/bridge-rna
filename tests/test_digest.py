@@ -150,10 +150,37 @@ def test_the_hover_text_states_every_number_behind_the_chip():
 
 def test_the_button_name_reads_as_words():
     t = {"term": "rpe", "series": 7, "of": 23, "ratio": 222.0}
-    assert D.term_label(t) == ("rpe: 7 of 23 series, more than 100 times its GEO "
-                               "rate. Filter the table to it.")
+    assert D.term_label(t) == ("rpe: 7 of 23 series, more than 100 times its "
+                               "reference rate. Filter the table to it.")
     t["ratio"] = 18.6
-    assert "19 times its GEO rate" in D.term_label(t)
+    assert "19 times its reference rate" in D.term_label(t)
+
+
+@pytest.mark.parametrize("missing", ["NaT", "NONE", "nan", "<NA>", "None"])
+def test_a_missing_value_spelling_is_never_offered_as_a_word(missing):
+    """The table folds these to an empty title, so a word made of one would
+    filter the table to nothing."""
+    hits = [hit("1", "GSE1", title=missing), hit("2", "GSE2", title=missing)]
+    d = D.shared_terms(hits, table(nat=5, none=5, nan=5))
+    assert d["terms"] == []
+    assert d["status"] == "no_text"
+
+
+def test_a_word_the_corpus_table_never_measured_is_not_listed():
+    """Inventing a background count for it would print a ratio from nothing."""
+    hits = [hit("1", "GSE1", title="retina zzunseen"),
+            hit("2", "GSE2", title="retina zzunseen")]
+    d = D.shared_terms(hits, table(retina=10))
+    assert [t["term"] for t in d["terms"]] == ["retina"]
+
+
+def test_every_number_names_the_reference_not_all_of_geo():
+    t = {"term": "eye", "series": 8, "of": 22, "corpus_series": 1150,
+         "expected": 0.49, "ratio": 16.4}
+    for text in (D.term_title(t, 52_122), D.term_label(t),
+                 D.prompt_text({"terms": [t]}),
+                 D.message({"status": "none", "series_count": 3})):
+        assert "all GEO" not in text and "GEO rate" not in text
 
 
 def _flatten(node):
