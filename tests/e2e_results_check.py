@@ -563,6 +563,15 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8065)
     ap.add_argument("--headed", action="store_true")
     args = ap.parse_args()
+    # The Shared terms checks need the corpus word counts. Without them the row
+    # names the build command instead of listing words, and the checks used to
+    # fail on a 30 s locator timeout that never said why.
+    sys.path.insert(0, str(REPO))
+    from manifold.paths import ARCHS4_TERMS_PARQUET
+    if not ARCHS4_TERMS_PARQUET.exists():
+        print(f"missing {ARCHS4_TERMS_PARQUET}: run "
+              "python precompute/build_term_index.py first (about a minute)")
+        return 1
     SHOTS.mkdir(parents=True, exist_ok=True)
     c = Checks()
     base = f"http://127.0.0.1:{args.port}"
