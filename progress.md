@@ -18,9 +18,14 @@ The same missing file made `e2e_results_check.py` fail its Shared terms checks o
 
 Validation on 3772cd1: 1,171 pytest tests; browser suites `e2e_check.py` 217, `e2e_cohort_check.py` 196, `e2e_results_check.py` 86, `e2e_upload_check.py` 82, `e2e_help_check.py` 45, `e2e_network_style.py` 44, `e2e_cleanup_check.py` 3, all passing.
 
-**Shipped, not yet applied.** `20261124T065645Z-f15abf2e` (commit `3772cd1`) transferred and read-back verified: 1 file added (`bridge_rna/digest.py`), 8 changed, nothing removed, no server drift, no dependency changes; preflight passed (940,455 ARCHS4, 2,108 OSDR, upload/reference cosine 1.00000000).
-`cache/archs4_terms.parquet` staged in `.ship/incoming/data-20261124-terms/` and verified by a read-only SSH checksum (`ec21242d...e9cf3a`).
-On the server: copy the file into `cache/` first, then `python3 ~/fm_viz_new/.ship/incoming/20261124T065645Z-f15abf2e/deploy/apply.py apply`, restart Gunicorn, then commit and push to GitLab from the server checkout (this Mac has no GitLab remote).
+**Deployed** as `20261124T065645Z-f15abf2e` (commit `3772cd1`; 1 file added, `bridge_rna/digest.py`, 8 changed, nothing removed, no server drift, no dependency changes; preflight passed with 940,455 ARCHS4, 2,108 OSDR, upload/reference cosine 1.00000000), applied over SSH at Joshua's request and confirmed running at 16:52 UTC.
+`cache/archs4_terms.parquet` was staged in `.ship/incoming/data-20261124-terms/`, verified by checksum (`ec21242d...e9cf3a`), and copied into `cache/` before the apply; the deployed `digest.available()` reads True.
+Gunicorn was started detached with the runbook command (`nohup setsid`, log at `~/fm_viz_new/.runtime/gunicorn.log`); `/` and `/map` answer 200 and `/__release` names the shipment, the observer wrote `.ship/running.json`, and `ship.py confirm` recorded it.
+The server checkout was committed and pushed to GitLab as `2e01aba` on `master`, and its working tree is clean.
+
+**The app had been down since 2026-11-10 20:14 UTC.** The 2026-11-10 apply stopped Gunicorn as designed and reported "ready; run the usual Gunicorn command", but nothing started it again, so for two weeks nothing listened on :8000.
+Nothing in the code failed; the gap is that the apply deliberately never starts Gunicorn and the shipment was recorded as "Shipped, not yet applied" while its apply had in fact run.
+Whether to put Gunicorn under a supervisor (a systemd unit) so a stop is never left unstarted is Joshua's call on the server.
 
 ## 2026-11-10 (the 2026-10-21 fixes reach the deploy line)
 
