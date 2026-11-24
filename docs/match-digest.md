@@ -1,7 +1,8 @@
 # Shared terms: what a set of matches has in common
 
 Started 2026-11-10 on branch `feature/match-digest`, cut from `feature/retrieval-table` at 7c2358d.
-It is a demo branch for the 2026-11-10 mentor meeting and is not shipped.
+It began as a demo branch for the 2026-11-10 mentor meeting.
+Joshua asked for it to ship to the NASA server on 2026-11-24, after testing it locally.
 
 ## Why
 
@@ -125,5 +126,12 @@ Codex found no defect in the `allow_duplicate` wiring, the re-render guard or th
 
 ## Not done here
 
-- Shipping: `cache/archs4_terms.parquet` must be built on, or copied to, the server, and `deploy/` has no artifact step for it yet.
-  `bridge_rna/digest.py` is already in `deploy/runtime-files.json`, and without the artifact the row names the build command instead of failing.
+- `deploy/` still has no artifact step, so `cache/archs4_terms.parquet` does not travel with a code shipment.
+  For the 2026-11-24 shipment it was built locally and staged separately, the way `cache/whitening.npz` was on 2026-10-28; see "Shipping" below.
+
+## Shipping
+
+`ship.py` ships code only, and its SFTP client writes nothing outside `.ship/incoming/`.
+The artifact is therefore staged beside the code, in `.ship/incoming/data-20261124-terms/archs4_terms.parquet`, and verified there by a read-only checksum.
+On the server it is copied into `cache/` before the code is applied; without it the row names the build command instead of listing words.
+`tests/e2e_results_check.py` now refuses to start without the artifact and names the command, because its Shared terms checks used to fail on a 30 s locator timeout that never said why.
